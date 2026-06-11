@@ -176,43 +176,70 @@ export default function App() {
     setIsSubmitting(true);
     setSubmitError(null);
     setSubmitSuccess(null);
-    setSubmitStep("Subiendo archivos al servidor...");
 
     const chosenProj = projects.find(p => p.id === selectedProjectId);
     const projectName = chosenProj ? chosenProj.name : "";
 
-    const formData = new FormData();
-    formData.append("senderName", senderName);
-    formData.append("senderEmail", senderEmail);
-    formData.append("projectId", selectedProjectId);
-    formData.append("projectName", projectName);
-    
-    selectedFiles.forEach((file) => {
-      formData.append("files", file);
-    });
+    // Step 1: Upload each file individually to Notion (parallel batches of 3)
+    const fileRecords: {
+      name: string; finalName: string; size: number;
+      uploadId: string; extModified: boolean; mimeType: string;
+    }[] = [];
 
     try {
-      // Step feedback transition
-      setTimeout(() => {
-        if (isSubmitting) setSubmitStep("Registrando archivos y creando Toggle List en Notion...");
-      }, 2000);
+      const BATCH = 3;
+      for (let i = 0; i < selectedFiles.length; i += BATCH) {
+        const batch = selectedFiles.slice(i, i + BATCH);
+        setSubmitStep(
+          `Subiendo archivo${batch.length > 1 ? "s" : ""} ${i + 1}${batch.length > 1 ? `–${Math.min(i + BATCH, selectedFiles.length)}` : ""} de ${selectedFiles.length}...`
+        );
 
+        const results = await Promise.all(
+          batch.map(async (file) => {
+            const fd = new FormData();
+            fd.append("file", file, file.name);
+            const res = await fetch("/api/upload-file", { method: "POST", body: fd });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+              throw new Error(data.error || `Error al subir "${file.name}"`);
+            }
+            return {
+              name: file.name,
+              finalName: data.finalName as string,
+              size: file.size,
+              uploadId: data.id as string,
+              extModified: data.extModified as boolean,
+              mimeType: file.type || "application/octet-stream",
+            };
+          })
+        );
+        fileRecords.push(...results);
+      }
+    } catch (err: any) {
+      setSubmitError(err.message || "Error al subir archivos.");
+      setIsSubmitting(false);
+      setSubmitStep("");
+      return;
+    }
+
+    // Step 2: POST only metadata + upload IDs to create the Notion toggle block
+    setSubmitStep("Registrando en Notion...");
+    try {
       const res = await fetch("/api/submit", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ senderName, senderEmail, projectId: selectedProjectId, projectName, fileRecords }),
       });
-
       const data = await res.json();
       if (data.success) {
         setSubmitSuccess(data.submission);
-        // Clear form
         setSenderName("");
         setSenderEmail("");
         setSelectedFiles([]);
       } else {
         setSubmitError(data.error || "Algo salió mal al sincronizar.");
       }
-    } catch (error) {
+    } catch {
       setSubmitError("Hubo un error de conexión con la red o el servidor.");
     } finally {
       setIsSubmitting(false);

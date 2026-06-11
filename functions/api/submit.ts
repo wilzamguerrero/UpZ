@@ -1,8 +1,7 @@
-import { json, appendChildren, uploadFileToNotion, uploadLargeFileToNotion, type Env } from "../_shared/notion";
+import { json, appendChildren, type Env } from "../_shared/notion";
 
 async function getCredentials(env: Env): Promise<{ notionSecret: string }> {
   let notionSecret = env.NOTION_SECRET || "";
-
   if (env.SUBMISSIONS_KV) {
     try {
       const override = await env.SUBMISSIONS_KV.get("config");
@@ -17,93 +16,60 @@ async function getCredentials(env: Env): Promise<{ notionSecret: string }> {
   return { notionSecret };
 }
 
+interface FileRecord {
+  name: string;
+  finalName: string;
+  size: number;
+  uploadId: string;
+  extModified: boolean;
+  mimeType: string;
+}
+
+const IMAGE_TYPES = new Set([
+  "image/png", "image/jpeg", "image/jpg", "image/gif",
+  "image/webp", "image/svg+xml", "image/bmp", "image/tiff",
+]);
+
 /**
  * POST /api/submit
- * Accepts multipart/form-data: senderName, senderEmail, projectId, projectName, files[]
- * Files are uploaded directly to Notion — no external storage needed.
- * Files ≤ 20MB use single-part upload. Files > 20MB use multi-part chunked upload.
+ * Accepts JSON body with pre-uploaded file records (uploadIds from /api/upload-file).
+ * Creates a toggle block in Notion with images displayed inline and files as attachments.
  */
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { notionSecret } = await getCredentials(context.env);
   const { SUBMISSIONS_KV } = context.env;
 
-  let formData: FormData;
+  let body: {
+    senderName?: string;
+    senderEmail?: string;
+    projectId?: string;
+    projectName?: string;
+    fileRecords?: FileRecord[];
+  };
   try {
-    formData = await context.request.formData();
+    body = await context.request.json();
   } catch {
-    return json({ error: "No se pudo leer el formulario." }, 400);
+    return json({ error: "Cuerpo de solicitud invalido." }, 400);
   }
 
-  const senderName = (formData.get("senderName") as string | null)?.trim() || "";
-  const senderEmail = (formData.get("senderEmail") as string | null)?.trim() || "";
-  const projectId = (formData.get("projectId") as string | null)?.trim() || "";
-  const projectName = (formData.get("projectName") as string | null)?.trim() || "Proyecto de Notion";
+  const {
+    senderName = "",
+    senderEmail = "",
+    projectId = "",
+    projectName = "Proyecto",
+    fileRecords = [],
+  } = body;
 
   if (!senderName || !senderEmail || !projectId) {
-    return json({ error: "Faltan campos obligatorios (nombre, correo o proyecto)" }, 400);
+    return json({ error: "Faltan campos obligatorios (nombre, correo o proyecto)." }, 400);
   }
-
-  const files = formData.getAll("files") as File[];
-  if (!files || files.length === 0) {
-    return json({ error: "No se han subido archivos" }, 400);
+  if (fileRecords.length === 0) {
+    return json({ error: "No se han subido archivos." }, 400);
   }
-
   if (!notionSecret) {
-    return json({ error: "Notion no está configurado en el servidor." }, 400);
+    return json({ error: "Notion no esta configurado en el servidor." }, 400);
   }
 
-  // 5 GiB limit for paid workspaces
-  const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024;
-  // 20 MiB threshold for multi-part uploads
-  const MULTI_PART_THRESHOLD = 20 * 1024 * 1024;
-
-  // Process each file — all uploads go directly to Notion
-  const fileRecords: {
-    name: string;
-    finalName: string;
-    size: number;
-    uploadId: string;
-    extModified: boolean;
-    isMultiPart: boolean;
-  }[] = [];
-
-  for (const file of files) {
-    // Validate file size
-    if (file.size > MAX_FILE_SIZE) {
-      return json(
-        { error: `El archivo "${file.name}" excede el límite de 5 GB permitido por Notion.` },
-        400
-      );
-    }
-
-    try {
-      let result: { id: string; finalName: string; originalName: string; extModified: boolean };
-
-      if (file.size > MULTI_PART_THRESHOLD) {
-        // Large file: use multi-part chunked upload
-        result = await uploadLargeFileToNotion(file, notionSecret);
-      } else {
-        // Small file: use single-part upload
-        result = await uploadFileToNotion(file, notionSecret);
-      }
-
-      fileRecords.push({
-        name: file.name,
-        finalName: result.finalName,
-        size: file.size,
-        uploadId: result.id,
-        extModified: result.extModified,
-        isMultiPart: file.size > MULTI_PART_THRESHOLD,
-      });
-    } catch (err: any) {
-      return json(
-        { error: `Error al subir "${file.name}" a Notion: ${err.message || err}` },
-        500
-      );
-    }
-  }
-
-  // Build date string
   const dateStr =
     new Date().toLocaleString("es-ES", {
       timeZone: "UTC",
@@ -116,7 +82,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const toggleHeader = `👤 ${senderName} (${senderEmail}) — ${dateStr}`;
 
-  // Build Notion child blocks — use file_upload references or external static references
   const innerBlocks: any[] = [
     {
       object: "block",
@@ -126,7 +91,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           {
             type: "text",
             text: {
-              content: `Información de la entrega:\n• Remitente: ${senderName}\n• Correo: ${senderEmail}\n• Fecha de envío: ${dateStr}\n• Archivos totales: ${files.length}`,
+              content: `Informacion de la entrega:\n- Remitente: ${senderName}\n- Correo: ${senderEmail}\n- Fecha de envio: ${dateStr}\n- Archivos totales: ${fileRecords.length}`,
             },
           },
         ],
@@ -141,36 +106,33 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         rich_text: [{ type: "text", text: { content: "Archivos adjuntos" } }],
       },
     },
-    ...fileRecords.map((f) => {
-      const fileObj: any = {
-        type: "file_upload",
-        file_upload: { id: f.uploadId },
-      };
-      if (f.extModified) {
-        fileObj.caption = [
-          {
-            type: "text",
-            text: {
-              content: `⚠️ .zip agregado por compatibilidad. Nombre original: ${f.name} (renombrar o quitar .zip al descargar)`
-            }
-          }
-        ];
-      } else {
-        const sizeLabel = (f.size / (1024 * 1024)).toFixed(2);
-        const uploadType = f.isMultiPart ? "multi-part" : "directo";
-        fileObj.caption = [
-          {
-            type: "text",
-            text: {
-              content: `✅ Subido de forma nativa a Notion (${uploadType}). ${f.name} — ${sizeLabel} MB`
-            }
-          }
-        ];
+    ...fileRecords.map((f: FileRecord) => {
+      const isImage = IMAGE_TYPES.has(f.mimeType);
+      const sizeLabel = (f.size / (1024 * 1024)).toFixed(2) + " MB";
+      const caption = f.extModified
+        ? [{ type: "text", text: { content: `⚠️ .zip agregado. Nombre original: ${f.name} (${sizeLabel})` } }]
+        : [{ type: "text", text: { content: `${isImage ? "🖼️" : "📄"} ${f.name} (${sizeLabel})` } }];
+
+      if (isImage) {
+        return {
+          object: "block",
+          type: "image",
+          image: {
+            type: "file_upload",
+            file_upload: { id: f.uploadId },
+            caption,
+          },
+        };
       }
+
       return {
         object: "block",
         type: "file",
-        file: fileObj,
+        file: {
+          type: "file_upload",
+          file_upload: { id: f.uploadId },
+          caption,
+        },
       };
     }),
   ];
@@ -192,12 +154,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     );
   } catch (err: any) {
     return json(
-      { error: `Error al guardar envío en Notion: ${err.message || "Error desconocido"}.` },
+      { error: `Error al guardar envio en Notion: ${err.message || "Error desconocido"}.` },
       500
     );
   }
 
-  // Save submission log to KV (optional — best effort)
   const submissionId = `sub_${Date.now()}`;
   const submissionRecord = {
     id: submissionId,
@@ -206,11 +167,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     senderName,
     senderEmail,
     timestamp: new Date().toISOString(),
-    files: fileRecords.map((f) => ({
+    files: fileRecords.map((f: FileRecord) => ({
       name: f.name,
       size: f.size,
-      isMultiPart: f.isMultiPart,
-      url: `(Subido a Notion: ${f.finalName})`
+      url: `(Subido a Notion: ${f.finalName})`,
     })),
   };
 
@@ -227,7 +187,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   return json({
     success: true,
-    message: "¡Archivos subidos y registrados en Notion con éxito!",
+    message: "Archivos subidos y registrados en Notion con exito!",
     submission: submissionRecord,
   });
 };
