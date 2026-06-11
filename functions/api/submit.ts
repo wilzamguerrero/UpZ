@@ -51,24 +51,78 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return json({ error: "Notion no está configurado en el servidor." }, 400);
   }
 
-  // Upload each file directly to Notion and collect their upload IDs
-  const fileRecords: { name: string; finalName: string; size: number; uploadId: string; extModified: boolean }[] = [];
+  // Process each file with high-capacity hybrid logic
+  const fileRecords: {
+    name: string;
+    finalName: string;
+    size: number;
+    uploadId: string;
+    extModified: boolean;
+    isLocalFallback: boolean;
+    localUrl: string;
+  }[] = [];
+
   for (const file of files) {
-    try {
-      const res = await uploadFileToNotion(file, notionSecret);
-      fileRecords.push({
-        name: file.name,
-        finalName: res.finalName,
-        size: file.size,
-        uploadId: res.id,
-        extModified: res.extModified
-      });
-    } catch (err: any) {
-      return json(
-        { error: `Error al subir "${file.name}" a Notion: ${err.message || "Error desconocido"}` },
-        500
-      );
+    let uploadId = "";
+    let finalName = file.name;
+    let extModified = false;
+    let isLocalFallback = false;
+    let localUrl = "";
+
+    // 20 MiB is 20971520 bytes
+    const IS_TOO_LARGE_FOR_NOTION = file.size > 20971520;
+
+    if (!IS_TOO_LARGE_FOR_NOTION) {
+      try {
+        const res = await uploadFileToNotion(file, notionSecret);
+        uploadId = res.id;
+        finalName = res.finalName;
+        extModified = res.extModified;
+      } catch (err: any) {
+        console.warn(`Notion direct upload failed for "${file.name}", falling back to local server storage:`, err);
+        isLocalFallback = true;
+      }
+    } else {
+      isLocalFallback = true;
     }
+
+    if (isLocalFallback) {
+      try {
+        const appUrl = new URL(context.request.url).origin;
+        const uploadForm = new FormData();
+        uploadForm.append("file", file, file.name);
+
+        const uploadRes = await fetch(`${appUrl}/api/fallback-upload`, {
+          method: "POST",
+          body: uploadForm,
+        });
+
+        if (!uploadRes.ok) {
+          throw new Error(`Respuesta no exitosa del servidor (${uploadRes.status}): ${await uploadRes.text()}`);
+        }
+
+        const uploadData = (await uploadRes.json()) as any;
+        if (!uploadData.success) {
+          throw new Error(uploadData.error || "Fallo en el guardado de respaldo.");
+        }
+        localUrl = uploadData.url;
+      } catch (err: any) {
+        return json(
+          { error: `Error al subir "${file.name}" usando almacenamiento de respaldo: ${err.message || err}` },
+          500
+        );
+      }
+    }
+
+    fileRecords.push({
+      name: file.name,
+      finalName,
+      size: file.size,
+      uploadId,
+      extModified,
+      isLocalFallback,
+      localUrl,
+    });
   }
 
   // Build date string
@@ -84,7 +138,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const toggleHeader = `👤 ${senderName} (${senderEmail}) — ${dateStr}`;
 
-  // Build Notion child blocks — use file_upload references (hosted by Notion)
+  // Build Notion child blocks — use file_upload references or external static references
   const innerBlocks: any[] = [
     {
       object: "block",
@@ -110,25 +164,55 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       },
     },
     ...fileRecords.map((f) => {
-      const fileObj: any = {
-        type: "file_upload",
-        file_upload: { id: f.uploadId },
-      };
-      if (f.extModified) {
-        fileObj.caption = [
-          {
-            type: "text",
-            text: {
-              content: `⚠️ .zip agregado por compatibilidad. Nombre original: ${f.name} (renombrar o quitar .zip al descargar)`
+      if (f.isLocalFallback) {
+        return {
+          object: "block",
+          type: "file",
+          file: {
+            type: "external",
+            external: {
+              url: f.localUrl,
+            },
+            caption: [
+              {
+                type: "text",
+                text: {
+                  content: `💾 Hospedado externamente por límite de tamaño o cuenta. Nombre: ${f.name} (${(f.size / (1024 * 1024)).toFixed(2)} MB)`
+                }
+              }
+            ]
+          },
+        };
+      } else {
+        const fileObj: any = {
+          type: "file_upload",
+          file_upload: { id: f.uploadId },
+        };
+        if (f.extModified) {
+          fileObj.caption = [
+            {
+              type: "text",
+              text: {
+                content: `⚠️ .zip agregado por compatibilidad. Nombre original: ${f.name} (renombrar o quitar .zip al descargar)`
+              }
             }
-          }
-        ];
+          ];
+        } else {
+          fileObj.caption = [
+            {
+              type: "text",
+              text: {
+                content: `✅ Subido de forma nativa a Notion. Nombre original: ${f.name}`
+              }
+            }
+          ];
+        }
+        return {
+          object: "block",
+          type: "file",
+          file: fileObj,
+        };
       }
-      return {
-        object: "block",
-        type: "file",
-        file: fileObj,
-      };
     }),
   ];
 
@@ -163,7 +247,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     senderName,
     senderEmail,
     timestamp: new Date().toISOString(),
-    files: fileRecords.map((f) => ({ name: f.name, size: f.size })),
+    files: fileRecords.map((f) => ({
+      name: f.name,
+      size: f.size,
+      isLocalFallback: f.isLocalFallback,
+      url: f.isLocalFallback ? f.localUrl : `(Subido a Notion: ${f.finalName})`
+    })),
   };
 
   if (SUBMISSIONS_KV) {
