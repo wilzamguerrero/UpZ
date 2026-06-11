@@ -60,20 +60,103 @@ export async function deleteBlock(blockId: string, token: string): Promise<any> 
   return notionFetch("DELETE", `/blocks/${blockId}`, token);
 }
 
-const ALLOWED_EXTENSIONS = new Set([
+const NOTION_MIME_TYPES: Record<string, string> = {
+  // Archives & Compressed
+  zip: "application/zip",
+  gz: "application/gzip",
+  gzip: "application/gzip",
+  tar: "application/x-tar",
+  "7z": "application/x-7z-compressed",
+  bz2: "application/x-bzip2",
+  rar: "application/vnd.rar",
+
   // Images
-  "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff", "tif", "ico", "heic", "avif", "apng",
-  // Video
-  "mp4", "m4v", "ogv", "webm", "mov", "avi", "mkv", "flv", "3gp", "3g2", "mpeg", "amv", "asf", "wmv", "f4v", "gifv", "qt",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  bmp: "image/bmp",
+  tiff: "image/tiff",
+  tif: "image/tiff",
+  ico: "image/vnd.microsoft.icon",
+  heic: "image/heic",
+  avif: "image/avif",
+  apng: "image/apng",
+
   // Audio
-  "mp3", "wav", "m4a", "ogg", "aac", "mid", "midi", "mpga", "m4b", "oga", "opus", "wma", "weba", "flac",
+  aac: "audio/aac",
+  adts: "audio/aac",
+  mid: "audio/midi",
+  midi: "audio/midi",
+  mp3: "audio/mpeg",
+  mpga: "audio/mpeg",
+  m4a: "audio/mp4",
+  m4b: "audio/mp4",
+  oga: "audio/ogg",
+  ogg: "audio/ogg",
+  opus: "audio/ogg",
+  wav: "audio/wav",
+  wma: "audio/x-ms-wma",
+  weba: "audio/webm",
+  flac: "audio/x-flac",
+
+  // Video
+  amv: "video/x-amv",
+  asf: "video/x-ms-asf",
+  wmv: "video/x-ms-asf",
+  avi: "video/x-msvideo",
+  f4v: "video/x-f4v",
+  flv: "video/x-flv",
+  gifv: "video/mp4",
+  m4v: "video/mp4",
+  mp4: "video/mp4",
+  mkv: "video/webm",
+  webm: "video/webm",
+  mov: "video/quicktime",
+  qt: "video/quicktime",
+  mpeg: "video/mpeg",
+  ogv: "video/ogg",
+  "3gp": "video/3gpp",
+  "3g2": "video/3gpp2",
+
   // Documents
-  "pdf", "doc", "docx", "dot", "dotx", "xls", "xlsx", "xlt", "xltx", "xla", "ppt", "pptx", "pot", "potx", "pps", "ppa",
-  "txt", "csv", "html", "htm", "css", "js", "ts", "json", "xml", "md", "markdown", "rtf", "epub",
-  "odt", "ods", "odp", "ics", "yaml", "yml", "tsv",
-  // Archives
-  "zip", "rar", "tar", "gz", "gzip", "7z", "bz2",
-]);
+  pdf: "application/pdf",
+  txt: "text/plain",
+  csv: "text/csv",
+  json: "application/json",
+  doc: "application/msword",
+  dot: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  dotx: "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+  xls: "application/vnd.ms-excel",
+  xlt: "application/vnd.ms-excel",
+  xla: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xltx: "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
+  ppt: "application/vnd.ms-powerpoint",
+  pot: "application/vnd.ms-powerpoint",
+  pps: "application/vnd.ms-powerpoint",
+  ppa: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  potx: "application/vnd.openxmlformats-officedocument.presentationml.template",
+  rtf: "application/rtf",
+  md: "text/markdown",
+  markdown: "text/markdown",
+  html: "text/html",
+  htm: "text/html",
+  epub: "application/epub+zip",
+  xml: "text/xml",
+  css: "text/css",
+  odt: "application/vnd.oasis.opendocument.text",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+  odp: "application/vnd.oasis.opendocument.presentation",
+  ics: "text/calendar",
+  yaml: "text/yaml",
+  yml: "text/yaml",
+  tsv: "text/tab-separated-values",
+};
 
 /** Compute upload name and content type, adding .zip for unsupported extensions */
 function resolveUploadMeta(filename: string, mimeType: string): { uploadName: string; contentType: string; extModified: boolean } {
@@ -83,7 +166,10 @@ function resolveUploadMeta(filename: string, mimeType: string): { uploadName: st
   let contentType = mimeType || "application/octet-stream";
   let extModified = false;
 
-  if (!ALLOWED_EXTENSIONS.has(ext)) {
+  const standardMime = NOTION_MIME_TYPES[ext];
+  if (standardMime) {
+    contentType = standardMime;
+  } else {
     uploadName = filename + ".zip";
     contentType = "application/zip";
     extModified = true;
