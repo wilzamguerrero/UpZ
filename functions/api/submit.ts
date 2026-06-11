@@ -1,4 +1,4 @@
-import { json, appendChildren, uploadFileToNotion, type Env } from "../_shared/notion";
+import { json, appendChildren, uploadFileToNotion, uploadLargeFileToNotion, type Env } from "../_shared/notion";
 
 async function getCredentials(env: Env): Promise<{ notionSecret: string }> {
   let notionSecret = env.NOTION_SECRET || "";
@@ -21,6 +21,7 @@ async function getCredentials(env: Env): Promise<{ notionSecret: string }> {
  * POST /api/submit
  * Accepts multipart/form-data: senderName, senderEmail, projectId, projectName, files[]
  * Files are uploaded directly to Notion — no external storage needed.
+ * Files ≤ 20MB use single-part upload. Files > 20MB use multi-part chunked upload.
  */
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { notionSecret } = await getCredentials(context.env);
@@ -51,78 +52,55 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return json({ error: "Notion no está configurado en el servidor." }, 400);
   }
 
-  // Process each file with high-capacity hybrid logic
+  // 5 GiB limit for paid workspaces
+  const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024;
+  // 20 MiB threshold for multi-part uploads
+  const MULTI_PART_THRESHOLD = 20 * 1024 * 1024;
+
+  // Process each file — all uploads go directly to Notion
   const fileRecords: {
     name: string;
     finalName: string;
     size: number;
     uploadId: string;
     extModified: boolean;
-    isLocalFallback: boolean;
-    localUrl: string;
+    isMultiPart: boolean;
   }[] = [];
 
   for (const file of files) {
-    let uploadId = "";
-    let finalName = file.name;
-    let extModified = false;
-    let isLocalFallback = false;
-    let localUrl = "";
-
-    // 20 MiB is 20971520 bytes
-    const IS_TOO_LARGE_FOR_NOTION = file.size > 20971520;
-
-    if (!IS_TOO_LARGE_FOR_NOTION) {
-      try {
-        const res = await uploadFileToNotion(file, notionSecret);
-        uploadId = res.id;
-        finalName = res.finalName;
-        extModified = res.extModified;
-      } catch (err: any) {
-        console.warn(`Notion direct upload failed for "${file.name}", falling back to local server storage:`, err);
-        isLocalFallback = true;
-      }
-    } else {
-      isLocalFallback = true;
+    // Validate file size
+    if (file.size > MAX_FILE_SIZE) {
+      return json(
+        { error: `El archivo "${file.name}" excede el límite de 5 GB permitido por Notion.` },
+        400
+      );
     }
 
-    if (isLocalFallback) {
-      try {
-        const appUrl = new URL(context.request.url).origin;
-        const uploadForm = new FormData();
-        uploadForm.append("file", file, file.name);
+    try {
+      let result: { id: string; finalName: string; originalName: string; extModified: boolean };
 
-        const uploadRes = await fetch(`${appUrl}/api/fallback-upload`, {
-          method: "POST",
-          body: uploadForm,
-        });
-
-        if (!uploadRes.ok) {
-          throw new Error(`Respuesta no exitosa del servidor (${uploadRes.status}): ${await uploadRes.text()}`);
-        }
-
-        const uploadData = (await uploadRes.json()) as any;
-        if (!uploadData.success) {
-          throw new Error(uploadData.error || "Fallo en el guardado de respaldo.");
-        }
-        localUrl = uploadData.url;
-      } catch (err: any) {
-        return json(
-          { error: `Error al subir "${file.name}" usando almacenamiento de respaldo: ${err.message || err}` },
-          500
-        );
+      if (file.size > MULTI_PART_THRESHOLD) {
+        // Large file: use multi-part chunked upload
+        result = await uploadLargeFileToNotion(file, notionSecret);
+      } else {
+        // Small file: use single-part upload
+        result = await uploadFileToNotion(file, notionSecret);
       }
-    }
 
-    fileRecords.push({
-      name: file.name,
-      finalName,
-      size: file.size,
-      uploadId,
-      extModified,
-      isLocalFallback,
-      localUrl,
-    });
+      fileRecords.push({
+        name: file.name,
+        finalName: result.finalName,
+        size: file.size,
+        uploadId: result.id,
+        extModified: result.extModified,
+        isMultiPart: file.size > MULTI_PART_THRESHOLD,
+      });
+    } catch (err: any) {
+      return json(
+        { error: `Error al subir "${file.name}" a Notion: ${err.message || err}` },
+        500
+      );
+    }
   }
 
   // Build date string
@@ -164,55 +142,36 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       },
     },
     ...fileRecords.map((f) => {
-      if (f.isLocalFallback) {
-        return {
-          object: "block",
-          type: "file",
-          file: {
-            type: "external",
-            external: {
-              url: f.localUrl,
-            },
-            caption: [
-              {
-                type: "text",
-                text: {
-                  content: `💾 Hospedado externamente por límite de tamaño o cuenta. Nombre: ${f.name} (${(f.size / (1024 * 1024)).toFixed(2)} MB)`
-                }
-              }
-            ]
-          },
-        };
+      const fileObj: any = {
+        type: "file_upload",
+        file_upload: { id: f.uploadId },
+      };
+      if (f.extModified) {
+        fileObj.caption = [
+          {
+            type: "text",
+            text: {
+              content: `⚠️ .zip agregado por compatibilidad. Nombre original: ${f.name} (renombrar o quitar .zip al descargar)`
+            }
+          }
+        ];
       } else {
-        const fileObj: any = {
-          type: "file_upload",
-          file_upload: { id: f.uploadId },
-        };
-        if (f.extModified) {
-          fileObj.caption = [
-            {
-              type: "text",
-              text: {
-                content: `⚠️ .zip agregado por compatibilidad. Nombre original: ${f.name} (renombrar o quitar .zip al descargar)`
-              }
+        const sizeLabel = (f.size / (1024 * 1024)).toFixed(2);
+        const uploadType = f.isMultiPart ? "multi-part" : "directo";
+        fileObj.caption = [
+          {
+            type: "text",
+            text: {
+              content: `✅ Subido de forma nativa a Notion (${uploadType}). ${f.name} — ${sizeLabel} MB`
             }
-          ];
-        } else {
-          fileObj.caption = [
-            {
-              type: "text",
-              text: {
-                content: `✅ Subido de forma nativa a Notion. Nombre original: ${f.name}`
-              }
-            }
-          ];
-        }
-        return {
-          object: "block",
-          type: "file",
-          file: fileObj,
-        };
+          }
+        ];
       }
+      return {
+        object: "block",
+        type: "file",
+        file: fileObj,
+      };
     }),
   ];
 
@@ -250,8 +209,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     files: fileRecords.map((f) => ({
       name: f.name,
       size: f.size,
-      isLocalFallback: f.isLocalFallback,
-      url: f.isLocalFallback ? f.localUrl : `(Subido a Notion: ${f.finalName})`
+      isMultiPart: f.isMultiPart,
+      url: `(Subido a Notion: ${f.finalName})`
     })),
   };
 

@@ -61,34 +61,46 @@ export async function deleteBlock(blockId: string, token: string): Promise<any> 
 }
 
 const ALLOWED_EXTENSIONS = new Set([
-  "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff",
-  "mp4", "m4v", "ogv", "webm", "mov",
-  "mp3", "wav", "m4a", "ogg",
-  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "html", "css", "js", "ts", "json", "xml", "md",
-  "zip", "rar", "tar", "gz"
+  // Images
+  "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff", "tif", "ico", "heic", "avif", "apng",
+  // Video
+  "mp4", "m4v", "ogv", "webm", "mov", "avi", "mkv", "flv", "3gp", "3g2", "mpeg", "amv", "asf", "wmv", "f4v", "gifv", "qt",
+  // Audio
+  "mp3", "wav", "m4a", "ogg", "aac", "mid", "midi", "mpga", "m4b", "oga", "opus", "wma", "weba", "flac",
+  // Documents
+  "pdf", "doc", "docx", "dot", "dotx", "xls", "xlsx", "xlt", "xltx", "xla", "ppt", "pptx", "pot", "potx", "pps", "ppa",
+  "txt", "csv", "html", "htm", "css", "js", "ts", "json", "xml", "md", "markdown", "rtf", "epub",
+  "odt", "ods", "odp", "ics", "yaml", "yml", "tsv",
+  // Archives
+  "zip", "rar", "tar", "gz", "gzip", "7z", "bz2",
 ]);
 
+/** Compute upload name and content type, adding .zip for unsupported extensions */
+function resolveUploadMeta(filename: string, mimeType: string): { uploadName: string; contentType: string; extModified: boolean } {
+  const dotIndex = filename.lastIndexOf(".");
+  const ext = dotIndex !== -1 ? filename.slice(dotIndex + 1).toLowerCase() : "";
+  let uploadName = filename;
+  let contentType = mimeType || "application/octet-stream";
+  let extModified = false;
+
+  if (!ALLOWED_EXTENSIONS.has(ext)) {
+    uploadName = filename + ".zip";
+    contentType = "application/zip";
+    extModified = true;
+  }
+
+  return { uploadName, contentType, extModified };
+}
+
 /**
- * Upload a file directly to Notion using the file upload API.
+ * Upload a small file (≤ 20MB) directly to Notion using single-part upload.
  * Step 1: create the upload object → Step 2: send the file content.
- * Returns the file_upload id and info.
  */
 export async function uploadFileToNotion(
   file: File,
   token: string
 ): Promise<{ id: string; finalName: string; originalName: string; extModified: boolean }> {
-  const dotIndex = file.name.lastIndexOf(".");
-  const ext = dotIndex !== -1 ? file.name.slice(dotIndex + 1).toLowerCase() : "";
-  let uploadName = file.name;
-  let contentType = file.type || "application/octet-stream";
-  let extModified = false;
-
-  // If file doesn't have a supported extension, change it so Notion won't reject it
-  if (!ALLOWED_EXTENSIONS.has(ext)) {
-    uploadName = file.name + ".zip";
-    contentType = "application/zip";
-    extModified = true;
-  }
+  const { uploadName, contentType, extModified } = resolveUploadMeta(file.name, file.type);
 
   // Step 1: create the file upload
   const createRes = await fetch(`${NOTION_BASE}/file_uploads`, {
@@ -104,7 +116,7 @@ export async function uploadFileToNotion(
     }),
   });
 
-  const upload = await createRes.json();
+  const upload = (await createRes.json()) as any;
   if (!upload.id) {
     throw new Error(`No se pudo crear el upload en Notion: ${JSON.stringify(upload)}`);
   }
@@ -113,17 +125,16 @@ export async function uploadFileToNotion(
   const sendForm = new FormData();
   sendForm.append("file", file, uploadName);
 
-  const sendRes = await fetch(`${NOTION_BASE}/file_uploads/${upload.id}/send`, {
+  const sendRes = await fetch(upload.upload_url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Notion-Version": NOTION_VERSION,
-      // NO Content-Type header — browser sets it with boundary for multipart
     },
     body: sendForm,
   });
 
-  const sent = await sendRes.json();
+  const sent = (await sendRes.json()) as any;
   if (sent.status !== "uploaded" && sent.status !== "complete") {
     throw new Error(`Error al enviar archivo a Notion: ${JSON.stringify(sent)}`);
   }
@@ -132,7 +143,110 @@ export async function uploadFileToNotion(
     id: upload.id as string,
     finalName: uploadName,
     originalName: file.name,
-    extModified
+    extModified,
+  };
+}
+
+/**
+ * Upload a large file (> 20MB, up to 5GB) to Notion using multi-part upload.
+ *
+ * Flow:
+ *   1. Create a multi_part file upload → get upload_url and complete_url
+ *   2. Split file into chunks of ~10MB, send each with part_number
+ *   3. POST to complete_url to finalize
+ */
+const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MiB per chunk (Notion recommends 10MB, min 5MB max 20MB)
+
+export async function uploadLargeFileToNotion(
+  file: File,
+  token: string
+): Promise<{ id: string; finalName: string; originalName: string; extModified: boolean }> {
+  const { uploadName, contentType, extModified } = resolveUploadMeta(file.name, file.type);
+
+  const totalSize = file.size;
+  const numberOfParts = Math.ceil(totalSize / CHUNK_SIZE);
+
+  // Step 1: Create multi-part file upload
+  const createRes = await fetch(`${NOTION_BASE}/file_uploads`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Notion-Version": NOTION_VERSION,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      mode: "multi_part",
+      number_of_parts: numberOfParts,
+      filename: uploadName,
+      content_type: contentType,
+    }),
+  });
+
+  const upload = (await createRes.json()) as any;
+  if (!upload.id) {
+    throw new Error(`No se pudo crear el upload multi-part en Notion: ${JSON.stringify(upload)}`);
+  }
+
+  const uploadUrl = upload.upload_url;
+  const completeUrl = upload.complete_url;
+
+  if (!uploadUrl || !completeUrl) {
+    throw new Error(`Notion no devolvió upload_url o complete_url: ${JSON.stringify(upload)}`);
+  }
+
+  // Step 2: Upload each chunk sequentially
+  const fileBuffer = await file.arrayBuffer();
+
+  for (let partNumber = 1; partNumber <= numberOfParts; partNumber++) {
+    const start = (partNumber - 1) * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, totalSize);
+    const chunk = fileBuffer.slice(start, end);
+
+    const partForm = new FormData();
+    partForm.append("part_number", String(partNumber));
+    partForm.append(
+      "file",
+      new Blob([chunk], { type: contentType }),
+      uploadName
+    );
+
+    const partRes = await fetch(uploadUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Notion-Version": NOTION_VERSION,
+      },
+      body: partForm,
+    });
+
+    if (!partRes.ok) {
+      const errText = await partRes.text();
+      throw new Error(
+        `Error al enviar parte ${partNumber}/${numberOfParts} de "${file.name}": ${partRes.status} - ${errText}`
+      );
+    }
+  }
+
+  // Step 3: Complete the multi-part upload
+  const completeRes = await fetch(completeUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Notion-Version": NOTION_VERSION,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const completed = (await completeRes.json()) as any;
+  if (completed.status !== "uploaded" && completed.status !== "complete") {
+    throw new Error(`Error al completar upload multi-part en Notion: ${JSON.stringify(completed)}`);
+  }
+
+  return {
+    id: upload.id as string,
+    finalName: uploadName,
+    originalName: file.name,
+    extModified,
   };
 }
 
