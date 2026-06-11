@@ -1,4 +1,4 @@
-import { json, appendChildren, type Env } from "../../_shared/notion";
+import { json, appendChildren, uploadFileToNotion, type Env } from "../../_shared/notion";
 
 async function getCredentials(env: Env): Promise<{ notionSecret: string }> {
   let notionSecret = env.NOTION_SECRET || "";
@@ -19,14 +19,12 @@ async function getCredentials(env: Env): Promise<{ notionSecret: string }> {
 
 /**
  * POST /api/submit
- * Accepts multipart/form-data with fields: senderName, senderEmail, projectId, projectName, files[]
- * - Stores files in R2 (FILES_BUCKET) if configured and serves them from /uploads/:filename
- * - Creates a Notion toggle entry in the project block
- * - Saves submission record to SUBMISSIONS_KV
+ * Accepts multipart/form-data: senderName, senderEmail, projectId, projectName, files[]
+ * Files are uploaded directly to Notion — no external storage needed.
  */
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { notionSecret } = await getCredentials(context.env);
-  const { FILES_BUCKET, SUBMISSIONS_KV } = context.env;
+  const { SUBMISSIONS_KV } = context.env;
 
   let formData: FormData;
   try {
@@ -53,29 +51,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return json({ error: "Notion no está configurado en el servidor." }, 400);
   }
 
-  // Upload files to R2 (if available) and build attachment records
-  const origin = new URL(context.request.url).origin;
-  const fileAttachments: { name: string; size: number; url: string }[] = [];
-
+  // Upload each file directly to Notion and collect their upload IDs
+  const fileRecords: { name: string; size: number; uploadId: string }[] = [];
   for (const file of files) {
-    if (FILES_BUCKET) {
-      const ext = file.name.split(".").pop() || "bin";
-      const uniqueName = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      await FILES_BUCKET.put(uniqueName, file.stream(), {
-        httpMetadata: { contentType: file.type || "application/octet-stream" },
-      });
-      fileAttachments.push({
-        name: file.name,
-        size: file.size,
-        url: `${origin}/uploads/${uniqueName}`,
-      });
-    } else {
-      // No R2: record file metadata only (no download link)
-      fileAttachments.push({
-        name: file.name,
-        size: file.size,
-        url: "",
-      });
+    try {
+      const uploadId = await uploadFileToNotion(file, notionSecret);
+      fileRecords.push({ name: file.name, size: file.size, uploadId });
+    } catch (err: any) {
+      return json(
+        { error: `Error al subir "${file.name}" a Notion: ${err.message || "Error desconocido"}` },
+        500
+      );
     }
   }
 
@@ -92,7 +78,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const toggleHeader = `👤 ${senderName} (${senderEmail}) — ${dateStr}`;
 
-  // Build Notion child blocks
+  // Build Notion child blocks — use file_upload references (hosted by Notion)
   const innerBlocks: any[] = [
     {
       object: "block",
@@ -117,26 +103,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         rich_text: [{ type: "text", text: { content: "Archivos adjuntos" } }],
       },
     },
-    ...fileAttachments.map((file) =>
-      file.url
-        ? {
-            object: "block",
-            type: "file",
-            file: { type: "external", external: { url: file.url } },
-          }
-        : {
-            object: "block",
-            type: "paragraph",
-            paragraph: {
-              rich_text: [
-                {
-                  type: "text",
-                  text: { content: `📎 ${file.name} (${Math.round(file.size / 1024)} KB) — sin enlace de descarga` },
-                },
-              ],
-            },
-          }
-    ),
+    ...fileRecords.map((f) => ({
+      object: "block",
+      type: "file",
+      file: {
+        type: "file_upload",
+        file_upload: { id: f.uploadId },
+      },
+    })),
   ];
 
   try {
@@ -161,7 +135,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     );
   }
 
-  // Save submission log to KV
+  // Save submission log to KV (optional — best effort)
   const submissionId = `sub_${Date.now()}`;
   const submissionRecord = {
     id: submissionId,
@@ -170,7 +144,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     senderName,
     senderEmail,
     timestamp: new Date().toISOString(),
-    files: fileAttachments,
+    files: fileRecords.map((f) => ({ name: f.name, size: f.size })),
   };
 
   if (SUBMISSIONS_KV) {
@@ -180,15 +154,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       list.unshift(submissionRecord);
       await SUBMISSIONS_KV.put("submissions", JSON.stringify(list));
     } catch {
-      // Non-critical – Notion entry already created
+      // Non-critical
     }
   }
 
   return json({
     success: true,
-    message: FILES_BUCKET
-      ? "¡Archivos subidos y registrados en Notion con éxito!"
-      : "¡Entrega registrada en Notion! (Los archivos no se almacenaron porque R2 no está configurado.)",
+    message: "¡Archivos subidos y registrados en Notion con éxito!",
     submission: submissionRecord,
   });
 };

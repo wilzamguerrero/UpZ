@@ -1,13 +1,24 @@
-import { json, type Env } from "../../../_shared/notion";
+import { json, uploadFileToNotion, type Env } from "../../../_shared/notion";
 
 /**
  * POST /api/projects/upload-bg
- * Uploads a background image.
- * - If FILES_BUCKET (R2) binding is configured: stores in R2 and returns URL served via /uploads/:filename.
- * - Otherwise: returns an error with setup instructions.
+ * Uploads a background image directly to Notion and returns its hosted URL.
  */
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-  const { FILES_BUCKET } = context.env;
+  let notionSecret = context.env.NOTION_SECRET || "";
+  if (context.env.SUBMISSIONS_KV) {
+    try {
+      const override = await context.env.SUBMISSIONS_KV.get("config");
+      if (override) {
+        const cfg = JSON.parse(override);
+        if (cfg.notionSecret) notionSecret = cfg.notionSecret;
+      }
+    } catch { /* ignore */ }
+  }
+
+  if (!notionSecret) {
+    return json({ error: "Notion no está configurado." }, 400);
+  }
 
   let formData: FormData;
   try {
@@ -21,26 +32,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return json({ error: "No se seleccionó o cargó ninguna imagen." }, 400);
   }
 
-  if (!FILES_BUCKET) {
-    return json(
-      {
-        error:
-          "El almacenamiento de archivos (R2) no está configurado. " +
-          "En el panel de Cloudflare Pages, agrega un binding de tipo R2 con el nombre FILES_BUCKET.",
-      },
-      503
-    );
+  try {
+    const uploadId = await uploadFileToNotion(file, notionSecret);
+    // Notion's hosted file URL pattern for file_upload objects
+    const fileUrl = `https://file.notion.so/f/f/${uploadId}/${encodeURIComponent(file.name)}`;
+    return json({ success: true, url: fileUrl, uploadId });
+  } catch (err: any) {
+    return json({ error: `Error al subir imagen a Notion: ${err.message || "Error desconocido"}` }, 500);
   }
-
-  const ext = file.name.split(".").pop() || "bin";
-  const uniqueName = `bg-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-
-  await FILES_BUCKET.put(uniqueName, file.stream(), {
-    httpMetadata: { contentType: file.type || "application/octet-stream" },
-  });
-
-  const url = new URL(context.request.url);
-  const fileUrl = `${url.origin}/uploads/${uniqueName}`;
-
-  return json({ success: true, url: fileUrl });
 };
