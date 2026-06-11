@@ -8,10 +8,22 @@ import Dropzone from "./components/Dropzone";
 import AdminPanel from "./components/AdminPanel";
 import { motion, AnimatePresence } from "motion/react";
 
+const normalizeString = (s: string) => {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // remove accents
+    .replace(/[^a-z0-9]/g, "-") // replace non-alphanumeric with dashes
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<"upload" | "admin">("upload");
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
+  const [isProjectLocked, setIsProjectLocked] = useState(false);
+  const [lockedProjectName, setLockedProjectName] = useState("");
   
   // App Config Info
   const [config, setConfig] = useState<{
@@ -45,6 +57,10 @@ export default function App() {
 
   // Load configuration, projects and copy text meta
   useEffect(() => {
+    const cleanPath = window.location.pathname.replace(/^\/+/, "").replace(/\/+$/, "");
+    if (cleanPath.toLowerCase() === "admin") {
+      setActiveTab("admin");
+    }
     fetchConfig();
     fetchProjectMeta();
   }, []);
@@ -105,8 +121,25 @@ export default function App() {
       const data = await res.json();
       if (data.success) {
         setProjects(data.projects);
+
+        // Resolve path url matching
+        const cleanPath = window.location.pathname.replace(/^\/+/, "").replace(/\/+$/, "");
+        if (cleanPath && cleanPath.toLowerCase() !== "admin") {
+          const match = data.projects.find((p: Project) => {
+            const matchesId = p.id.toLowerCase() === cleanPath.toLowerCase() || p.id.replace(/-/g, "").toLowerCase() === cleanPath.toLowerCase();
+            const matchesSlug = normalizeString(p.name) === normalizeString(decodeURIComponent(cleanPath));
+            return matchesId || matchesSlug;
+          });
+          
+          if (match) {
+            setSelectedProjectId(match.id);
+            setLockedProjectName(match.name);
+            setIsProjectLocked(true);
+            return;
+          }
+        }
+
         if (data.projects.length > 0) {
-          // pre-select first project
           setSelectedProjectId(data.projects[0].id);
         }
       } else {
@@ -237,7 +270,23 @@ export default function App() {
   const displayStep3 = activeMeta?.step3 || "Organización Instantánea: Todo se agrupa automáticamente en Notion listo";
 
   return (
-    <div className="min-h-screen bg-[#050505] flex flex-col antialiased text-[#e0e0e0]">
+    <div className="min-h-screen bg-[#050505] flex flex-col antialiased text-[#e0e0e0] relative">
+      
+      {/* Dynamic Background Tile / Mosaic layer */}
+      {activeTab === "upload" && activeMeta?.backgroundImage && (
+        <div 
+          className="fixed inset-0 -z-50 pointer-events-none" 
+          style={{
+            backgroundImage: `url(${activeMeta.backgroundImage})`,
+            backgroundRepeat: "repeat",
+            backgroundSize: "auto",
+          }}
+        />
+      )}
+      {/* Accessibility Contrast Dark Overlay layer */}
+      {activeTab === "upload" && activeMeta?.backgroundImage && (
+        <div className="fixed inset-0 bg-[#050505]/85 -z-40 pointer-events-none" />
+      )}
       
       {/* Dynamic Header Nav Bar */}
       <header className="sticky top-0 z-50 bg-[#050505]/80 backdrop-blur-md border-b border-white/5">
@@ -438,9 +487,9 @@ export default function App() {
                       <div>
                         <div className="flex items-center justify-between mb-1.5">
                           <label className="block text-xs font-semibold text-white/40 uppercase tracking-wide">
-                            Selecciona Proyecto / Carpeta de Notion
+                            {isProjectLocked ? "Carpeta de Destino en Notion" : "Selecciona Proyecto / Carpeta de Notion"}
                           </label>
-                          {config?.isConfigured && (
+                          {!isProjectLocked && config?.isConfigured && (
                             <button
                               type="button"
                               onClick={fetchProjects}
@@ -452,7 +501,15 @@ export default function App() {
                           )}
                         </div>
 
-                        {loadingProjects ? (
+                        {isProjectLocked ? (
+                          <div className="w-full px-4 py-3 bg-white/5 border border-white/20 rounded-xl flex items-center justify-between select-none">
+                            <div className="flex items-center gap-2.5">
+                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                              <span className="text-sm font-bold text-white tracking-wide">{lockedProjectName}</span>
+                            </div>
+                            <span className="text-[10px] text-white/40 font-mono tracking-wider uppercase bg-white/5 px-2 py-0.5 rounded-md border border-white/10">Enlace Directo Activo</span>
+                          </div>
+                        ) : loadingProjects ? (
                           <div className="w-full py-2.5 px-3 border border-white/5 rounded-xl bg-[#0d0d0d] flex items-center gap-2">
                             <Loader2 className="w-4 h-4 text-white/40 animate-spin" />
                             <span className="text-xs text-white/30">Sincronizando carpetas de Notion...</span>

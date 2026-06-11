@@ -16,6 +16,7 @@ export interface ProjectMeta {
   step2: string;
   step3: string;
   expirationDate?: string;
+  backgroundImage?: string;
 }
 
 export interface FileAttachment {

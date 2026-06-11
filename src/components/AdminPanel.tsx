@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { 
   Settings, Key, FolderPlus, FileSpreadsheet, Eye, EyeOff, Check, 
-  AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, Download, ArrowRight 
+  AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, Download, ArrowRight, Trash2 
 } from "lucide-react";
 import { Project, Submission, NotionConfig, ProjectMeta } from "../types";
 
@@ -43,12 +43,14 @@ export default function AdminPanel({
   const [copyStep2, setCopyStep2] = useState("");
   const [copyStep3, setCopyStep3] = useState("");
   const [copyExpiration, setCopyExpiration] = useState("");
+  const [copyBackground, setCopyBackground] = useState("");
   const [isSavingMeta, setIsSavingMeta] = useState(false);
   const [metaMessage, setMetaMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Project state
   const [newProjectName, setNewProjectName] = useState("");
   const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [isDeletingProjectId, setIsDeletingProjectId] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
 
   // Submissions state
@@ -81,13 +83,16 @@ export default function AdminPanel({
         step1: "Identifícate: Escribe tu nombre, correo y selecciona la carpeta de destino.",
         step2: "Sube Archivos: Arrastra y suelta tus fotos, PDFs o renders en el dropzone.",
         step3: "Organización Instantánea: Todo se agrupa automáticamente en Notion listo para tu supervisor.",
-        expirationDate: ""
+        expirationDate: "",
+        backgroundImage: ""
       };
       setCopyTitle(active.title);
       setCopyDesc(active.description);
       setCopyStep1(active.step1);
       setCopyStep2(active.step2);
       setCopyStep3(active.step3);
+      setCopyExpiration(active.expirationDate || "");
+      setCopyBackground(active.backgroundImage || "");
       setCopyExpiration(active.expirationDate || "");
       setMetaMessage(null);
     }
@@ -110,6 +115,7 @@ export default function AdminPanel({
           step2: copyStep2,
           step3: copyStep3,
           expirationDate: copyExpiration,
+          backgroundImage: copyBackground,
         }),
       });
       const data = await res.json();
@@ -199,6 +205,31 @@ export default function AdminPanel({
       setProjectError("Fallo de red al intentar crear el proyecto.");
     } finally {
       setIsCreatingProject(false);
+    }
+  };
+
+  const handleDeleteProject = async (projId: string, projName: string) => {
+    if (!window.confirm(`¿Estás seguro de que quieres eliminar la carpeta del proyecto "${projName}"? Se borrará tanto de Notion como localmente.`)) return;
+
+    setIsDeletingProjectId(projId);
+    try {
+      const res = await fetch(`/api/projects/${projId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (selectedMetaProjectId === projId) {
+          setSelectedMetaProjectId("");
+        }
+        await refreshProjects();
+        await refreshProjectMeta();
+      } else {
+        alert(data.error || "No se pudo eliminar el proyecto.");
+      }
+    } catch (err) {
+      alert("Error de red al intentar eliminar el proyecto.");
+    } finally {
+      setIsDeletingProjectId(null);
     }
   };
 
@@ -396,6 +427,22 @@ export default function AdminPanel({
                 </p>
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
+                  Imagen de Fondo (URL para mosaico)
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://ejemplo.com/mosaico-fondo.png"
+                  value={copyBackground}
+                  onChange={(e) => setCopyBackground(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all pointer-events-auto"
+                />
+                <p className="text-[10px] text-white/30 mt-1">
+                  Pega la URL de una imagen para que se repita como mosaico de fondo en la vista de carga de archivos de este proyecto.
+                </p>
+              </div>
+
               {metaMessage && (
                 <div className={`p-3 rounded-xl text-xs flex gap-2 items-center ${
                   metaMessage.type === "success" 
@@ -487,27 +534,51 @@ export default function AdminPanel({
               {projects.map((proj) => (
                 <div 
                   key={proj.id} 
-                  className="p-3 border border-white/5 bg-[#0d0d0d] rounded-xl flex items-center justify-between hover:border-white/10 transition-all group animate-fade-in"
+                  onClick={() => setSelectedMetaProjectId(proj.id)}
+                  className={`p-3 border rounded-xl flex items-center justify-between transition-all cursor-pointer group animate-fade-in ${
+                    proj.id === selectedMetaProjectId 
+                      ? "border-white/30 bg-white/5" 
+                      : "border-white/5 bg-[#0d0d0d] hover:border-white/12"
+                  }`}
+                  title="Haz clic para personalizar los textos de este proyecto"
                 >
                   <div className="min-w-0 flex-1 pr-2">
-                    <p className="text-sm font-semibold text-white/90 truncate">{proj.name}</p>
+                    <p className="text-sm font-semibold text-white/95 truncate">{proj.name}</p>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[10px] text-white/40 font-mono">
                         {getSubmissionsCountForProject(proj.id)} entregas
                       </span>
+                      {proj.id === selectedMetaProjectId && (
+                        <span className="text-[9px] text-[#22c55e] font-sans font-medium px-1.5 py-0.2 bg-emerald-950/30 border border-emerald-900/40 rounded-sm">
+                          Editando
+                        </span>
+                      )}
                     </div>
                   </div>
-                  {proj.url && (
-                    <a
-                      href={proj.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="p-1.5 text-white/40 hover:text-white bg-white/5 border border-white/10 rounded-lg transition-colors shrink-0"
-                      title="Abrir en Notion"
+                  
+                  {/* Action buttons */}
+                  <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    {proj.url && (
+                      <a
+                        href={proj.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1.5 text-white/40 hover:text-white bg-white/5 border border-white/10 rounded-lg transition-colors"
+                        title="Abrir en Notion"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteProject(proj.id, proj.name)}
+                      disabled={isDeletingProjectId === proj.id}
+                      className="p-1.5 text-red-400/60 hover:text-red-400 hover:bg-red-950/20 border border-white/5 hover:border-red-900/20 rounded-lg transition-all disabled:opacity-50 cursor-pointer"
+                      title="Eliminar Proyecto"
                     >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  )}
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

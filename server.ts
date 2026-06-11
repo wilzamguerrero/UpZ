@@ -214,6 +214,7 @@ app.get("/api/project-meta", async (req, res) => {
               step2: data.step2 || "",
               step3: data.step3 || "",
               expirationDate: data.expirationDate || expirationDate,
+              backgroundImage: data.backgroundImage || "",
             }
           });
         } catch (e) {
@@ -226,7 +227,8 @@ app.get("/api/project-meta", async (req, res) => {
         return res.json({
           success: true,
           meta: {
-            expirationDate
+            expirationDate,
+            backgroundImage: "",
           }
         });
       }
@@ -241,7 +243,7 @@ app.get("/api/project-meta", async (req, res) => {
 
 // 3.3. Set project customized copywriting meta directly to Notion & cached fallback
 app.post("/api/project-meta", async (req, res) => {
-  const { projectId, title, description, step1, step2, step3, expirationDate } = req.body;
+  const { projectId, title, description, step1, step2, step3, expirationDate, backgroundImage } = req.body;
   if (!projectId) {
     return res.status(400).json({ error: "El ID del proyecto es obligatorio." });
   }
@@ -262,6 +264,7 @@ app.post("/api/project-meta", async (req, res) => {
         step2: (step2 || "").trim(),
         step3: (step3 || "").trim(),
         expirationDate: (expirationDate || "").trim(),
+        backgroundImage: (backgroundImage || "").trim(),
       };
 
       const jsonString = JSON.stringify(metaPayload, null, 2);
@@ -364,6 +367,7 @@ app.post("/api/project-meta", async (req, res) => {
     step2: (step2 || "").trim(),
     step3: (step3 || "").trim(),
     expirationDate: (expirationDate || "").trim(),
+    backgroundImage: (backgroundImage || "").trim(),
   };
 
   saveProjectMeta(metaList);
@@ -467,6 +471,38 @@ app.post("/api/projects", async (req, res) => {
     console.error("Error creating project toggle in Notion:", err);
     res.status(500).json({
       error: `Error al crear proyecto en Notion: ${err.message || "Error desconocido"}.`,
+    });
+  }
+});
+
+// 5.1. Delete a Project in Notion (deletes the block)
+app.delete("/api/projects/:projectId", async (req, res) => {
+  const { projectId } = req.params;
+  if (!projectId) {
+    return res.status(400).json({ error: "El ID del proyecto es obligatorio para su eliminación." });
+  }
+
+  const config = loadConfig();
+  if (!config.notionSecret) {
+    return res.status(400).json({ error: "Notion no está configurado." });
+  }
+
+  try {
+    const notion = new Client({ auth: config.notionSecret });
+    await notion.blocks.delete({ block_id: projectId });
+
+    // Also remove from local project meta cache if it exists
+    const metaList = loadProjectMeta();
+    if (metaList[projectId]) {
+      delete metaList[projectId];
+      saveProjectMeta(metaList);
+    }
+
+    res.json({ success: true, message: "Proyecto eliminado en Notion exitosamente." });
+  } catch (err: any) {
+    console.error("Error deleting project block in Notion:", err);
+    res.status(500).json({
+      error: `Error al eliminar proyecto en Notion: ${err.message || "Error desconocido"}.`,
     });
   }
 });
