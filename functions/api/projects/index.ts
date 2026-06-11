@@ -1,4 +1,4 @@
-import { json, listChildren, appendChildren, type Env } from "../../../_shared/notion";
+import { json, listChildren, appendChildren, type Env } from "../../_shared/notion";
 
 /** Reads the effective Notion credentials (KV override > env vars) */
 async function getConfig(env: Env): Promise<{ notionSecret: string; parentPageId: string }> {

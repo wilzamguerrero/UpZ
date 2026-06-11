@@ -1,4 +1,4 @@
-import { json, type Env } from "../../../_shared/notion";
+import { json, type Env } from "../../_shared/notion";
 
 /** POST /api/config/clear – removes KV credential override */
 export const onRequestPost: PagesFunction<Env> = async (context) => {

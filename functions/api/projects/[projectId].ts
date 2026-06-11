@@ -1,4 +1,4 @@
-import { json, deleteBlock, type Env } from "../../../_shared/notion";
+import { json, deleteBlock, type Env } from "../../_shared/notion";
 
 /** DELETE /api/projects/:projectId – archive/delete the block in Notion */
 export const onRequestDelete: PagesFunction<Env> = async (context) => {

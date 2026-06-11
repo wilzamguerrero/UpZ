@@ -1,4 +1,4 @@
-import { json, listChildren, appendChildren, updateBlock, type Env } from "../../_shared/notion";
+import { json, listChildren, appendChildren, updateBlock, type Env } from "../_shared/notion";
 
 async function getCredentials(env: Env): Promise<{ notionSecret: string; parentPageId: string }> {
   let notionSecret = env.NOTION_SECRET || "";

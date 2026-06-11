@@ -1,4 +1,4 @@
-import { json, type Env } from "../../_shared/notion";
+import { json, type Env } from "../_shared/notion";
 
 /** GET /api/submissions – returns logged submissions from KV */
 export const onRequestGet: PagesFunction<Env> = async (context) => {

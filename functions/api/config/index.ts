@@ -1,4 +1,4 @@
-import { json, type Env } from "../../../_shared/notion";
+import { json, type Env } from "../../_shared/notion";
 
 /** GET /api/config – returns masked credential state from env vars + optional KV override */
 export const onRequestGet: PagesFunction<Env> = async (context) => {

@@ -1,4 +1,4 @@
-import { json, appendChildren, uploadFileToNotion, type Env } from "../../_shared/notion";
+import { json, appendChildren, uploadFileToNotion, type Env } from "../_shared/notion";
 
 async function getCredentials(env: Env): Promise<{ notionSecret: string }> {
   let notionSecret = env.NOTION_SECRET || "";

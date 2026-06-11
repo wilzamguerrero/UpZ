@@ -1,4 +1,4 @@
-import { json, uploadFileToNotion, type Env } from "../../../_shared/notion";
+import { json, uploadFileToNotion, type Env } from "../../_shared/notion";
 
 /**
  * POST /api/projects/upload-bg
