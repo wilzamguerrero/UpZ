@@ -28,6 +28,23 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 // Serve uploaded files statically
 app.use("/uploads", express.static(UPLOADS_DIR));
 
+// Helper: clean Notion page/block ID if user pasted a URL
+function cleanNotionId(input: string): string {
+  if (!input) return "";
+  const trimmed = input.trim();
+  const uuidWithDashesRegex = /[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i;
+  const matchDashes = trimmed.match(uuidWithDashesRegex);
+  if (matchDashes) {
+    return matchDashes[0];
+  }
+  const uuidPlainRegex = /[a-f0-9]{32}/i;
+  const matchPlain = trimmed.match(uuidPlainRegex);
+  if (matchPlain) {
+    return matchPlain[0];
+  }
+  return trimmed;
+}
+
 // Helper: load credentials
 function loadConfig() {
   let notionSecret = process.env.NOTION_SECRET || "";
@@ -42,6 +59,8 @@ function loadConfig() {
       console.error("Error reading config file:", e);
     }
   }
+
+  parentPageId = cleanNotionId(parentPageId);
   return { notionSecret, parentPageId };
 }
 
@@ -126,7 +145,8 @@ app.post("/api/config", (req, res) => {
     return res.status(400).json({ error: "Faltan datos de configuración" });
   }
 
-  saveConfig({ notionSecret, parentPageId });
+  const cleanedParentPageId = cleanNotionId(parentPageId);
+  saveConfig({ notionSecret, parentPageId: cleanedParentPageId });
   res.json({ success: true, message: "Configuración guardada correctamente" });
 });
 

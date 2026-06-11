@@ -1,4 +1,4 @@
-import { json, type Env } from "../../_shared/notion";
+import { json, cleanNotionId, type Env } from "../../_shared/notion";
 
 /** GET /api/config – returns masked credential state from env vars + optional KV override */
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -26,7 +26,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     isConfigured: !!(notionSecret && parentPageId),
     hasSecret: !!notionSecret,
     hasParentId: !!parentPageId,
-    parentPageId: parentPageId,
+    parentPageId: cleanNotionId(parentPageId),
     maskedSecret: notionSecret ? `••••••••${notionSecret.slice(-4)}` : "",
   });
 };
@@ -48,7 +48,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   if (SUBMISSIONS_KV) {
-    await SUBMISSIONS_KV.put("config", JSON.stringify({ notionSecret, parentPageId }));
+    const cleanedId = cleanNotionId(parentPageId);
+    await SUBMISSIONS_KV.put("config", JSON.stringify({ notionSecret, parentPageId: cleanedId }));
     return json({ success: true, message: "Configuración guardada correctamente" });
   }
 

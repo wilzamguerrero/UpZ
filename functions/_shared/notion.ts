@@ -109,3 +109,21 @@ export async function uploadFileToNotion(
 
   return upload.id as string;
 }
+
+/** Clean a Notion ID from any dirty pasted text or URL */
+export function cleanNotionId(input: string): string {
+  if (!input) return "";
+  const trimmed = input.trim();
+  const uuidWithDashesRegex = /[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/i;
+  const matchDashes = trimmed.match(uuidWithDashesRegex);
+  if (matchDashes) {
+    return matchDashes[0];
+  }
+  const uuidPlainRegex = /[a-f0-9]{32}/i;
+  const matchPlain = trimmed.match(uuidPlainRegex);
+  if (matchPlain) {
+    return matchPlain[0];
+  }
+  return trimmed;
+}
+
