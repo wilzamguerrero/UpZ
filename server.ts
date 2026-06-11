@@ -45,6 +45,99 @@ function cleanNotionId(input: string): string {
   return trimmed;
 }
 
+const BG_IMG_BLOCK_CAPTION = "__CERT_BG_IMG__";
+const NOTION_API_BASE_URL = "https://api.notion.com/v1";
+const NOTION_API_VER = "2022-06-28";
+
+// Helper: upload background image to Notion as a native Notion image block
+async function uploadBgImageToNotion(
+  notionSecret: string,
+  toggleBlockId: string,
+  imageBuffer: Buffer,
+  mimeType: string,
+  filename: string
+): Promise<{ blockId: string; imageUrl: string } | null> {
+  try {
+    const notion = new Client({ auth: notionSecret });
+
+    // Step 1: Init single-part file upload
+    const initResp = await fetch(`${NOTION_API_BASE_URL}/file_uploads`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${notionSecret}`,
+        "Notion-Version": NOTION_API_VER,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ mode: "single_part", filename, content_type: mimeType }),
+    });
+    if (!initResp.ok) {
+      console.error("Notion file upload init failed:", await initResp.text());
+      return null;
+    }
+    const initData = (await initResp.json()) as any;
+    const { id: uploadId, upload_url } = initData;
+
+    // Step 2: Upload binary content via multipart form
+    const formData = new FormData();
+    formData.append("file", new Blob([new Uint8Array(imageBuffer)], { type: mimeType }), filename);
+    const uploadResp = await fetch(upload_url, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${notionSecret}`,
+        "Notion-Version": NOTION_API_VER,
+      },
+      body: formData,
+    });
+    if (!uploadResp.ok) {
+      console.error("Notion file upload content failed:", await uploadResp.text());
+      return null;
+    }
+
+    // Step 3: Remove old bg image blocks in that toggle list block
+    const existingChildren = await notion.blocks.children.list({ block_id: toggleBlockId });
+    const existingBlocks: any[] = existingChildren.results || [];
+    const oldImgBlocks = existingBlocks.filter((b: any) =>
+      b.type === "image" &&
+      (b.image?.caption || []).map((t: any) => t.plain_text).join("") === BG_IMG_BLOCK_CAPTION
+    );
+    for (const block of oldImgBlocks) {
+      await notion.blocks.delete({ block_id: block.id }).catch(() => null);
+    }
+
+    // Step 4: Append image block referencing the uploaded file
+    const appendResp = await notion.blocks.children.append({
+      block_id: toggleBlockId,
+      children: [{
+        object: "block",
+        type: "image",
+        image: {
+          type: "file_upload",
+          file_upload: { id: uploadId },
+          caption: [{ type: "text", text: { content: BG_IMG_BLOCK_CAPTION } }],
+        } as any,
+      } as any],
+    });
+    const newBlockId = (appendResp.results as any[])[0]?.id;
+    if (!newBlockId) return null;
+
+    // Step 5: Retrieve the block to get the fresh signed URL (retry up to 5 times)
+    let imageUrl = "";
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await new Promise(r => setTimeout(r, 400 + attempt * 600));
+      try {
+        const blockDetail: any = await notion.blocks.retrieve({ block_id: newBlockId });
+        imageUrl = blockDetail?.image?.file?.url || blockDetail?.image?.external?.url || "";
+        if (imageUrl) break;
+      } catch { /* retry */ }
+    }
+
+    return { blockId: newBlockId, imageUrl };
+  } catch (e: any) {
+    console.error("uploadBgImageToNotion error:", e.message);
+    return null;
+  }
+}
+
 // Helper: load credentials
 function loadConfig() {
   let notionSecret = process.env.NOTION_SECRET || "";
@@ -136,6 +229,38 @@ app.get("/api/config", (req, res) => {
     parentPageId: config.parentPageId,
     maskedSecret: config.notionSecret ? `••••••••${config.notionSecret.slice(-4)}` : "",
   });
+});
+
+// Proxy route for background images stored in Notion blocks
+app.get("/api/notion/blocks/:blockId/image", async (req, res) => {
+  try {
+    const { blockId } = req.params;
+    const config = loadConfig();
+    if (!config.notionSecret) {
+      return res.status(401).json({ success: false, message: "Notion no está configurado" });
+    }
+    const notion = new Client({ auth: config.notionSecret });
+    const blockDetail: any = await notion.blocks.retrieve({ block_id: blockId });
+    const imageUrl: string = blockDetail?.image?.file?.url || blockDetail?.image?.external?.url || "";
+    if (!imageUrl) {
+      return res.status(404).json({ success: false, message: "Imagen no encontrada en el bloque de Notion" });
+    }
+
+    const upstream = await fetch(imageUrl);
+    if (!upstream.ok) {
+      return res.status(502).json({ success: false, message: "No se pudo descargar la imagen desde Notion" });
+    }
+
+    const contentType = upstream.headers.get("content-type") || "application/octet-stream";
+    const arrayBuffer = await upstream.arrayBuffer();
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Content-Type", contentType);
+    return res.status(200).send(Buffer.from(arrayBuffer));
+  } catch (e: any) {
+    console.error("Error proxying Notion image:", e);
+    return res.status(500).json({ success: false, message: "No se pudo cargar la imagen desde el proxy de Notion" });
+  }
 });
 
 // 2. Set config details
@@ -537,11 +662,48 @@ app.delete("/api/projects/:projectId", async (req, res) => {
   }
 });
 
-// 5.2. Upload background image that gets saved inside local /uploads directory
-app.post("/api/projects/upload-bg", upload.single("bgImage"), (req, res) => {
+// 5.2. Upload background image that gets saved inside Notion or locally as fallback
+app.post("/api/projects/upload-bg", upload.single("bgImage"), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: "No se seleccionó o cargó ninguna imagen." });
   }
+
+  const { projectId } = req.query;
+  const config = loadConfig();
+
+  // If a project ID is specified and Notion is configured, try uploading directly to Notion
+  if (config.notionSecret && projectId) {
+    try {
+      const fileBuffer = fs.readFileSync(req.file.path);
+      const mimeType = req.file.mimetype;
+      const filename = req.file.filename;
+
+      const uploadResult = await uploadBgImageToNotion(
+        config.notionSecret,
+        projectId as string,
+        fileBuffer,
+        mimeType,
+        filename
+      );
+
+      if (uploadResult) {
+        // Clean up the local temp uploaded file
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch (err) {
+          console.warn("Error cleaning up local uploaded temp file:", err);
+        }
+
+        // Return the dynamic same-origin proxy URL
+        const fileUrl = `/api/notion/blocks/${uploadResult.blockId}/image`;
+        return res.json({ success: true, url: fileUrl });
+      }
+    } catch (e: any) {
+      console.error("Error saving image inside Notion:", e);
+    }
+  }
+
+  // Fallback to local uploads directory
   const protocol = req.headers["x-forwarded-proto"] || req.protocol;
   const host = req.get("host");
   const appUrl = process.env.APP_URL || `${protocol}://${host}`;

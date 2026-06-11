@@ -1,10 +1,21 @@
 import React, { useState, useEffect } from "react";
 import { 
   Settings, Key, FolderPlus, FileSpreadsheet, Eye, EyeOff, Check, 
-  AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, Download, ArrowRight, Trash2 
+  AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, Download, ArrowRight, Trash2,
+  Link, QrCode, Copy
 } from "lucide-react";
 import { Project, Submission, NotionConfig, ProjectMeta } from "../types";
 import DateTimePicker from "./DateTimePicker";
+
+const normalizeString = (s: string) => {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // remove accents
+    .replace(/[^a-z0-9]/g, "-") // replace non-alphanumeric with dashes
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+};
 
 interface AdminPanelProps {
   projects: Project[];
@@ -48,6 +59,7 @@ export default function AdminPanel({
   const [copyIsActive, setCopyIsActive] = useState(true);
   const [isUploadingBg, setIsUploadingBg] = useState(false);
   const [isSavingMeta, setIsSavingMeta] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [metaMessage, setMetaMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Project state
@@ -147,7 +159,7 @@ export default function AdminPanel({
     formData.append("bgImage", file);
 
     try {
-      const res = await fetch("/api/projects/upload-bg", {
+      const res = await fetch(`/api/projects/upload-bg?projectId=${selectedMetaProjectId}`, {
         method: "POST",
         body: formData,
       });
@@ -395,6 +407,86 @@ export default function AdminPanel({
                   {projects.find(p => p.id === selectedMetaProjectId)?.name || "Ninguno"}
                 </span>
               </div>
+
+              {(() => {
+                const selectedProject = projects.find(p => p.id === selectedMetaProjectId);
+                if (!selectedProject) return null;
+                const landingSlug = normalizeString(selectedProject.name);
+                const directUrl = `${window.location.origin}/${landingSlug}`;
+                
+                const handleCopyLink = () => {
+                  navigator.clipboard.writeText(directUrl);
+                  setCopiedLink(true);
+                  setTimeout(() => setCopiedLink(false), 2000);
+                };
+
+                return (
+                  <div className="bg-[#0a0a0a] rounded-xl p-3.5 border border-white/5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest flex items-center gap-1">
+                        <Link className="w-3 h-3 text-purple-400" /> Acceso Directo y QR
+                      </span>
+                      {copiedLink ? (
+                        <span className="text-[10px] text-emerald-400 font-semibold animate-pulse bg-emerald-950/30 px-2 py-0.5 rounded border border-emerald-900/30">
+                          ¡Copiado!
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <div className="bg-[#111] border border-white/10 rounded-lg px-2.5 py-1.5 flex-1 select-all font-mono text-xs text-white truncate">
+                        {directUrl}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleCopyLink}
+                        className="p-2 bg-white/5 border border-white/10 hover:bg-white/10 rounded-lg text-white transition-colors cursor-pointer flex items-center justify-center shrink-0"
+                        title="Copiar URL Completa"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+
+                      <a
+                        href={directUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 bg-white/5 border border-white/10 hover:bg-white/10 rounded-lg text-white transition-colors flex items-center justify-center cursor-pointer shrink-0"
+                        title="Abrir en nueva pestaña"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    </div>
+
+                    <div className="flex items-start gap-3 bg-white/5 p-2.5 rounded-lg border border-white/5">
+                      <div className="bg-white p-1 rounded shrink-0 self-center">
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(directUrl)}`}
+                          alt="Código QR"
+                          className="w-[72px] h-[72px]"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-bold text-white flex items-center gap-1">
+                          <QrCode className="w-3 h-3 text-emerald-400" /> QR del Proyecto
+                        </p>
+                        <p className="text-[9px] text-white/40 mt-0.5 leading-relaxed">
+                          Escanea o haz clic abajo para descargar una versión imprimible del QR.
+                        </p>
+                        <a
+                          href={`https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(directUrl)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-[9px] text-blue-400 hover:text-blue-300 hover:underline mt-1 font-semibold"
+                        >
+                          <Download className="w-2.5 h-2.5" /> Descargar QR Imprimible
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="flex items-center gap-2 p-1.5 bg-[#0d0d0d] border border-white/5 rounded-xl">
                 <input
@@ -644,6 +736,11 @@ export default function AdminPanel({
                     <div className="flex flex-wrap items-center gap-2 mt-1">
                       <span className="text-[10px] text-white/40 font-mono">
                         {getSubmissionsCountForProject(proj.id)} entregas
+                      </span>
+                      
+                      <span className="text-[10px] text-purple-400 hover:text-purple-300 font-mono truncate select-all flex items-center gap-0.5" title="Enlace directo público para entregas">
+                        <Link className="w-2.5 h-2.5 shrink-0" />
+                        /{normalizeString(proj.name)}
                       </span>
                       
                       {proj.isActive === false ? (
