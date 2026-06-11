@@ -32,7 +32,12 @@ export async function notionFetch(
     (init as any).body = JSON.stringify(body);
   }
   const res = await fetch(`${NOTION_BASE}${path}`, init);
-  return res.json();
+  const data = await res.json();
+  if (!res.ok) {
+    const msg = data?.message || data?.code || `HTTP ${res.status}`;
+    throw new Error(`Notion API error (${res.status}): ${msg}`);
+  }
+  return data;
 }
 
 /** List children blocks of a Notion block/page */
