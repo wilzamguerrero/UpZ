@@ -1,0 +1,663 @@
+import React, { useState, useEffect } from "react";
+import { 
+  FolderSync, ShieldCheck, Mail, User, ListFilter, Send, 
+  CheckCircle2, Loader2, ArrowRight, Settings2, RefreshCcw, AlertTriangle, Clock
+} from "lucide-react";
+import { Project, ProjectMeta } from "./types";
+import Dropzone from "./components/Dropzone";
+import AdminPanel from "./components/AdminPanel";
+import { motion, AnimatePresence } from "motion/react";
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState<"upload" | "admin">("upload");
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+  
+  // App Config Info
+  const [config, setConfig] = useState<{
+    isConfigured: boolean;
+    hasSecret: boolean;
+    hasParentId: boolean;
+    parentPageId: string;
+    maskedSecret: string;
+  } | null>(null);
+
+  // Project meta copywriting customization
+  const [projectMeta, setProjectMeta] = useState<Record<string, ProjectMeta>>({});
+
+  // Admin dynamic authentication states
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const [adminPasswordInput, setAdminPasswordInput] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  // Form states
+  const [senderName, setSenderName] = useState("");
+  const [senderEmail, setSenderEmail] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  
+  // Submit engine states
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitStep, setSubmitStep] = useState<string>("");
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitSuccess, setSubmitSuccess] = useState<any | null>(null);
+
+  // Load configuration, projects and copy text meta
+  useEffect(() => {
+    fetchConfig();
+    fetchProjectMeta();
+  }, []);
+
+  const fetchProjectMeta = async () => {
+    try {
+      const res = await fetch("/api/project-meta");
+      const data = await res.json();
+      if (data.success) {
+        setProjectMeta(data.meta || {});
+      }
+    } catch (e) {
+      console.error("Error setting up project meta details", e);
+    }
+  };
+
+  // Fetch specific project metadata and expiration date on selection in real-time
+  useEffect(() => {
+    if (selectedProjectId) {
+      fetchProjectMetaForProject(selectedProjectId);
+    }
+  }, [selectedProjectId]);
+
+  const fetchProjectMetaForProject = async (projId: string) => {
+    try {
+      const res = await fetch(`/api/project-meta?projectId=${projId}`);
+      const data = await res.json();
+      if (data.success && data.meta) {
+        setProjectMeta((prev) => ({
+          ...prev,
+          [projId]: data.meta,
+        }));
+      }
+    } catch (e) {
+      console.error("Error fetching dynamic project meta", e);
+    }
+  };
+
+  const fetchConfig = async () => {
+    try {
+      const res = await fetch("/api/config");
+      const data = await res.json();
+      if (data.success) {
+        setConfig(data);
+        if (data.isConfigured) {
+          fetchProjects();
+        }
+      }
+    } catch (e) {
+      console.error("Error setting up app config state", e);
+    }
+  };
+
+  const fetchProjects = async () => {
+    setLoadingProjects(true);
+    try {
+      const res = await fetch("/api/projects");
+      const data = await res.json();
+      if (data.success) {
+        setProjects(data.projects);
+        if (data.projects.length > 0) {
+          // pre-select first project
+          setSelectedProjectId(data.projects[0].id);
+        }
+      } else {
+        setProjects([]);
+      }
+    } catch (e) {
+      console.error("Error listing projects", e);
+      setProjects([]);
+    } finally {
+      setLoadingProjects(false);
+    }
+  };
+
+  const handleFilesAdded = (newFiles: File[]) => {
+    setSelectedFiles((prev) => [...prev, ...newFiles]);
+  };
+
+  const handleFileRemoved = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!senderName || !senderEmail || !selectedProjectId || selectedFiles.length === 0) {
+      setSubmitError("Por favor completa todos los campos y añade al menos un archivo.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+    setSubmitSuccess(null);
+    setSubmitStep("Subiendo archivos al servidor...");
+
+    const chosenProj = projects.find(p => p.id === selectedProjectId);
+    const projectName = chosenProj ? chosenProj.name : "";
+
+    const formData = new FormData();
+    formData.append("senderName", senderName);
+    formData.append("senderEmail", senderEmail);
+    formData.append("projectId", selectedProjectId);
+    formData.append("projectName", projectName);
+    
+    selectedFiles.forEach((file) => {
+      formData.append("files", file);
+    });
+
+    try {
+      // Step feedback transition
+      setTimeout(() => {
+        if (isSubmitting) setSubmitStep("Registrando archivos y creando Toggle List en Notion...");
+      }, 2000);
+
+      const res = await fetch("/api/submit", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setSubmitSuccess(data.submission);
+        // Clear form
+        setSenderName("");
+        setSenderEmail("");
+        setSelectedFiles([]);
+      } else {
+        setSubmitError(data.error || "Algo salió mal al sincronizar.");
+      }
+    } catch (error) {
+      setSubmitError("Hubo un error de conexión con la red o el servidor.");
+    } finally {
+      setIsSubmitting(false);
+      setSubmitStep("");
+    }
+  };
+
+  const handleAdminLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!adminPasswordInput) return;
+    setIsLoggingIn(true);
+    setLoginError(null);
+    try {
+      const res = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: adminPasswordInput }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setIsAdminAuthenticated(true);
+        setLoginError(null);
+      } else {
+        setLoginError(data.error || "La contraseña ingresada no coincide.");
+      }
+    } catch (err) {
+      setLoginError("Error de comunicación de red al consultar contraseña. Verifica la conexión.");
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const renderStepText = (text: string) => {
+    const parts = text.split(":");
+    if (parts.length > 1) {
+      return (
+        <>
+          <strong className="text-white/80">{parts[0]}:</strong>
+          {parts.slice(1).join(":")}
+        </>
+      );
+    }
+    return text;
+  };
+
+  const activeMeta = selectedProjectId ? projectMeta[selectedProjectId] : null;
+
+  const isProjectExpired = (() => {
+    if (!activeMeta?.expirationDate) return false;
+    const expDate = new Date(activeMeta.expirationDate);
+    // Include 23:59:59 of the expiration day so it doesn't expire prematurely
+    expDate.setHours(23, 59, 59, 999);
+    return new Date() > expDate;
+  })();
+
+  const displayTitle = activeMeta?.title || "Comparte tus archivos directo a Notion.";
+  const displayDescription = activeMeta?.description || "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instantánea. Tus archivos se organizan de forma automática bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la página del proyecto que elijas.";
+  const displayStep1 = activeMeta?.step1 || "Identifícate: Escribe tu nombre, correo y selecciona la carpeta de destino.";
+  const displayStep2 = activeMeta?.step2 || "Sube Archivos: Arrastra y suelta tus fotos, PDFs o renders en el dropzone.";
+  const displayStep3 = activeMeta?.step3 || "Organización Instantánea: Todo se agrupa automáticamente en Notion listo";
+
+  return (
+    <div className="min-h-screen bg-[#050505] flex flex-col antialiased text-[#e0e0e0]">
+      
+      {/* Dynamic Header Nav Bar */}
+      <header className="sticky top-0 z-50 bg-[#050505]/80 backdrop-blur-md border-b border-white/5">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
+          
+          {/* Logo Brand */}
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-white text-black rounded-xl shadow-sm">
+              <FolderSync className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="font-bold text-white tracking-tight text-base block">Notion Drop</span>
+              <span className="text-[10px] text-white/40 font-mono block">WeTransfer Mode for Notion</span>
+            </div>
+          </div>
+
+          {/* Navigation toggles with framer motion pill */}
+          <div className="bg-white/5 p-1 rounded-full flex gap-1 relative select-none border border-white/10">
+            <button
+              id="tab-btn-upload"
+              onClick={() => { setActiveTab("upload"); handleFilesAdded([]); }}
+              className={`relative px-4 py-1.5 rounded-full text-xs font-semibold tracking-wide transition-all ${
+                activeTab === "upload" 
+                  ? "bg-white text-black shadow-2xs" 
+                  : "text-white/50 hover:text-white"
+              }`}
+            >
+              Entregar Archivos
+            </button>
+            <button
+              id="tab-btn-admin"
+              onClick={() => setActiveTab("admin")}
+              className={`relative px-4 py-1.5 rounded-full text-xs font-semibold tracking-wide transition-all flex items-center gap-1.5 ${
+                activeTab === "admin" 
+                  ? "bg-white text-black shadow-2xs" 
+                  : "text-white/50 hover:text-white"
+              }`}
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+              Administración
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Primary Content Container */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        <AnimatePresence mode="wait">
+          {activeTab === "upload" ? (
+            <motion.div
+              key="upload-view"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.25 }}
+              className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center py-4"
+            >
+              
+              {/* Left Column (Desktop Hero Explanation) */}
+              <div className="lg:col-span-5 space-y-6">
+                <div className="inline-flex items-center gap-2 bg-white/5 text-white/90 text-[11px] font-semibold px-3 py-1 rounded-full border border-white/10">
+                  <ShieldCheck className="w-4 h-4" /> Almacenado Seguro en Notion
+                </div>
+
+                <h1 className="text-4xl sm:text-5xl font-extrabold text-white tracking-tight leading-[1.1]">
+                  {displayTitle.includes("Notion") ? (
+                    <>
+                      {displayTitle.split("Notion")[0]}
+                      <span className="text-white/60">Notion</span>
+                      {displayTitle.split("Notion")[1] || "."}
+                    </>
+                  ) : (
+                    displayTitle
+                  )}
+                </h1>
+
+                <p className="text-sm text-white/40 leading-relaxed">
+                  {displayDescription}
+                </p>
+
+                <div className="border-t border-white/5 pt-6 space-y-4">
+                  <div className="flex gap-3">
+                    <span className="w-6 h-6 rounded-full bg-white/5 border border-white/10 text-white/60 text-xs font-bold flex items-center justify-center shrink-0">1</span>
+                    <p className="text-xs text-white/40">{renderStepText(displayStep1)}</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <span className="w-6 h-6 rounded-full bg-white/5 border border-white/10 text-white/60 text-xs font-bold flex items-center justify-center shrink-0">2</span>
+                    <p className="text-xs text-white/40">{renderStepText(displayStep2)}</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <span className="w-6 h-6 rounded-full bg-white/5 border border-white/10 text-white/60 text-xs font-bold flex items-center justify-center shrink-0">3</span>
+                    <p className="text-xs text-white/40">{renderStepText(displayStep3)}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column (The interactive Form Card) */}
+              <div className="lg:col-span-7">
+                <div className="bg-[#111111] rounded-3xl p-6 sm:p-8 border border-white/10 shadow-sm">
+                  
+                  {submitSuccess ? (
+                    // Submission Success feedback View
+                    <motion.div 
+                      initial={{ scale: 0.95, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      className="text-center py-8 space-y-6"
+                    >
+                      <div className="w-16 h-16 bg-emerald-950/40 text-emerald-400 rounded-full flex items-center justify-center mx-auto border border-emerald-900/50">
+                        <CheckCircle2 className="w-10 h-10" />
+                      </div>
+                      
+                      <div>
+                        <h2 className="text-2xl font-bold text-white">¡Archivos Enviados!</h2>
+                        <p className="text-xs text-white/40 mt-2">
+                          Se ha creado tu Toggle List en Notion correctamente.
+                        </p>
+                      </div>
+
+                      <div className="bg-[#0d0d0d] rounded-2xl p-5 text-left text-xs space-y-3.5 border border-white/5 max-w-md mx-auto">
+                        <div className="flex justify-between">
+                          <span className="text-white/40">Remitente:</span>
+                          <span className="font-semibold text-slate-200">{submitSuccess.senderName} ({submitSuccess.senderEmail})</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-white/40">Proyecto:</span>
+                          <span className="font-semibold text-slate-200">{submitSuccess.projectName}</span>
+                        </div>
+                        <div className="flex justify-between border-t border-white/5 pt-3">
+                          <span className="text-white/40">Archivos totales:</span>
+                          <span className="font-mono font-bold text-white">{submitSuccess.files.length}</span>
+                        </div>
+                        <div className="space-y-1.5 pt-1.5">
+                          {submitSuccess.files.map((file: any, fIdx: number) => (
+                            <div key={fIdx} className="flex justify-between text-[11px] text-white/50 bg-[#111111] p-2 rounded-lg border border-white/5">
+                              <span className="truncate flex-1 pr-2">📎 {file.name}</span>
+                              <span className="font-mono text-white/30">{(file.size / (1024 * 1024)).toFixed(2)} MB</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <button
+                        id="submit-another-btn"
+                        onClick={() => setSubmitSuccess(null)}
+                        className="py-2.5 px-6 rounded-xl bg-white hover:bg-white/95 text-black font-semibold text-xs tracking-wide transition-all pointer-events-auto"
+                      >
+                        Enviar más archivos
+                      </button>
+                    </motion.div>
+                  ) : (
+                    // Regular Transfer Form
+                    <form onSubmit={handleSubmit} className="space-y-6">
+                      
+                      <div className="space-y-4">
+                        <h2 className="text-lg font-bold text-white">Haz un Envío</h2>
+                        <hr className="border-white/5" />
+                      </div>
+
+                      {/* Client parameters input fields */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
+                            Tu Nombre
+                          </label>
+                          <div className="relative">
+                            <User className="absolute left-3 top-3 text-white/30 w-4 h-4" />
+                            <input
+                              type="text"
+                              required
+                              placeholder="Ej: Laura Castro"
+                              value={senderName}
+                              onChange={(e) => setSenderName(e.target.value)}
+                              className="w-full pl-10 pr-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none placeholder-white/20 transition-all text-white"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
+                            Tu Correo
+                          </label>
+                          <div className="relative">
+                            <Mail className="absolute left-3 top-3 text-white/30 w-4 h-4" />
+                            <input
+                              type="email"
+                              required
+                              placeholder="Ej: laura@empresa.com"
+                              value={senderEmail}
+                              onChange={(e) => setSenderEmail(e.target.value)}
+                              className="w-full pl-10 pr-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none placeholder-white/20 transition-all text-white"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Project selector logic from Notion listing */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="block text-xs font-semibold text-white/40 uppercase tracking-wide">
+                            Selecciona Proyecto / Carpeta de Notion
+                          </label>
+                          {config?.isConfigured && (
+                            <button
+                              type="button"
+                              onClick={fetchProjects}
+                              className="p-1 hover:bg-white/5 rounded-md transition-colors text-white/40 hover:text-white"
+                              title="Refrescar lista de Notion"
+                            >
+                              <RefreshCcw className="w-3.5 h-3.5 animate-hover-spin" />
+                            </button>
+                          )}
+                        </div>
+
+                        {loadingProjects ? (
+                          <div className="w-full py-2.5 px-3 border border-white/5 rounded-xl bg-[#0d0d0d] flex items-center gap-2">
+                            <Loader2 className="w-4 h-4 text-white/40 animate-spin" />
+                            <span className="text-xs text-white/30">Sincronizando carpetas de Notion...</span>
+                          </div>
+                        ) : !config?.isConfigured ? (
+                          <div className="p-3 border border-amber-900/50 bg-amber-950/30 rounded-xl text-xs text-amber-300 flex items-start gap-2 leading-relaxed">
+                            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                            <div>
+                              <span>No se han configurado las credenciales de Notion.</span>
+                              <button
+                                type="button"
+                                onClick={() => setActiveTab("admin")}
+                                className="block font-semibold underline text-amber-400 hover:text-amber-300 mt-1"
+                              >
+                                Configurar ahora en Administración
+                              </button>
+                            </div>
+                          </div>
+                        ) : projects.length === 0 ? (
+                          <div className="p-3 border border-white/10 bg-[#0d0d0d] rounded-xl text-xs text-white/50 flex items-start gap-2 leading-relaxed">
+                            <ListFilter className="w-4 h-4 text-white/30 shrink-0 mt-0.5" />
+                            <div>
+                              <span>No existen carpetas o proyectos creados en tu página de Notion.</span>
+                              <button
+                                type="button"
+                                onClick={() => setActiveTab("admin")}
+                                className="block font-semibold underline text-white hover:text-white/80 mt-1"
+                              >
+                                Crear un Proyecto / Carpeta
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <select
+                            id="select-project"
+                            value={selectedProjectId}
+                            onChange={(e) => setSelectedProjectId(e.target.value)}
+                            required
+                            className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none text-white transition-all font-medium cursor-pointer"
+                          >
+                            {projects.map((proj) => (
+                              <option key={proj.id} value={proj.id} className="bg-[#111111] text-white">
+                                {proj.name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+
+                      {/* Dropzone visual module / Expired state alert */}
+                      {isProjectExpired ? (
+                        <div className="p-6 border border-red-900/30 bg-red-950/20 rounded-2xl text-center space-y-4">
+                          <div className="w-12 h-12 bg-red-950/40 text-red-400 rounded-full flex items-center justify-center mx-auto border border-red-900/40 animate-pulse">
+                            <Clock className="w-6 h-6" />
+                          </div>
+                          <div className="space-y-1 bg-[#150a0a]/50 p-4 rounded-xl border border-red-950">
+                            <h3 className="text-sm font-bold text-white tracking-wide uppercase">Plazo de entrega vencido</h3>
+                            <p className="text-xs text-white/55 leading-relaxed max-w-sm mx-auto mt-2">
+                              La fecha límite para cargar archivos en esta carpeta expiró el{" "}
+                              <strong className="text-red-300">
+                                {new Date(activeMeta!.expirationDate!).toLocaleDateString('es-ES', { 
+                                  weekday: 'long', 
+                                  year: 'numeric', 
+                                  month: 'long', 
+                                  day: 'numeric' 
+                                })}
+                              </strong>.
+                            </p>
+                          </div>
+                          <p className="text-[10px] text-white/30">
+                            Por favor ponte en contacto con tu supervisor o administrador de Notion si necesitas prorrogar la entrega.
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-semibold text-white/40 uppercase tracking-wide">
+                              Archivos a adjuntar
+                            </label>
+                            <Dropzone
+                              files={selectedFiles}
+                              onFilesAdded={handleFilesAdded}
+                              onFileRemoved={handleFileRemoved}
+                            />
+                          </div>
+
+                          {submitError && (
+                            <div className="p-3 border border-red-900/50 bg-red-950/30 text-red-300 text-xs rounded-xl flex items-center gap-1.5">
+                              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                              <span>{submitError}</span>
+                            </div>
+                          )}
+
+                          <button
+                            type="submit"
+                            disabled={isSubmitting || selectedFiles.length === 0 || !selectedProjectId}
+                            className="w-full py-3.5 rounded-2xl bg-white hover:bg-white/95 disabled:bg-white/5 disabled:text-white/20 text-black font-extrabold text-xs tracking-wider uppercase transition-all select-none shadow-xs hover:shadow-sm cursor-pointer"
+                          >
+                            {isSubmitting ? (
+                              <div className="flex items-center justify-center gap-2">
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                <span>{submitStep}</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center gap-2">
+                                <Send className="w-4 h-4" />
+                                <span>Transferir Archivos</span>
+                              </div>
+                            )}
+                          </button>
+                        </>
+                      )}
+
+                    </form>
+                  )}
+
+                </div>
+              </div>
+
+            </motion.div>
+          ) : (
+            <motion.div
+              key="admin-view"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.25 }}
+              className="py-4"
+            >
+              {!isAdminAuthenticated ? (
+                <div className="max-w-md mx-auto my-12 bg-[#111111] rounded-3xl p-8 border border-white/10 shadow-lg space-y-6">
+                  <div className="text-center space-y-2">
+                    <div className="w-12 h-12 bg-white/5 text-white rounded-full flex items-center justify-center mx-auto border border-white/10">
+                      <ShieldCheck className="w-6 h-6" />
+                    </div>
+                    <h2 className="text-lg font-bold text-white tracking-tight">Acceso a Administración</h2>
+                    <p className="text-xs text-white/40 leading-relaxed">
+                      Por seguridad, introduce la contraseña configurada en tu Notion (dentro de un bloque de Cita / Quote).
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleAdminLogin} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
+                        Contraseña
+                      </label>
+                      <input
+                        type="password"
+                        required
+                        placeholder="••••••••"
+                        value={adminPasswordInput}
+                        onChange={(e) => setAdminPasswordInput(e.target.value)}
+                        className="w-full px-4 py-3 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none placeholder-white/20 transition-all text-white font-mono text-center"
+                      />
+                    </div>
+
+                    {loginError && (
+                      <div className="p-3 bg-red-950/30 border border-red-900/50 text-red-300 text-xs rounded-xl text-center leading-relaxed">
+                        {loginError}
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={isLoggingIn}
+                      className="w-full py-3 rounded-xl bg-white hover:bg-white/90 disabled:bg-white/10 disabled:text-white/30 text-black font-semibold text-xs tracking-wider uppercase transition-all flex items-center justify-center gap-2 cursor-pointer animate-fade-in"
+                    >
+                      {isLoggingIn ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Validando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Ingresar</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </>
+                      )}
+                    </button>
+                  </form>
+                </div>
+              ) : (
+                <AdminPanel
+                  projects={projects}
+                  refreshProjects={fetchProjects}
+                  config={config}
+                  refreshConfig={fetchConfig}
+                  projectMeta={projectMeta}
+                  refreshProjectMeta={fetchProjectMeta}
+                />
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+      </main>
+
+      {/* Footer information */}
+      <footer className="bg-[#050505] border-t border-white/5 py-6 select-none">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center sm:flex sm:justify-between sm:items-center text-white/30 text-[11px] font-medium tracking-wide">
+          <p>© 2026 Notion Drop. Todos los derechos reservados.</p>
+          <p className="mt-2 sm:mt-0">Sincronización en la nube con API Oficial Notion Workspace</p>
+        </div>
+      </footer>
+
+    </div>
+  );
+}
