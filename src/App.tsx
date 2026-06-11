@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { 
   FolderSync, ShieldCheck, Mail, User, ListFilter, Send, 
-  CheckCircle2, Loader2, ArrowRight, Settings2, RefreshCcw, AlertTriangle, Clock
+  CheckCircle2, Loader2, ArrowRight, Settings2, RefreshCcw, AlertTriangle, Clock, EyeOff, AlertCircle
 } from "lucide-react";
 import { Project, ProjectMeta } from "./types";
 import Dropzone from "./components/Dropzone";
@@ -140,7 +140,12 @@ export default function App() {
         }
 
         if (data.projects.length > 0) {
-          setSelectedProjectId(data.projects[0].id);
+          const activeProjects = data.projects.filter((p: any) => p.isActive !== false);
+          if (activeProjects.length > 0) {
+            setSelectedProjectId(activeProjects[0].id);
+          } else {
+            setSelectedProjectId(data.projects[0].id);
+          }
         }
       } else {
         setProjects([]);
@@ -258,8 +263,10 @@ export default function App() {
   const isProjectExpired = (() => {
     if (!activeMeta?.expirationDate) return false;
     const expDate = new Date(activeMeta.expirationDate);
-    // Include 23:59:59 of the expiration day so it doesn't expire prematurely
-    expDate.setHours(23, 59, 59, 999);
+    // If it is just a date (no T/time structure), include 23:59:59 of that day
+    if (!activeMeta.expirationDate.includes("T")) {
+      expDate.setHours(23, 59, 59, 999);
+    }
     return new Date() > expDate;
   })();
 
@@ -444,6 +451,24 @@ export default function App() {
                       <div className="space-y-4">
                         <h2 className="text-lg font-bold text-white">Haz un Envío</h2>
                         <hr className="border-white/5" />
+                        
+                        {activeMeta?.expirationDate && !isProjectExpired && activeMeta?.isActive !== false && (
+                          <div className="flex items-center gap-1.5 text-[11px] text-[#fbbf24] font-medium bg-[#1c120c]/60 border border-amber-900/30 px-3 py-2 rounded-xl">
+                            <Clock className="w-3.5 h-3.5 shrink-0" />
+                            <span>
+                              Entrega disponible hasta el:{" "}
+                              <span className="font-bold">
+                                {new Date(activeMeta.expirationDate).toLocaleDateString("es-ES", {
+                                  day: "numeric",
+                                  month: "long",
+                                  year: "numeric",
+                                  hour: activeMeta.expirationDate.includes("T") ? "2-digit" : undefined,
+                                  minute: activeMeta.expirationDate.includes("T") ? "2-digit" : undefined,
+                                })}
+                              </span>
+                            </span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Client parameters input fields */}
@@ -483,7 +508,7 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Project selector logic from Notion listing */}
+                               {/* Project selector logic from Notion listing */}
                       <div>
                         <div className="flex items-center justify-between mb-1.5">
                           <label className="block text-xs font-semibold text-white/40 uppercase tracking-wide">
@@ -542,15 +567,23 @@ export default function App() {
                               </button>
                             </div>
                           </div>
+                        ) : projects.filter(p => p.isActive !== false).length === 0 ? (
+                          <div className="p-3 border border-red-900/40 bg-red-950/20 rounded-xl text-xs text-red-300 flex items-start gap-2 leading-relaxed">
+                            <AlertCircle className="w-4.5 h-4.5 text-red-400 shrink-0 mt-0.5 animate-pulse" />
+                            <div>
+                              <span className="font-semibold block mb-0.5 text-white">Entregas no disponibles</span>
+                              <span>Todos los proyectos están temporalmente inactivos o deshabilitados.</span>
+                            </div>
+                          </div>
                         ) : (
                           <select
                             id="select-project"
                             value={selectedProjectId}
                             onChange={(e) => setSelectedProjectId(e.target.value)}
                             required
-                            className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none text-white transition-all font-medium cursor-pointer"
+                            className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none text-white transition-all font-medium cursor-pointer animate-fade-in"
                           >
-                            {projects.map((proj) => (
+                            {projects.filter(p => p.isActive !== false).map((proj) => (
                               <option key={proj.id} value={proj.id} className="bg-[#111111] text-white">
                                 {proj.name}
                               </option>
@@ -559,8 +592,23 @@ export default function App() {
                         )}
                       </div>
 
-                      {/* Dropzone visual module / Expired state alert */}
-                      {isProjectExpired ? (
+                      {/* Dropzone visual module / Active / Inactive check or Expired state alert */}
+                      {activeMeta?.isActive === false ? (
+                        <div className="p-6 border border-amber-900/40 bg-amber-950/20 rounded-2xl text-center space-y-4">
+                          <div className="w-12 h-12 bg-amber-950/40 text-amber-400 rounded-full flex items-center justify-center mx-auto border border-amber-900/40 animate-pulse">
+                            <EyeOff className="w-6 h-6" />
+                          </div>
+                          <div className="space-y-1 bg-[#1c120c]/50 p-4 rounded-xl border border-amber-950">
+                            <h3 className="text-sm font-bold text-white tracking-wide uppercase">Proyecto Inactivo</h3>
+                            <p className="text-xs text-white/60 leading-relaxed max-w-sm mx-auto mt-2">
+                              Este proyecto ha sido <strong className="text-amber-300">desactivado/inhabilitado temporalmente</strong> por el administrador de Notion y no recibe nuevas entregas.
+                            </p>
+                          </div>
+                          <p className="text-[10px] text-white/30">
+                            Por favor ponte en contacto con tu supervisor o administrador de Notion si necesitas prorrogar la entrega.
+                          </p>
+                        </div>
+                      ) : isProjectExpired ? (
                         <div className="p-6 border border-red-900/30 bg-red-950/20 rounded-2xl text-center space-y-4">
                           <div className="w-12 h-12 bg-red-950/40 text-red-400 rounded-full flex items-center justify-center mx-auto border border-red-900/40 animate-pulse">
                             <Clock className="w-6 h-6" />
@@ -574,7 +622,9 @@ export default function App() {
                                   weekday: 'long', 
                                   year: 'numeric', 
                                   month: 'long', 
-                                  day: 'numeric' 
+                                  day: 'numeric',
+                                  hour: activeMeta!.expirationDate!.includes("T") ? "2-digit" : undefined,
+                                  minute: activeMeta!.expirationDate!.includes("T") ? "2-digit" : undefined,
                                 })}
                               </strong>.
                             </p>

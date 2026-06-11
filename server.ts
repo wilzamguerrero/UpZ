@@ -215,6 +215,7 @@ app.get("/api/project-meta", async (req, res) => {
               step3: data.step3 || "",
               expirationDate: data.expirationDate || expirationDate,
               backgroundImage: data.backgroundImage || "",
+              isActive: data.isActive !== undefined ? !!data.isActive : true,
             }
           });
         } catch (e) {
@@ -243,7 +244,7 @@ app.get("/api/project-meta", async (req, res) => {
 
 // 3.3. Set project customized copywriting meta directly to Notion & cached fallback
 app.post("/api/project-meta", async (req, res) => {
-  const { projectId, title, description, step1, step2, step3, expirationDate, backgroundImage } = req.body;
+  const { projectId, title, description, step1, step2, step3, expirationDate, backgroundImage, isActive } = req.body;
   if (!projectId) {
     return res.status(400).json({ error: "El ID del proyecto es obligatorio." });
   }
@@ -265,6 +266,7 @@ app.post("/api/project-meta", async (req, res) => {
         step3: (step3 || "").trim(),
         expirationDate: (expirationDate || "").trim(),
         backgroundImage: (backgroundImage || "").trim(),
+        isActive: isActive !== undefined ? !!isActive : true,
       };
 
       const jsonString = JSON.stringify(metaPayload, null, 2);
@@ -368,6 +370,7 @@ app.post("/api/project-meta", async (req, res) => {
     step3: (step3 || "").trim(),
     expirationDate: (expirationDate || "").trim(),
     backgroundImage: (backgroundImage || "").trim(),
+    isActive: isActive !== undefined ? !!isActive : true,
   };
 
   saveProjectMeta(metaList);
@@ -389,10 +392,15 @@ app.get("/api/projects", async (req, res) => {
       block_id: config.parentPageId,
     });
 
+    const metaList = loadProjectMeta();
+
     // Query projects as either toggle blocks or legacy child_page blocks
     const projects = response.results
       .filter((block: any) => block.type === "toggle" || block.type === "child_page")
       .map((block: any) => {
+        const meta = metaList[block.id] || {};
+        const isActive = meta.isActive !== undefined ? meta.isActive : true;
+        
         if (block.type === "toggle") {
           const name = block.toggle.rich_text.map((rt: any) => rt.plain_text).join("").trim();
           return {
@@ -400,6 +408,7 @@ app.get("/api/projects", async (req, res) => {
             name: name || "Proyecto sin título",
             type: "toggle",
             url: `https://notion.so/${config.parentPageId.replace(/-/g, "")}#${block.id.replace(/-/g, "")}`,
+            isActive,
           };
         } else {
           return {
@@ -407,6 +416,7 @@ app.get("/api/projects", async (req, res) => {
             name: block.child_page.title || "Proyecto sin título",
             type: "page",
             url: `https://notion.so/${block.id.replace(/-/g, "")}`,
+            isActive,
           };
         }
       });
@@ -505,6 +515,18 @@ app.delete("/api/projects/:projectId", async (req, res) => {
       error: `Error al eliminar proyecto en Notion: ${err.message || "Error desconocido"}.`,
     });
   }
+});
+
+// 5.2. Upload background image that gets saved inside local /uploads directory
+app.post("/api/projects/upload-bg", upload.single("bgImage"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "No se seleccionó o cargó ninguna imagen." });
+  }
+  const protocol = req.headers["x-forwarded-proto"] || req.protocol;
+  const host = req.get("host");
+  const appUrl = process.env.APP_URL || `${protocol}://${host}`;
+  const fileUrl = `${appUrl.replace(/\/$/, "")}/uploads/${req.file.filename}`;
+  res.json({ success: true, url: fileUrl });
 });
 
 // 6. Get Submissions Logs

@@ -44,6 +44,8 @@ export default function AdminPanel({
   const [copyStep3, setCopyStep3] = useState("");
   const [copyExpiration, setCopyExpiration] = useState("");
   const [copyBackground, setCopyBackground] = useState("");
+  const [copyIsActive, setCopyIsActive] = useState(true);
+  const [isUploadingBg, setIsUploadingBg] = useState(false);
   const [isSavingMeta, setIsSavingMeta] = useState(false);
   const [metaMessage, setMetaMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
@@ -84,7 +86,8 @@ export default function AdminPanel({
         step2: "Sube Archivos: Arrastra y suelta tus fotos, PDFs o renders en el dropzone.",
         step3: "Organización Instantánea: Todo se agrupa automáticamente en Notion listo para tu supervisor.",
         expirationDate: "",
-        backgroundImage: ""
+        backgroundImage: "",
+        isActive: true
       };
       setCopyTitle(active.title);
       setCopyDesc(active.description);
@@ -93,7 +96,7 @@ export default function AdminPanel({
       setCopyStep3(active.step3);
       setCopyExpiration(active.expirationDate || "");
       setCopyBackground(active.backgroundImage || "");
-      setCopyExpiration(active.expirationDate || "");
+      setCopyIsActive(active.isActive !== false);
       setMetaMessage(null);
     }
   }, [selectedMetaProjectId, projectMeta]);
@@ -116,12 +119,14 @@ export default function AdminPanel({
           step3: copyStep3,
           expirationDate: copyExpiration,
           backgroundImage: copyBackground,
+          isActive: copyIsActive,
         }),
       });
       const data = await res.json();
       if (data.success) {
         setMetaMessage({ type: "success", text: "¡Textos guardados correctamente!" });
         await refreshProjectMeta();
+        await refreshProjects();
       } else {
         setMetaMessage({ type: "error", text: data.error || "No se pudieron guardar los textos." });
       }
@@ -129,6 +134,65 @@ export default function AdminPanel({
       setMetaMessage({ type: "error", text: "Error de red al intentar guardar los textos." });
     } finally {
       setIsSavingMeta(false);
+    }
+  };
+
+  const handleUploadBgImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingBg(true);
+    const formData = new FormData();
+    formData.append("bgImage", file);
+
+    try {
+      const res = await fetch("/api/projects/upload-bg", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.success && data.url) {
+        setCopyBackground(data.url);
+      } else {
+        alert(data.error || "No se pudo subir la imagen.");
+      }
+    } catch (err) {
+      alert("Error de red al intentar subir la imagen de fondo.");
+    } finally {
+      setIsUploadingBg(false);
+    }
+  };
+
+  const handleToggleProjectActive = async (projId: string, currentActiveStatus: boolean) => {
+    const existingMeta = projectMeta[projId] || {
+      title: "Comparte tus archivos directo a Notion.",
+      description: "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instantánea. Tus archivos se organizan de forma automática bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la página del proyecto que elijas.",
+      step1: "Identifícate: Escribe tu nombre, correo y selecciona la carpeta de destino.",
+      step2: "Sube Archivos: Arrastra y suelta tus fotos, PDFs o renders en el dropzone.",
+      step3: "Organización Instantánea: Todo se agrupa automáticamente en Notion listo para tu supervisor.",
+      expirationDate: "",
+      backgroundImage: ""
+    };
+
+    try {
+      const res = await fetch("/api/project-meta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: projId,
+          ...existingMeta,
+          isActive: !currentActiveStatus,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        await refreshProjectMeta();
+        await refreshProjects();
+      } else {
+        alert(data.error || "No se pudo cambiar el estado de activación.");
+      }
+    } catch (err) {
+      alert("Error al conectar con el servidor.");
     }
   };
 
@@ -324,21 +388,24 @@ export default function AdminPanel({
             </div>
           ) : (
             <form onSubmit={handleSaveMeta} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
-                  Seleccionar Proyecto
+              <div className="mb-2 p-2.5 bg-white/5 text-[11px] font-semibold text-white bg-[#0d0d0d] rounded-xl border border-white/5 flex items-center justify-between select-none">
+                <span className="text-white/40 uppercase tracking-widest text-[9px]">Editando textos de:</span>
+                <span className="text-white font-bold truncate max-w-[180px]" title={projects.find(p => p.id === selectedMetaProjectId)?.name || ""}>
+                  {projects.find(p => p.id === selectedMetaProjectId)?.name || "Ninguno"}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2 p-1.5 bg-[#0d0d0d] border border-white/5 rounded-xl">
+                <input
+                  type="checkbox"
+                  id="project-active-checkbox"
+                  checked={copyIsActive}
+                  onChange={(e) => setCopyIsActive(e.target.checked)}
+                  className="w-4 h-4 rounded text-black border-white/10 bg-[#0d0d0d] focus:ring-0 cursor-pointer"
+                />
+                <label htmlFor="project-active-checkbox" className="text-[11px] font-bold text-white/80 cursor-pointer select-none">
+                  Proyecto Activo (Permitir entregas)
                 </label>
-                <select
-                  value={selectedMetaProjectId}
-                  onChange={(e) => setSelectedMetaProjectId(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white pointer-events-auto cursor-pointer"
-                >
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
               </div>
 
               <div>
@@ -413,34 +480,64 @@ export default function AdminPanel({
 
               <div>
                 <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
-                  Fecha de Vencimiento (Límite de entrega)
+                  Fecha y Hora de Vencimiento (Límite)
                 </label>
                 <input
-                  type="date"
+                  type="datetime-local"
                   placeholder="Sin fecha límite"
                   value={copyExpiration}
                   onChange={(e) => setCopyExpiration(e.target.value)}
                   className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all cursor-pointer pointer-events-auto"
                 />
                 <p className="text-[10px] text-white/30 mt-1">
-                  Establece un día límite. Pasada esta fecha, se inhabilitará la entrega para este proyecto.
+                  Establece el día y la hora límite. Pasado este momento, se inhabilitará la zona de carga para este proyecto.
                 </p>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
-                  Imagen de Fondo (URL para mosaico)
+                  Imagen de Fondo (Diseño Mosaico/Tile)
                 </label>
-                <input
-                  type="text"
-                  placeholder="https://ejemplo.com/mosaico-fondo.png"
-                  value={copyBackground}
-                  onChange={(e) => setCopyBackground(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all pointer-events-auto"
-                />
-                <p className="text-[10px] text-white/30 mt-1">
-                  Pega la URL de una imagen para que se repita como mosaico de fondo en la vista de carga de archivos de este proyecto.
-                </p>
+                
+                <div className="grid grid-cols-1 gap-2 mb-2">
+                  <label className="flex flex-col items-center justify-center border border-dashed border-white/10 hover:border-white/20 bg-[#0d0d0d] rounded-xl py-3 px-4 cursor-pointer text-center group transition-all">
+                    <span className="text-xs font-semibold text-white/70 group-hover:text-white">
+                      {isUploadingBg ? "Subiendo archivo..." : "📁 Seleccionar o Arrastrar Imagen"}
+                    </span>
+                    <span className="text-[9px] text-white/30 mt-0.5">JPG, PNG o GIF (guardada en /uploads)</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleUploadBgImage}
+                      disabled={isUploadingBg}
+                      className="hidden"
+                    />
+                  </label>
+
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="O pega una URL externa de imagen..."
+                      value={copyBackground}
+                      onChange={(e) => setCopyBackground(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all pointer-events-auto"
+                    />
+                  </div>
+                </div>
+
+                {copyBackground && (
+                  <div className="flex items-center gap-2 bg-white/5 p-2 rounded-xl border border-white/5 min-w-0">
+                    <div className="w-8 h-8 rounded-md bg-cover bg-center shrink-0 border border-white/10" style={{ backgroundImage: `url(${copyBackground})` }} referrerPolicy="no-referrer" />
+                    <span className="text-[10px] text-white/50 truncate flex-1 font-mono">{copyBackground}</span>
+                    <button
+                      type="button"
+                      onClick={() => setCopyBackground("")}
+                      className="text-[10px] text-red-400 hover:underline px-1.5 py-0.5 whitespace-nowrap cursor-pointer"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                )}
               </div>
 
               {metaMessage && (
@@ -538,18 +635,31 @@ export default function AdminPanel({
                   className={`p-3 border rounded-xl flex items-center justify-between transition-all cursor-pointer group animate-fade-in ${
                     proj.id === selectedMetaProjectId 
                       ? "border-white/30 bg-white/5" 
-                      : "border-white/5 bg-[#0d0d0d] hover:border-white/12"
+                      : proj.isActive !== false
+                        ? "border-white/5 bg-[#0d0d0d] hover:border-white/12"
+                        : "border-dashed border-red-900/40 bg-red-950/5 hover:border-red-900/60"
                   }`}
                   title="Haz clic para personalizar los textos de este proyecto"
                 >
                   <div className="min-w-0 flex-1 pr-2">
                     <p className="text-sm font-semibold text-white/95 truncate">{proj.name}</p>
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="flex flex-wrap items-center gap-2 mt-1">
                       <span className="text-[10px] text-white/40 font-mono">
                         {getSubmissionsCountForProject(proj.id)} entregas
                       </span>
+                      
+                      {proj.isActive === false ? (
+                        <span className="text-[9px] text-red-400 font-sans font-medium px-1.5 py-[1px] bg-red-950/40 border border-red-900/40 rounded-sm">
+                          Inactivo
+                        </span>
+                      ) : (
+                        <span className="text-[9px] text-emerald-400 font-sans font-medium px-1.5 py-[1px] bg-emerald-950/40 border border-emerald-950/40 rounded-sm">
+                          Activo
+                        </span>
+                      )}
+
                       {proj.id === selectedMetaProjectId && (
-                        <span className="text-[9px] text-[#22c55e] font-sans font-medium px-1.5 py-0.2 bg-emerald-950/30 border border-emerald-900/40 rounded-sm">
+                        <span className="text-[9px] text-[#22c55e] font-sans font-medium px-1.5 py-[1px] bg-emerald-950/30 border border-emerald-900/40 rounded-sm">
                           Editando
                         </span>
                       )}
@@ -558,6 +668,20 @@ export default function AdminPanel({
                   
                   {/* Action buttons */}
                   <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    {/* Direct activation toggle switch */}
+                    <button
+                      type="button"
+                      onClick={() => handleToggleProjectActive(proj.id, proj.isActive !== false)}
+                      className={`p-1.5 border rounded-lg transition-all cursor-pointer flex items-center justify-center ${
+                        proj.isActive !== false 
+                          ? "text-emerald-400 hover:text-emerald-350 bg-emerald-950/20 border-emerald-900/20 hover:border-emerald-700/40" 
+                          : "text-white/20 hover:text-white bg-white/5 border-white/5 hover:bg-white/10"
+                      }`}
+                      title={proj.isActive !== false ? "Proyecto Activo (Pulsa para desactivar)" : "Proyecto Desactivado (Pulsa para activar)"}
+                    >
+                      {proj.isActive !== false ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                    </button>
+
                     {proj.url && (
                       <a
                         href={proj.url}

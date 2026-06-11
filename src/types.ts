@@ -7,6 +7,7 @@ export interface Project {
   id: string;
   name: string;
   url?: string;
+  isActive?: boolean;
 }
 
 export interface ProjectMeta {
@@ -17,6 +18,7 @@ export interface ProjectMeta {
   step3: string;
   expirationDate?: string;
   backgroundImage?: string;
+  isActive?: boolean;
 }
 
 export interface FileAttachment {
