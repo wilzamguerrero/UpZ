@@ -47,7 +47,7 @@ export async function listChildren(blockId: string, token: string): Promise<any>
 
 /** Append children blocks to a Notion block/page */
 export async function appendChildren(blockId: string, children: unknown[], token: string): Promise<any> {
-  return notionFetch("POST", `/blocks/${blockId}/children`, token, { children });
+  return notionFetch("PATCH", `/blocks/${blockId}/children`, token, { children });
 }
 
 /** Update a Notion block */
