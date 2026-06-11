@@ -33,9 +33,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   try {
-    const uploadId = await uploadFileToNotion(file, notionSecret);
+    const { id: uploadId, finalName } = await uploadFileToNotion(file, notionSecret);
     // Notion's hosted file URL pattern for file_upload objects
-    const fileUrl = `https://file.notion.so/f/f/${uploadId}/${encodeURIComponent(file.name)}`;
+    const fileUrl = `https://file.notion.so/f/f/${uploadId}/${encodeURIComponent(finalName)}`;
     return json({ success: true, url: fileUrl, uploadId });
   } catch (err: any) {
     return json({ error: `Error al subir imagen a Notion: ${err.message || "Error desconocido"}` }, 500);

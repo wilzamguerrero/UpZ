@@ -52,11 +52,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   // Upload each file directly to Notion and collect their upload IDs
-  const fileRecords: { name: string; size: number; uploadId: string }[] = [];
+  const fileRecords: { name: string; finalName: string; size: number; uploadId: string; extModified: boolean }[] = [];
   for (const file of files) {
     try {
-      const uploadId = await uploadFileToNotion(file, notionSecret);
-      fileRecords.push({ name: file.name, size: file.size, uploadId });
+      const res = await uploadFileToNotion(file, notionSecret);
+      fileRecords.push({
+        name: file.name,
+        finalName: res.finalName,
+        size: file.size,
+        uploadId: res.id,
+        extModified: res.extModified
+      });
     } catch (err: any) {
       return json(
         { error: `Error al subir "${file.name}" a Notion: ${err.message || "Error desconocido"}` },
@@ -103,14 +109,27 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         rich_text: [{ type: "text", text: { content: "Archivos adjuntos" } }],
       },
     },
-    ...fileRecords.map((f) => ({
-      object: "block",
-      type: "file",
-      file: {
+    ...fileRecords.map((f) => {
+      const fileObj: any = {
         type: "file_upload",
         file_upload: { id: f.uploadId },
-      },
-    })),
+      };
+      if (f.extModified) {
+        fileObj.caption = [
+          {
+            type: "text",
+            text: {
+              content: `⚠️ .zip agregado por compatibilidad. Nombre original: ${f.name} (renombrar o quitar .zip al descargar)`
+            }
+          }
+        ];
+      }
+      return {
+        object: "block",
+        type: "file",
+        file: fileObj,
+      };
+    }),
   ];
 
   try {

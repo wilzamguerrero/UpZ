@@ -60,15 +60,36 @@ export async function deleteBlock(blockId: string, token: string): Promise<any> 
   return notionFetch("DELETE", `/blocks/${blockId}`, token);
 }
 
+const ALLOWED_EXTENSIONS = new Set([
+  "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff",
+  "mp4", "m4v", "ogv", "webm", "mov",
+  "mp3", "wav", "m4a", "ogg",
+  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "html", "css", "js", "ts", "json", "xml", "md",
+  "zip", "rar", "tar", "gz"
+]);
+
 /**
  * Upload a file directly to Notion using the file upload API.
  * Step 1: create the upload object → Step 2: send the file content.
- * Returns the file_upload id to reference in blocks.
+ * Returns the file_upload id and info.
  */
 export async function uploadFileToNotion(
   file: File,
   token: string
-): Promise<string> {
+): Promise<{ id: string; finalName: string; originalName: string; extModified: boolean }> {
+  const dotIndex = file.name.lastIndexOf(".");
+  const ext = dotIndex !== -1 ? file.name.slice(dotIndex + 1).toLowerCase() : "";
+  let uploadName = file.name;
+  let contentType = file.type || "application/octet-stream";
+  let extModified = false;
+
+  // If file doesn't have a supported extension, change it so Notion won't reject it
+  if (!ALLOWED_EXTENSIONS.has(ext)) {
+    uploadName = file.name + ".zip";
+    contentType = "application/zip";
+    extModified = true;
+  }
+
   // Step 1: create the file upload
   const createRes = await fetch(`${NOTION_BASE}/file_uploads`, {
     method: "POST",
@@ -78,8 +99,8 @@ export async function uploadFileToNotion(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      filename: file.name,
-      content_type: file.type || "application/octet-stream",
+      filename: uploadName,
+      content_type: contentType,
     }),
   });
 
@@ -90,7 +111,7 @@ export async function uploadFileToNotion(
 
   // Step 2: send the file content
   const sendForm = new FormData();
-  sendForm.append("file", file, file.name);
+  sendForm.append("file", file, uploadName);
 
   const sendRes = await fetch(`${NOTION_BASE}/file_uploads/${upload.id}/send`, {
     method: "POST",
@@ -107,7 +128,12 @@ export async function uploadFileToNotion(
     throw new Error(`Error al enviar archivo a Notion: ${JSON.stringify(sent)}`);
   }
 
-  return upload.id as string;
+  return {
+    id: upload.id as string,
+    finalName: uploadName,
+    originalName: file.name,
+    extModified
+  };
 }
 
 /** Clean a Notion ID from any dirty pasted text or URL */

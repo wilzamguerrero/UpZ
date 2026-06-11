@@ -49,6 +49,14 @@ const BG_IMG_BLOCK_CAPTION = "__CERT_BG_IMG__";
 const NOTION_API_BASE_URL = "https://api.notion.com/v1";
 const NOTION_API_VER = "2022-06-28";
 
+const ALLOWED_EXTENSIONS = new Set([
+  "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff",
+  "mp4", "m4v", "ogv", "webm", "mov",
+  "mp3", "wav", "m4a", "ogg",
+  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv", "html", "css", "js", "ts", "json", "xml", "md",
+  "zip", "rar", "tar", "gz"
+]);
+
 // Helper: upload background image to Notion as a native Notion image block
 async function uploadBgImageToNotion(
   notionSecret: string,
@@ -60,6 +68,16 @@ async function uploadBgImageToNotion(
   try {
     const notion = new Client({ auth: notionSecret });
 
+    const dotIndex = filename.lastIndexOf(".");
+    const ext = dotIndex !== -1 ? filename.slice(dotIndex + 1).toLowerCase() : "";
+    let uploadName = filename;
+    let contentType = mimeType;
+
+    if (!ALLOWED_EXTENSIONS.has(ext)) {
+      uploadName = filename + ".zip";
+      contentType = "application/zip";
+    }
+
     // Step 1: Init single-part file upload
     const initResp = await fetch(`${NOTION_API_BASE_URL}/file_uploads`, {
       method: "POST",
@@ -68,7 +86,7 @@ async function uploadBgImageToNotion(
         "Notion-Version": NOTION_API_VER,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ mode: "single_part", filename, content_type: mimeType }),
+      body: JSON.stringify({ mode: "single_part", filename: uploadName, content_type: contentType }),
     });
     if (!initResp.ok) {
       console.error("Notion file upload init failed:", await initResp.text());
@@ -79,7 +97,7 @@ async function uploadBgImageToNotion(
 
     // Step 2: Upload binary content via multipart form
     const formData = new FormData();
-    formData.append("file", new Blob([new Uint8Array(imageBuffer)], { type: mimeType }), filename);
+    formData.append("file", new Blob([new Uint8Array(imageBuffer)], { type: contentType }), uploadName);
     const uploadResp = await fetch(upload_url, {
       method: "POST",
       headers: {
