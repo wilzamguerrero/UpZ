@@ -4,6 +4,7 @@ import {
   AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, Download, ArrowRight, Trash2 
 } from "lucide-react";
 import { Project, Submission, NotionConfig, ProjectMeta } from "../types";
+import DateTimePicker from "./DateTimePicker";
 
 interface AdminPanelProps {
   projects: Project[];
@@ -482,12 +483,9 @@ export default function AdminPanel({
                 <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
                   Fecha y Hora de Vencimiento (Límite)
                 </label>
-                <input
-                  type="datetime-local"
-                  placeholder="Sin fecha límite"
+                <DateTimePicker
                   value={copyExpiration}
-                  onChange={(e) => setCopyExpiration(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all cursor-pointer pointer-events-auto"
+                  onChange={setCopyExpiration}
                 />
                 <p className="text-[10px] text-white/30 mt-1">
                   Establece el día y la hora límite. Pasado este momento, se inhabilitará la zona de carga para este proyecto.
