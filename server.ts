@@ -914,17 +914,70 @@ app.post("/api/fallback-upload", upload.single("file"), (req, res) => {
   });
 });
 
-// 7. Submit files (creates Toggle block inside specific project child page)
-app.post("/api/submit", upload.array("files"), async (req, res) => {
-  const { senderName, senderEmail, projectId, projectName } = req.body;
-  const files = req.files as Express.Multer.File[];
-
-  if (!senderName || !senderEmail || !projectId) {
-    return res.status(400).json({ error: "Faltan campos obligatorios (nombre, correo o proyecto)" });
+// 7. Upload individual files directly to Notion (supports both single-part and multi-part)
+app.post("/api/upload-file", upload.single("file"), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "No se proporcionó ningún archivo." });
   }
 
-  if (!files || files.length === 0) {
-    return res.status(400).json({ error: "No se han subido archivos" });
+  const config = loadConfig();
+  if (!config.notionSecret) {
+    return res.status(400).json({ error: "Notion no está configurado." });
+  }
+
+  const MULTI_PART_THRESHOLD = 20 * 1024 * 1024;
+
+  try {
+    let result: { id: string; finalName: string; extModified: boolean };
+
+    if (req.file.size > MULTI_PART_THRESHOLD) {
+      result = await uploadLargeFileObjectToNotion(
+        config.notionSecret,
+        req.file.path,
+        req.file.originalname,
+        req.file.mimetype
+      );
+    } else {
+      result = await uploadFileObjectToNotion(
+        config.notionSecret,
+        req.file.path,
+        req.file.originalname,
+        req.file.mimetype
+      );
+    }
+
+    // Delete local temp file after upload to Notion
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch (e) {
+      console.warn("Could not delete uploaded temp file", e);
+    }
+
+    res.json({
+      success: true,
+      id: result.id,
+      finalName: result.finalName,
+      extModified: result.extModified,
+      mimeType: req.file.mimetype,
+      size: req.file.size,
+    });
+  } catch (err: any) {
+    console.error(`Local upload to Notion failed for "${req.file.originalname}":`, err);
+    res.status(500).json({
+      error: `Error al subir "${req.file.originalname}" a Notion: ${err.message || "Error desconocido"}.`,
+    });
+  }
+});
+
+// 8. Submit files (creates Toggle block inside specific project child page using pre-uploaded fileIDs)
+app.post("/api/submit", async (req, res) => {
+  const { senderName, senderEmail, projectId, projectName, fileRecords = [] } = req.body;
+
+  if (!senderName || !senderEmail || !projectId) {
+    return res.status(400).json({ error: "Faltan campos obligatorios (nombre, correo o proyecto)." });
+  }
+  if (fileRecords.length === 0) {
+    return res.status(400).json({ error: "No se han subido archivos." });
   }
 
   const config = loadConfig();
@@ -934,68 +987,6 @@ app.post("/api/submit", upload.array("files"), async (req, res) => {
 
   try {
     const notion = new Client({ auth: config.notionSecret });
-
-    // Determine host URL for files
-    const protocol = req.headers["x-forwarded-proto"] || req.protocol;
-    const host = req.get("host");
-    const appUrl = process.env.APP_URL || `${protocol}://${host}`;
-    // 20 MiB threshold for multi-part uploads
-    const MULTI_PART_THRESHOLD = 20 * 1024 * 1024;
-
-    // Process each file — all uploads go directly to Notion
-    const fileRecords: {
-      name: string;
-      finalName: string;
-      size: number;
-      uploadId: string;
-      extModified: boolean;
-      isMultiPart: boolean;
-    }[] = [];
-
-    for (const file of files) {
-      try {
-        let result: { id: string; finalName: string; extModified: boolean };
-
-        if (file.size > MULTI_PART_THRESHOLD) {
-          // Large file: use multi-part chunked upload
-          result = await uploadLargeFileObjectToNotion(
-            config.notionSecret,
-            file.path,
-            file.originalname,
-            file.mimetype
-          );
-        } else {
-          // Small file: use single-part upload
-          result = await uploadFileObjectToNotion(
-            config.notionSecret,
-            file.path,
-            file.originalname,
-            file.mimetype
-          );
-        }
-
-        // Delete local temp file after successful upload to Notion
-        try {
-          fs.unlinkSync(file.path);
-        } catch (e) {
-          console.warn("Could not delete uploaded temp file", e);
-        }
-
-        fileRecords.push({
-          name: file.originalname,
-          finalName: result.finalName,
-          size: file.size,
-          uploadId: result.id,
-          extModified: result.extModified,
-          isMultiPart: file.size > MULTI_PART_THRESHOLD,
-        });
-      } catch (err: any) {
-        console.error(`Upload to Notion failed for "${file.originalname}":`, err);
-        return res.status(500).json({
-          error: `Error al subir "${file.originalname}" a Notion: ${err.message || "Error desconocido"}.`,
-        });
-      }
-    }
 
     // Format current date in human-friendly way
     const dateStr = new Date().toLocaleString("es-ES", {
@@ -1022,7 +1013,7 @@ app.post("/api/submit", upload.array("files"), async (req, res) => {
           {
             type: "text",
             text: {
-              content: `Información de la entrega:\n• Remitente: ${senderName.trim()}\n• Correo: ${senderEmail.trim()}\n• Fecha de envío: ${dateStr}\n• Archivos totales: ${files.length}`,
+              content: `Información de la entrega:\n• Remitente: ${senderName.trim()}\n• Correo: ${senderEmail.trim()}\n• Fecha de envío: ${dateStr}\n• Archivos totales: ${fileRecords.length}`,
             },
           },
         ],
@@ -1050,38 +1041,40 @@ app.post("/api/submit", upload.array("files"), async (req, res) => {
       },
     });
 
-    // 3. Native File Blocks (all uploaded natively to Notion)
-    fileRecords.forEach((f) => {
-      const fileObj: any = {
-        type: "file_upload",
-        file_upload: { id: f.uploadId },
-      };
-      if (f.extModified) {
-        fileObj.caption = [
-          {
-            type: "text",
-            text: {
-              content: `⚠️ .zip agregado por compatibilidad. Nombre original: ${f.name} (renombrar o quitar .zip al descargar)`
-            }
-          }
-        ];
+    const IMAGE_TYPES = new Set([
+      "image/png", "image/jpeg", "image/jpg", "image/gif",
+      "image/webp", "image/svg+xml", "image/bmp", "image/tiff",
+    ]);
+
+    // 3. Native File/Image Blocks (all uploaded natively to Notion)
+    fileRecords.forEach((f: any) => {
+      const isImage = IMAGE_TYPES.has(f.mimeType);
+      const sizeLabel = (f.size / (1024 * 1024)).toFixed(2) + " MB";
+      const caption = f.extModified
+        ? [{ type: "text", text: { content: `⚠️ .zip agregado. Nombre original: ${f.name} (${sizeLabel})` } }]
+        : [{ type: "text", text: { content: `${isImage ? "🖼️" : "📄"} ${f.name} (${sizeLabel})` } }];
+
+      if (isImage) {
+        blocks.push({
+          object: "block",
+          type: "image",
+          image: {
+            type: "file_upload",
+            file_upload: { id: f.uploadId },
+            caption,
+          },
+        });
       } else {
-        const sizeLabel = (f.size / (1024 * 1024)).toFixed(2);
-        const uploadType = f.isMultiPart ? "multi-part" : "directo";
-        fileObj.caption = [
-          {
-            type: "text",
-            text: {
-              content: `✅ Subido de forma nativa a Notion (${uploadType}). ${f.name} — ${sizeLabel} MB`
-            }
-          }
-        ];
+        blocks.push({
+          object: "block",
+          type: "file",
+          file: {
+            type: "file_upload",
+            file_upload: { id: f.uploadId },
+            caption,
+          },
+        });
       }
-      blocks.push({
-        object: "block",
-        type: "file",
-        file: fileObj,
-      });
     });
 
     // Append standard toggle block with the children blocks inside
@@ -1115,10 +1108,9 @@ app.post("/api/submit", upload.array("files"), async (req, res) => {
       senderName: senderName.trim(),
       senderEmail: senderEmail.trim(),
       timestamp: new Date().toISOString(),
-      files: fileRecords.map((f) => ({
+      files: fileRecords.map((f: any) => ({
         name: f.name,
         size: f.size,
-        isMultiPart: f.isMultiPart,
         url: `(Subido a Notion: ${f.finalName})`
       })),
     };
@@ -1126,7 +1118,7 @@ app.post("/api/submit", upload.array("files"), async (req, res) => {
 
     res.json({
       success: true,
-      message: "¡Archivos subidos y registrados en Notion con éxito!",
+      message: "Archivos subidos y registrados en Notion con éxito!",
       submission: submissionRecord,
     });
   } catch (err: any) {

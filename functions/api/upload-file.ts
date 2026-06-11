@@ -1,4 +1,4 @@
-import { json, uploadFileToNotion, type Env } from "../_shared/notion";
+import { json, uploadFileToNotion, uploadLargeFileToNotion, type Env } from "../_shared/notion";
 
 async function getCredentials(env: Env): Promise<{ notionSecret: string }> {
   let notionSecret = env.NOTION_SECRET || "";
@@ -53,8 +53,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     );
   }
 
+  // 20 MiB threshold for multi-part uploads
+  const MULTI_PART_THRESHOLD = 20 * 1024 * 1024;
+
   try {
-    const result = await uploadFileToNotion(file, notionSecret);
+    let result: { id: string; finalName: string; originalName: string; extModified: boolean };
+
+    if (file.size > MULTI_PART_THRESHOLD) {
+      // Large file: use multi-part chunked upload
+      result = await uploadLargeFileToNotion(file, notionSecret);
+    } else {
+      // Small file: use single-part upload
+      result = await uploadFileToNotion(file, notionSecret);
+    }
+
     return json({
       success: true,
       id: result.id,
