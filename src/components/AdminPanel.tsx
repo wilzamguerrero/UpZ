@@ -2,10 +2,14 @@ import React, { useState, useEffect } from "react";
 import { 
   Settings, Key, FolderPlus, FileSpreadsheet, Eye, EyeOff, Check, 
   AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, Download, ArrowRight, Trash2,
-  Link, QrCode, Copy
+  Link, QrCode, Copy, GripVertical, Database, Table
 } from "lucide-react";
-import { Project, Submission, NotionConfig, ProjectMeta } from "../types";
+import { Project, Submission, NotionConfig, ProjectMeta, CustomField, DbColumn } from "../types";
 import DateTimePicker from "./DateTimePicker";
+import GradingTable from "./GradingTable";
+
+const genId = () => `cf_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+const genColId = () => `col_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
 const normalizeString = (s: string) => {
   return s
@@ -51,12 +55,18 @@ export default function AdminPanel({
   const [selectedMetaProjectId, setSelectedMetaProjectId] = useState("");
   const [copyTitle, setCopyTitle] = useState("");
   const [copyDesc, setCopyDesc] = useState("");
-  const [copyStep1, setCopyStep1] = useState("");
-  const [copyStep2, setCopyStep2] = useState("");
-  const [copyStep3, setCopyStep3] = useState("");
+  const [copyCustomFields, setCopyCustomFields] = useState<CustomField[]>([]);
   const [copyExpiration, setCopyExpiration] = useState("");
   const [copyBackground, setCopyBackground] = useState("");
   const [copyIsActive, setCopyIsActive] = useState(true);
+  const [copyUseDatabase, setCopyUseDatabase] = useState(false);
+  const [copyDatabaseId, setCopyDatabaseId] = useState("");
+  const [copyDbColumns, setCopyDbColumns] = useState<DbColumn[]>([]);
+  const [isCreatingDb, setIsCreatingDb] = useState(false);
+  const [copyGroupId, setCopyGroupId] = useState("");
+
+  // Drag & drop ordering state
+  const [dragId, setDragId] = useState<string | null>(null);
   const [isUploadingBg, setIsUploadingBg] = useState(false);
   const [isSavingMeta, setIsSavingMeta] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -95,21 +105,32 @@ export default function AdminPanel({
       const active = projectMeta[selectedMetaProjectId] || {
         title: "Comparte tus archivos directo a Notion.",
         description: "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instantánea. Tus archivos se organizan de forma automática bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la página del proyecto que elijas.",
-        step1: "Identifícate: Escribe tu nombre, correo y selecciona la carpeta de destino.",
-        step2: "Sube Archivos: Arrastra y suelta tus fotos, PDFs o renders en el dropzone.",
-        step3: "Organización Instantánea: Todo se agrupa automáticamente en Notion listo para tu supervisor.",
         expirationDate: "",
         backgroundImage: "",
         isActive: true
       };
-      setCopyTitle(active.title);
-      setCopyDesc(active.description);
-      setCopyStep1(active.step1);
-      setCopyStep2(active.step2);
-      setCopyStep3(active.step3);
+      setCopyTitle(active.title || "");
+      setCopyDesc(active.description || "");
+
+      // Load custom fields; migrate legacy step1/2/3 if present and no customFields yet.
+      let fields: CustomField[] = Array.isArray(active.customFields) ? [...active.customFields] : [];
+      if (fields.length === 0) {
+        const legacy = [active.step1, active.step2, active.step3].filter(Boolean) as string[];
+        fields = legacy.map((txt) => {
+          const idx = txt.indexOf(":");
+          const label = idx > -1 ? txt.slice(0, idx).trim() : "Paso";
+          const value = idx > -1 ? txt.slice(idx + 1).trim() : txt.trim();
+          return { id: genId(), label, value };
+        });
+      }
+      setCopyCustomFields(fields);
       setCopyExpiration(active.expirationDate || "");
       setCopyBackground(active.backgroundImage || "");
       setCopyIsActive(active.isActive !== false);
+      setCopyUseDatabase(!!active.useDatabase);
+      setCopyDatabaseId(active.databaseId || "");
+      setCopyDbColumns(Array.isArray(active.dbColumns) ? active.dbColumns : []);
+      setCopyGroupId(active.groupId || "");
       setMetaMessage(null);
     }
   }, [selectedMetaProjectId, projectMeta]);
@@ -127,12 +148,15 @@ export default function AdminPanel({
           projectId: selectedMetaProjectId,
           title: copyTitle,
           description: copyDesc,
-          step1: copyStep1,
-          step2: copyStep2,
-          step3: copyStep3,
+          customFields: copyCustomFields,
           expirationDate: copyExpiration,
           backgroundImage: copyBackground,
           isActive: copyIsActive,
+          useDatabase: copyUseDatabase,
+          databaseId: copyDatabaseId,
+          dbColumns: copyDbColumns,
+          groupId: copyGroupId,
+          order: projectMeta[selectedMetaProjectId]?.order ?? 0,
         }),
       });
       const data = await res.json();
@@ -147,6 +171,39 @@ export default function AdminPanel({
       setMetaMessage({ type: "error", text: "Error de red al intentar guardar los textos." });
     } finally {
       setIsSavingMeta(false);
+    }
+  };
+
+  /** Create (or recreate) the Notion database for the selected project. */
+  const handleCreateDatabase = async () => {
+    if (!selectedMetaProjectId) return;
+    setIsCreatingDb(true);
+    setMetaMessage(null);
+    try {
+      const projName = projects.find((p) => p.id === selectedMetaProjectId)?.name || "Entregas";
+      const res = await fetch("/api/projects/create-db", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: selectedMetaProjectId,
+          title: projName,
+          dbColumns: copyDbColumns,
+          submitterFields: copyCustomFields
+            .filter((f) => f.askSubmitter && f.label)
+            .map((f) => f.label),
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.databaseId) {
+        setCopyDatabaseId(data.databaseId);
+        setMetaMessage({ type: "success", text: "Base de datos creada en Notion. Recuerda guardar los textos." });
+      } else {
+        setMetaMessage({ type: "error", text: data.error || "No se pudo crear la base de datos." });
+      }
+    } catch (err) {
+      setMetaMessage({ type: "error", text: "Error de red al crear la base de datos." });
+    } finally {
+      setIsCreatingDb(false);
     }
   };
 
@@ -180,9 +237,6 @@ export default function AdminPanel({
     const existingMeta = projectMeta[projId] || {
       title: "Comparte tus archivos directo a Notion.",
       description: "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instantánea. Tus archivos se organizan de forma automática bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la página del proyecto que elijas.",
-      step1: "Identifícate: Escribe tu nombre, correo y selecciona la carpeta de destino.",
-      step2: "Sube Archivos: Arrastra y suelta tus fotos, PDFs o renders en el dropzone.",
-      step3: "Organización Instantánea: Todo se agrupa automáticamente en Notion listo para tu supervisor.",
       expirationDate: "",
       backgroundImage: ""
     };
@@ -207,6 +261,43 @@ export default function AdminPanel({
     } catch (err) {
       alert("Error al conectar con el servidor.");
     }
+  };
+
+  /** Persist only group/order for a project without touching the editor form. */
+  const persistOrderGroup = async (projId: string, patch: { groupId?: string; order?: number }) => {
+    const existing = projectMeta[projId] || { title: "", description: "" };
+    await fetch("/api/project-meta", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectId: projId,
+        ...existing,
+        groupId: patch.groupId !== undefined ? patch.groupId : existing.groupId || "",
+        order: patch.order !== undefined ? patch.order : existing.order ?? 0,
+      }),
+    });
+  };
+
+  /** Reorder projects via drag & drop, persisting the new order to each project. */
+  const handleDropReorder = async (targetId: string) => {
+    if (!dragId || dragId === targetId) {
+      setDragId(null);
+      return;
+    }
+    const ordered = [...orderedProjects];
+    const fromIdx = ordered.findIndex((p) => p.id === dragId);
+    const toIdx = ordered.findIndex((p) => p.id === targetId);
+    if (fromIdx === -1 || toIdx === -1) {
+      setDragId(null);
+      return;
+    }
+    const [moved] = ordered.splice(fromIdx, 1);
+    ordered.splice(toIdx, 0, moved);
+    setDragId(null);
+    // Persist new order index for every project.
+    await Promise.all(ordered.map((p, i) => persistOrderGroup(p.id, { order: i })));
+    await refreshProjectMeta();
+    await refreshProjects();
   };
 
   const fetchSubmissions = async () => {
@@ -341,6 +432,44 @@ export default function AdminPanel({
   const getSubmissionsCountForProject = (projId: string) => {
     return submissions.filter(sub => sub.projectId === projId).length;
   };
+
+  /** Short, safe formatting of an expiration date (empty if missing/invalid). */
+  const formatExpiration = (raw?: string): string => {
+    if (!raw || !raw.trim()) return "";
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleDateString("es-ES", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      ...(raw.includes("T") ? { hour: "2-digit", minute: "2-digit" } : {}),
+    });
+  };
+
+  // Merge stored order/group from metadata into the projects list.
+  const orderedProjects = [...projects]
+    .map((p) => ({
+      ...p,
+      order: projectMeta[p.id]?.order ?? 0,
+      groupId: projectMeta[p.id]?.groupId || "",
+    }))
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+  // Build groups: map of groupId -> list of projects, plus ungrouped.
+  const groupsMap: Record<string, { name: string; items: typeof orderedProjects }> = {};
+  const ungrouped: typeof orderedProjects = [];
+  for (const p of orderedProjects) {
+    if (p.groupId) {
+      const groupProj = projects.find((g) => g.id === p.groupId);
+      const key = p.groupId;
+      if (!groupsMap[key]) {
+        groupsMap[key] = { name: groupProj?.name || "Grupo", items: [] };
+      }
+      groupsMap[key].items.push(p);
+    } else {
+      ungrouped.push(p);
+    }
+  }
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -488,19 +617,6 @@ export default function AdminPanel({
                 );
               })()}
 
-              <div className="flex items-center gap-2 p-1.5 bg-[#0d0d0d] border border-white/5 rounded-xl">
-                <input
-                  type="checkbox"
-                  id="project-active-checkbox"
-                  checked={copyIsActive}
-                  onChange={(e) => setCopyIsActive(e.target.checked)}
-                  className="w-4 h-4 rounded text-black border-white/10 bg-[#0d0d0d] focus:ring-0 cursor-pointer"
-                />
-                <label htmlFor="project-active-checkbox" className="text-[11px] font-bold text-white/80 cursor-pointer select-none">
-                  Proyecto Activo (Permitir entregas)
-                </label>
-              </div>
-
               <div>
                 <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
                   Título de Bienvenida
@@ -529,46 +645,222 @@ export default function AdminPanel({
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
-                  Paso 1 (Identificación)
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Escribe el paso"
-                  value={copyStep1}
-                  onChange={(e) => setCopyStep1(e.target.value)}
-                  className="w-full px-3 py-2 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all"
-                />
+              {/* Dynamic custom fields editor (point 5) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-semibold text-white/40 uppercase tracking-wide">
+                    Campos personalizados
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCopyCustomFields((prev) => [...prev, { id: genId(), label: "", value: "" }])
+                    }
+                    className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" /> Agregar campo
+                  </button>
+                </div>
+
+                {copyCustomFields.length === 0 ? (
+                  <p className="text-[10px] text-white/30 bg-[#0d0d0d] border border-dashed border-white/10 rounded-xl px-3 py-3 text-center">
+                    No hay campos. Pulsa “Agregar campo” para crear los tuyos (opcional).
+                  </p>
+                ) : (
+                  copyCustomFields.map((field, idx) => (
+                    <div key={field.id} className="bg-[#0d0d0d] border border-white/10 rounded-xl p-2 space-y-1.5">
+                      <div className="flex gap-1.5 items-start">
+                        <input
+                          type="text"
+                          placeholder="Etiqueta (ej: Curso)"
+                          value={field.label}
+                          onChange={(e) =>
+                            setCopyCustomFields((prev) =>
+                              prev.map((f, i) => (i === idx ? { ...f, label: e.target.value } : f))
+                            )
+                          }
+                          className="w-1/3 px-2.5 py-2 bg-[#111] border border-white/10 rounded-lg text-xs focus:border-white/30 focus:outline-none text-white transition-all"
+                        />
+                        <input
+                          type="text"
+                          placeholder={field.askSubmitter ? "Texto de ayuda (opcional)" : "Valor / descripción"}
+                          value={field.value}
+                          onChange={(e) =>
+                            setCopyCustomFields((prev) =>
+                              prev.map((f, i) => (i === idx ? { ...f, value: e.target.value } : f))
+                            )
+                          }
+                          className="flex-1 px-2.5 py-2 bg-[#111] border border-white/10 rounded-lg text-xs focus:border-white/30 focus:outline-none text-white transition-all"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCopyCustomFields((prev) => prev.filter((_, i) => i !== idx))
+                          }
+                          className="p-2 text-red-400/60 hover:text-red-400 hover:bg-red-950/20 border border-white/5 hover:border-red-900/20 rounded-lg transition-all cursor-pointer shrink-0"
+                          title="Eliminar campo"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-4 px-1">
+                        <label className="flex items-center gap-1.5 text-[10px] text-white/60 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={!!field.askSubmitter}
+                            onChange={(e) =>
+                              setCopyCustomFields((prev) =>
+                                prev.map((f, i) => (i === idx ? { ...f, askSubmitter: e.target.checked } : f))
+                              )
+                            }
+                            className="w-3 h-3 rounded cursor-pointer"
+                          />
+                          Lo rellena la persona
+                        </label>
+                        {field.askSubmitter && (
+                          <label className="flex items-center gap-1.5 text-[10px] text-white/60 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={!!field.required}
+                              onChange={(e) =>
+                                setCopyCustomFields((prev) =>
+                                  prev.map((f, i) => (i === idx ? { ...f, required: e.target.checked } : f))
+                                )
+                              }
+                              className="w-3 h-3 rounded cursor-pointer"
+                            />
+                            Obligatorio
+                          </label>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
-                  Paso 2 (Subida de Archivos)
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Escribe el paso"
-                  value={copyStep2}
-                  onChange={(e) => setCopyStep2(e.target.value)}
-                  className="w-full px-3 py-2 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all"
-                />
+              {/* Database mode (point 8) */}
+              <div className="space-y-2 border-t border-white/5 pt-4">
+                <div className="flex items-center gap-2 p-1.5 bg-[#0d0d0d] border border-white/5 rounded-xl">
+                  <input
+                    type="checkbox"
+                    id="use-database-checkbox"
+                    checked={copyUseDatabase}
+                    onChange={(e) => setCopyUseDatabase(e.target.checked)}
+                    className="w-4 h-4 rounded text-black border-white/10 bg-[#0d0d0d] focus:ring-0 cursor-pointer"
+                  />
+                  <label htmlFor="use-database-checkbox" className="text-[11px] font-bold text-white/80 cursor-pointer select-none">
+                    Usar base de datos (tabla en Notion)
+                  </label>
+                </div>
+                <p className="text-[10px] text-white/30">
+                  Sin base de datos: cada envío crea un toggle por persona (modo actual). Con base de datos: cada envío se guarda como fila en una tabla de Notion y puedes calificar.
+                </p>
+
+                {copyUseDatabase && (
+                  <div className="space-y-2 bg-[#0a0a0a] border border-white/5 rounded-xl p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">
+                        Columnas de control
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCopyDbColumns((prev) => [...prev, { id: genColId(), name: "", type: "text" }])
+                        }
+                        className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" /> Agregar columna
+                      </button>
+                    </div>
+
+                    {copyDbColumns.length === 0 ? (
+                      <p className="text-[10px] text-white/30 text-center py-1">
+                        Ej: Nota, Estado, Comentarios. Nombre, Correo, Fecha y Archivos se añaden automáticamente.
+                      </p>
+                    ) : (
+                      copyDbColumns.map((col, idx) => (
+                        <div key={col.id} className="flex gap-1.5 items-center">
+                          <input
+                            type="text"
+                            placeholder="Nombre (ej: Nota)"
+                            value={col.name}
+                            onChange={(e) =>
+                              setCopyDbColumns((prev) =>
+                                prev.map((c, i) => (i === idx ? { ...c, name: e.target.value } : c))
+                              )
+                            }
+                            className="flex-1 px-2.5 py-2 bg-[#111] border border-white/10 rounded-lg text-xs focus:border-white/30 focus:outline-none text-white"
+                          />
+                          <select
+                            value={col.type}
+                            onChange={(e) =>
+                              setCopyDbColumns((prev) =>
+                                prev.map((c, i) => (i === idx ? { ...c, type: e.target.value as DbColumn["type"] } : c))
+                              )
+                            }
+                            className="px-2 py-2 bg-[#111] border border-white/10 rounded-lg text-xs text-white cursor-pointer"
+                          >
+                            <option value="text">Texto</option>
+                            <option value="number">Número</option>
+                            <option value="select">Selección</option>
+                            <option value="checkbox">Casilla</option>
+                            <option value="date">Fecha</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => setCopyDbColumns((prev) => prev.filter((_, i) => i !== idx))}
+                            className="p-2 text-red-400/60 hover:text-red-400 hover:bg-red-950/20 border border-white/5 rounded-lg transition-all cursor-pointer shrink-0"
+                            title="Eliminar columna"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))
+                    )}
+
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      {copyDatabaseId ? (
+                        <span className="text-[10px] text-emerald-400 font-mono truncate flex items-center gap-1">
+                          <Check className="w-3 h-3 shrink-0" /> BD: {copyDatabaseId.slice(0, 8)}...
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-amber-400/80">Aún no se ha creado la base de datos.</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleCreateDatabase}
+                        disabled={isCreatingDb}
+                        className="text-[10px] font-semibold bg-white/10 hover:bg-white/15 text-white px-2.5 py-1.5 rounded-lg border border-white/10 transition-all disabled:opacity-50 cursor-pointer"
+                      >
+                        {isCreatingDb ? "Creando..." : copyDatabaseId ? "Recrear BD" : "Crear base de datos"}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div>
+              {/* Parent group selector (point 7) */}
+              <div className="border-t border-white/5 pt-4">
                 <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
-                  Paso 3 (Resultado)
+                  Grupo / Materia (contenedor)
                 </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Escribe el paso"
-                  value={copyStep3}
-                  onChange={(e) => setCopyStep3(e.target.value)}
-                  className="w-full px-3 py-2 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all"
-                />
+                <select
+                  value={copyGroupId}
+                  onChange={(e) => setCopyGroupId(e.target.value)}
+                  className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all cursor-pointer"
+                >
+                  <option value="">Sin grupo (suelto)</option>
+                  {projects
+                    .filter((p) => p.id !== selectedMetaProjectId)
+                    .map((p) => (
+                      <option key={p.id} value={p.id} className="bg-[#111] text-white">
+                        {p.name}
+                      </option>
+                    ))}
+                </select>
+                <p className="text-[10px] text-white/30 mt-1">
+                  Agrupa este proyecto dentro de otro (ej. una materia) para organizarlo. El orden se ajusta arrastrando en la lista de proyectos.
+                </p>
               </div>
 
               <div>
@@ -717,26 +1009,56 @@ export default function AdminPanel({
               <p className="text-xs text-white/20 mt-1">Crea tu primer proyecto utilizando el formulario superior.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-1">
-              {projects.map((proj) => (
+            <div className="flex flex-col gap-2 max-h-[28rem] overflow-y-auto pr-1">
+              {orderedProjects.map((proj, position) => (
                 <div 
                   key={proj.id} 
+                  draggable
+                  onDragStart={() => setDragId(proj.id)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => handleDropReorder(proj.id)}
                   onClick={() => setSelectedMetaProjectId(proj.id)}
                   className={`p-3 border rounded-xl flex items-center justify-between transition-all cursor-pointer group animate-fade-in ${
+                    dragId === proj.id ? "opacity-40 border-dashed" : ""
+                  } ${
                     proj.id === selectedMetaProjectId 
                       ? "border-white/30 bg-white/5" 
                       : proj.isActive !== false
                         ? "border-white/5 bg-[#0d0d0d] hover:border-white/12"
                         : "border-dashed border-red-900/40 bg-red-950/5 hover:border-red-900/60"
                   }`}
-                  title="Haz clic para personalizar los textos de este proyecto"
+                  title="Arrastra para reordenar • Clic para personalizar"
                 >
-                  <div className="min-w-0 flex-1 pr-2">
-                    <p className="text-sm font-semibold text-white/95 truncate">{proj.name}</p>
+                  <div className="flex items-center gap-1 shrink-0 text-white/20 group-hover:text-white/40" title="Arrastrar para reordenar">
+                    <GripVertical className="w-4 h-4" />
+                    <span className="text-[10px] font-mono font-bold text-white/40 w-5 text-center">{position + 1}</span>
+                  </div>
+                  <div className="min-w-0 flex-1 px-2">
+                    <p className="text-sm font-semibold text-white/95 truncate flex items-center gap-1.5">
+                      {proj.groupId && (
+                        <span className="text-[9px] text-purple-300 bg-purple-950/30 border border-purple-900/30 px-1 py-[1px] rounded" title="Pertenece a un grupo">
+                          {groupsMap[proj.groupId]?.name || "Grupo"}
+                        </span>
+                      )}
+                      {projectMeta[proj.id]?.useDatabase && (
+                        <Database className="w-3 h-3 text-emerald-400 shrink-0" />
+                      )}
+                      {proj.name}
+                    </p>
                     <div className="flex flex-wrap items-center gap-2 mt-1">
                       <span className="text-[10px] text-white/40 font-mono">
                         {getSubmissionsCountForProject(proj.id)} entregas
                       </span>
+
+                      {formatExpiration(projectMeta[proj.id]?.expirationDate) && (
+                        <span
+                          className="text-[9px] text-amber-300 font-medium px-1.5 py-[1px] bg-amber-950/30 border border-amber-900/30 rounded-sm flex items-center gap-1"
+                          title="Fecha de vencimiento"
+                        >
+                          <Calendar className="w-2.5 h-2.5 shrink-0" />
+                          {formatExpiration(projectMeta[proj.id]?.expirationDate)}
+                        </span>
+                      )}
                       
                       <span className="text-[10px] text-purple-400 hover:text-purple-300 font-mono truncate select-all flex items-center gap-0.5" title="Enlace directo público para entregas">
                         <Link className="w-2.5 h-2.5 shrink-0" />
@@ -803,6 +1125,29 @@ export default function AdminPanel({
             </div>
           )}
         </div>
+
+        {/* Grading table per project (point 9) */}
+        {selectedMetaProjectId && projects.find((p) => p.id === selectedMetaProjectId) && (
+          <div className="bg-[#111111] rounded-2xl p-6 border border-white/10 shadow-xs">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-2.5 bg-white/5 text-white rounded-xl">
+                <Table className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-white">Tabla de Calificaciones</h2>
+                <p className="text-xs text-white/40">
+                  {projects.find((p) => p.id === selectedMetaProjectId)?.name}
+                </p>
+              </div>
+            </div>
+            <GradingTable
+              project={projects.find((p) => p.id === selectedMetaProjectId)!}
+              meta={projectMeta[selectedMetaProjectId]}
+              submissions={submissions}
+              refreshSubmissions={fetchSubmissions}
+            />
+          </div>
+        )}
 
         {/* Deliveries Submission Log */}
         <div className="bg-[#111111] rounded-2xl p-6 border border-white/10 shadow-xs">

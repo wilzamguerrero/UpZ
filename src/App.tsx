@@ -48,6 +48,7 @@ export default function App() {
   const [senderEmail, setSenderEmail] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [customValues, setCustomValues] = useState<Record<string, string>>({});
   
   // Submit engine states
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -358,6 +359,17 @@ export default function App() {
       return;
     }
 
+    // Validate required submitter custom fields.
+    const requiredAsk = (projectMeta[selectedProjectId]?.customFields || []).filter(
+      (f) => f.askSubmitter && f.required
+    );
+    for (const f of requiredAsk) {
+      if (!customValues[f.id] || !customValues[f.id].trim()) {
+        setSubmitError(`El campo "${f.label || "obligatorio"}" es obligatorio.`);
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     setSubmitError(null);
     setSubmitSuccess(null);
@@ -389,10 +401,23 @@ export default function App() {
     setSubmitStep("Registrando en Notion...");
     setUploadProgress(null);
     try {
+      const submitMeta = projectMeta[selectedProjectId];
       const res = await fetch("/api/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ senderName, senderEmail, projectId: selectedProjectId, projectName, fileRecords }),
+        body: JSON.stringify({
+          senderName,
+          senderEmail,
+          projectId: selectedProjectId,
+          projectName,
+          fileRecords,
+          customValues,
+          customFields: (submitMeta?.customFields || [])
+            .filter((cf) => cf.askSubmitter)
+            .map((cf) => ({ id: cf.id, label: cf.label })),
+          useDatabase: !!submitMeta?.useDatabase,
+          databaseId: submitMeta?.databaseId || "",
+        }),
       });
       const data = await res.json();
       if (data.success) {
@@ -400,6 +425,7 @@ export default function App() {
         setSenderName("");
         setSenderEmail("");
         setSelectedFiles([]);
+        setCustomValues({});
       } else {
         setSubmitError(data.error || "Algo salió mal al sincronizar.");
       }
@@ -471,9 +497,9 @@ export default function App() {
 
   const displayTitle = activeMeta?.title || "Comparte tus archivos directo a Notion.";
   const displayDescription = activeMeta?.description || "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instantánea. Tus archivos se organizan de forma automática bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la página del proyecto que elijas.";
-  const displayStep1 = activeMeta?.step1 || "Identifícate: Escribe tu nombre, correo y selecciona la carpeta de destino.";
-  const displayStep2 = activeMeta?.step2 || "Sube Archivos: Arrastra y suelta tus fotos, PDFs o renders en el dropzone.";
-  const displayStep3 = activeMeta?.step3 || "Organización Instantánea: Todo se agrupa automáticamente en Notion listo";
+  const displayCustomFields = activeMeta?.customFields || [];
+  const infoFields = displayCustomFields.filter((f) => !f.askSubmitter);
+  const askFields = displayCustomFields.filter((f) => f.askSubmitter);
 
   return (
     <div className="min-h-screen bg-[#050505] flex flex-col antialiased text-[#e0e0e0] relative">
@@ -574,20 +600,24 @@ export default function App() {
                   {displayDescription}
                 </p>
 
-                <div className="border-t border-white/5 pt-6 space-y-4">
-                  <div className="flex gap-3">
-                    <span className="w-6 h-6 rounded-full bg-white/5 border border-white/10 text-white/60 text-xs font-bold flex items-center justify-center shrink-0">1</span>
-                    <p className="text-xs text-white/40">{renderStepText(displayStep1)}</p>
+                {infoFields.length > 0 && (
+                  <div className="border-t border-white/5 pt-6 space-y-4">
+                    {infoFields.map((field, idx) => (
+                      <div key={field.id} className="flex gap-3">
+                        <span className="w-6 h-6 rounded-full bg-white/5 border border-white/10 text-white/60 text-xs font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
+                        <p className="text-xs text-white/40">
+                          {field.label ? (
+                            <>
+                              <strong className="text-white/80">{field.label}:</strong> {field.value}
+                            </>
+                          ) : (
+                            field.value
+                          )}
+                        </p>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex gap-3">
-                    <span className="w-6 h-6 rounded-full bg-white/5 border border-white/10 text-white/60 text-xs font-bold flex items-center justify-center shrink-0">2</span>
-                    <p className="text-xs text-white/40">{renderStepText(displayStep2)}</p>
-                  </div>
-                  <div className="flex gap-3">
-                    <span className="w-6 h-6 rounded-full bg-white/5 border border-white/10 text-white/60 text-xs font-bold flex items-center justify-center shrink-0">3</span>
-                    <p className="text-xs text-white/40">{renderStepText(displayStep3)}</p>
-                  </div>
-                </div>
+                )}
               </div>
 
               {/* Right Column (The interactive Form Card) */}
@@ -707,7 +737,30 @@ export default function App() {
                         </div>
                       </div>
 
-                               {/* Project selector logic from Notion listing */}
+                               {/* Submitter-filled custom fields (point 5C) */}
+                      {askFields.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {askFields.map((field) => (
+                            <div key={field.id}>
+                              <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
+                                {field.label || "Campo"}{field.required ? " *" : ""}
+                              </label>
+                              <input
+                                type="text"
+                                required={!!field.required}
+                                placeholder={field.value || `Escribe ${field.label || "valor"}`}
+                                value={customValues[field.id] || ""}
+                                onChange={(e) =>
+                                  setCustomValues((prev) => ({ ...prev, [field.id]: e.target.value }))
+                                }
+                                className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none placeholder-white/20 transition-all text-white"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Project selector logic from Notion listing */}
                       <div>
                         <div className="flex items-center justify-between mb-1.5">
                           <label className="block text-xs font-semibold text-white/40 uppercase tracking-wide">
@@ -730,6 +783,18 @@ export default function App() {
                             <div className="flex items-center gap-2.5">
                               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
                               <span className="text-sm font-bold text-white tracking-wide">{lockedProjectName}</span>
+                              {hasValidExpiration && (
+                                <span className="text-[10px] text-amber-300 font-medium px-1.5 py-0.5 bg-amber-950/30 border border-amber-900/30 rounded flex items-center gap-1">
+                                  <Clock className="w-2.5 h-2.5 shrink-0" />
+                                  {new Date(activeMeta!.expirationDate!).toLocaleDateString("es-ES", {
+                                    day: "numeric",
+                                    month: "short",
+                                    year: "numeric",
+                                    hour: activeMeta!.expirationDate!.includes("T") ? "2-digit" : undefined,
+                                    minute: activeMeta!.expirationDate!.includes("T") ? "2-digit" : undefined,
+                                  })}
+                                </span>
+                              )}
                             </div>
                             <span className="text-[10px] text-white/40 font-mono tracking-wider uppercase bg-white/5 px-2 py-0.5 rounded-md border border-white/10">Enlace Directo Activo</span>
                           </div>
@@ -782,11 +847,48 @@ export default function App() {
                             required
                             className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none text-white transition-all font-medium cursor-pointer animate-fade-in"
                           >
-                            {projects.filter(p => p.isActive !== false).map((proj) => (
-                              <option key={proj.id} value={proj.id} className="bg-[#111111] text-white">
-                                {proj.name}
-                              </option>
-                            ))}
+                            {(() => {
+                              const available = projects
+                                .filter((p) => p.isActive !== false)
+                                .map((p) => ({
+                                  ...p,
+                                  order: projectMeta[p.id]?.order ?? 0,
+                                  groupId: projectMeta[p.id]?.groupId || "",
+                                }))
+                                .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+                              const grouped: Record<string, typeof available> = {};
+                              const loose: typeof available = [];
+                              for (const p of available) {
+                                if (p.groupId) {
+                                  (grouped[p.groupId] ||= []).push(p);
+                                } else {
+                                  loose.push(p);
+                                }
+                              }
+
+                              return (
+                                <>
+                                  {loose.map((proj) => (
+                                    <option key={proj.id} value={proj.id} className="bg-[#111111] text-white">
+                                      {proj.name}
+                                    </option>
+                                  ))}
+                                  {Object.entries(grouped).map(([gid, items]) => {
+                                    const groupName = projects.find((g) => g.id === gid)?.name || "Grupo";
+                                    return (
+                                      <optgroup key={gid} label={groupName} className="bg-[#111111] text-white">
+                                        {items.map((proj) => (
+                                          <option key={proj.id} value={proj.id} className="bg-[#111111] text-white">
+                                            {proj.name}
+                                          </option>
+                                        ))}
+                                      </optgroup>
+                                    );
+                                  })}
+                                </>
+                              );
+                            })()}
                           </select>
                         )}
                       </div>

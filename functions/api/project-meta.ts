@@ -59,9 +59,15 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
               step1: data.step1 || "",
               step2: data.step2 || "",
               step3: data.step3 || "",
+              customFields: Array.isArray(data.customFields) ? data.customFields : [],
               expirationDate: data.expirationDate || expirationDate,
               backgroundImage: data.backgroundImage || "",
               isActive: data.isActive !== undefined ? !!data.isActive : true,
+              groupId: data.groupId || "",
+              order: typeof data.order === "number" ? data.order : undefined,
+              useDatabase: !!data.useDatabase,
+              databaseId: data.databaseId || "",
+              dbColumns: Array.isArray(data.dbColumns) ? data.dbColumns : [],
             },
           });
         } catch {
@@ -107,11 +113,36 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return json({ error: "Cuerpo de solicitud inválido" }, 400);
   }
 
-  const { projectId, title, description, step1, step2, step3, expirationDate, backgroundImage, isActive } = body;
+  const {
+    projectId, title, description, step1, step2, step3,
+    customFields, expirationDate, backgroundImage, isActive,
+    groupId, order, useDatabase, databaseId, dbColumns,
+  } = body;
 
   if (!projectId) {
     return json({ error: "El ID del proyecto es obligatorio." }, 400);
   }
+
+  const cleanCustomFields = Array.isArray(customFields)
+    ? customFields
+        .filter((f: any) => f && (f.label || f.value))
+        .map((f: any, i: number) => ({
+          id: f.id || `cf_${i}`,
+          label: (f.label || "").trim(),
+          value: (f.value || "").trim(),
+        }))
+    : [];
+
+  const cleanDbColumns = Array.isArray(dbColumns)
+    ? dbColumns
+        .filter((c: any) => c && c.name)
+        .map((c: any, i: number) => ({
+          id: c.id || `col_${i}`,
+          name: (c.name || "").trim(),
+          type: c.type || "text",
+          options: Array.isArray(c.options) ? c.options : undefined,
+        }))
+    : [];
 
   const metaPayload = {
     title: (title || "").trim(),
@@ -119,9 +150,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     step1: (step1 || "").trim(),
     step2: (step2 || "").trim(),
     step3: (step3 || "").trim(),
+    customFields: cleanCustomFields,
     expirationDate: (expirationDate || "").trim(),
     backgroundImage: (backgroundImage || "").trim(),
     isActive: isActive !== undefined ? !!isActive : true,
+    groupId: (groupId || "").trim(),
+    order: typeof order === "number" ? order : 0,
+    useDatabase: !!useDatabase,
+    databaseId: (databaseId || "").trim(),
+    dbColumns: cleanDbColumns,
   };
 
   if (notionSecret) {

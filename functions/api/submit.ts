@@ -1,4 +1,4 @@
-import { json, appendChildren, type Env } from "../_shared/notion";
+import { json, appendChildren, notionFetch, cleanNotionId, type Env } from "../_shared/notion";
 
 async function getCredentials(env: Env): Promise<{ notionSecret: string }> {
   let notionSecret = env.NOTION_SECRET || "";
@@ -45,6 +45,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     projectId?: string;
     projectName?: string;
     fileRecords?: FileRecord[];
+    customValues?: Record<string, string>;
+    customFields?: { id: string; label: string }[];
+    useDatabase?: boolean;
+    databaseId?: string;
   };
   try {
     body = await context.request.json();
@@ -58,6 +62,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     projectId = "",
     projectName = "Proyecto",
     fileRecords = [],
+    customValues = {},
+    customFields = [],
+    useDatabase = false,
+    databaseId = "",
   } = body;
 
   if (!senderName || !senderEmail || !projectId) {
@@ -82,6 +90,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const toggleHeader = `👤 ${senderName} (${senderEmail}) — ${dateStr}`;
 
+  // Render custom field lines for the callout block.
+  const customLines = (customFields || [])
+    .map((cf) => {
+      const val = customValues?.[cf.id];
+      if (!val) return "";
+      return `\n- ${cf.label}: ${val}`;
+    })
+    .join("");
+
   const innerBlocks: any[] = [
     {
       object: "block",
@@ -91,7 +108,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           {
             type: "text",
             text: {
-              content: `Informacion de la entrega:\n- Remitente: ${senderName}\n- Correo: ${senderEmail}\n- Fecha de envio: ${dateStr}\n- Archivos totales: ${fileRecords.length}`,
+              content: `Informacion de la entrega:\n- Remitente: ${senderName}\n- Correo: ${senderEmail}\n- Fecha de envio: ${dateStr}\n- Archivos totales: ${fileRecords.length}${customLines}`,
             },
           },
         ],
@@ -137,6 +154,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }),
   ];
 
+  // Always create the per-person toggle (works for both modes).
   try {
     await appendChildren(
       projectId,
@@ -159,6 +177,33 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     );
   }
 
+  // Database mode: also insert a row into the project's Notion database.
+  const cleanDbId = cleanNotionId(databaseId || "");
+  if (useDatabase && cleanDbId) {
+    const fileNames = fileRecords.map((f) => f.name).join(", ");
+    const dbProperties: Record<string, any> = {
+      Nombre: { title: [{ type: "text", text: { content: senderName } }] },
+      Correo: { email: senderEmail },
+      "Fecha de envío": { date: { start: new Date().toISOString() } },
+      Archivos: { rich_text: [{ type: "text", text: { content: fileNames } }] },
+    };
+    // Map custom field values as rich_text columns (best-effort).
+    for (const cf of customFields || []) {
+      const val = customValues?.[cf.id];
+      if (val) {
+        dbProperties[cf.label] = { rich_text: [{ type: "text", text: { content: val } }] };
+      }
+    }
+    try {
+      await notionFetch("POST", "/pages", notionSecret, {
+        parent: { type: "database_id", database_id: cleanDbId },
+        properties: dbProperties,
+      });
+    } catch {
+      // Non-critical: toggle already created; ignore database insert failure.
+    }
+  }
+
   const submissionId = `sub_${Date.now()}`;
   const submissionRecord = {
     id: submissionId,
@@ -172,6 +217,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       size: f.size,
       url: `(Subido a Notion: ${f.finalName})`,
     })),
+    customValues: customValues || {},
+    controlValues: {},
   };
 
   if (SUBMISSIONS_KV) {
@@ -180,6 +227,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const list = raw ? JSON.parse(raw) : [];
       list.unshift(submissionRecord);
       await SUBMISSIONS_KV.put("submissions", JSON.stringify(list));
+    } catch {
+      // Non-critical
+    }
+
+    // Per-person JSON storage (used by the no-database mode for grading later).
+    try {
+      const personKey = `person:${projectId}:${submissionId}`;
+      await SUBMISSIONS_KV.put(personKey, JSON.stringify(submissionRecord));
     } catch {
       // Non-critical
     }

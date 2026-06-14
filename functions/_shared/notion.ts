@@ -5,6 +5,7 @@ export interface Env {
   NOTION_SECRET: string;
   NOTION_ID_PAGE: string;
   SUBMISSIONS_KV?: KVNamespace;
+  FILES_BUCKET?: R2Bucket;
 }
 
 export function json(data: unknown, status = 200): Response {
