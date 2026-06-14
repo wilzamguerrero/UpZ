@@ -173,8 +173,42 @@ export default function App() {
   const SMALL_FILE_THRESHOLD = 20 * 1024 * 1024; // 20 MiB
   const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB (Notion limit)
 
+  // Extensions accepted by Notion's File Upload API (mirrors server-side NOTION_MIME_TYPES)
+  const NOTION_SUPPORTED_EXTENSIONS = new Set([
+    // Archives
+    "zip","gz","gzip","tar","7z","bz2","rar",
+    // Images
+    "png","jpg","jpeg","gif","webp","svg","bmp","tiff","tif","ico","heic","avif","apng",
+    // Audio
+    "aac","adts","mid","midi","mp3","mpga","m4a","m4b","oga","ogg","opus","wav","wma","weba","flac",
+    // Video
+    "amv","asf","wmv","avi","f4v","flv","gifv","m4v","mp4","mkv","webm","mov","qt","mpeg","ogv","3gp","3g2",
+    // Documents
+    "pdf","txt","csv","json","doc","dot","docx","dotx","xls","xlt","xla","xlsx","xltx",
+    "ppt","pot","pps","ppa","pptx","potx","rtf","md","markdown","html","htm","epub","xml","css",
+    "odt","ods","odp","ics","yaml","yml","tsv",
+  ]);
+
+  /** Check if a file needs to be compressed to ZIP for Notion compatibility */
+  const needsZipCompression = (filename: string): boolean => {
+    const dotIndex = filename.lastIndexOf(".");
+    if (dotIndex === -1) return true; // no extension
+    const ext = filename.slice(dotIndex + 1).toLowerCase();
+    return !NOTION_SUPPORTED_EXTENSIONS.has(ext);
+  };
+
+  /** Compress a file into a real ZIP using JSZip */
+  const compressFileToZip = async (file: File): Promise<File> => {
+    const JSZip = (await import("jszip")).default;
+    const zip = new JSZip();
+    zip.file(file.name, file);
+    const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
+    return new File([blob], file.name + ".zip", { type: "application/zip" });
+  };
+
   /**
    * Upload a single file to Notion.
+   * - Unsupported extensions → compressed to real ZIP first
    * - Files ≤ 20MB: single request to /api/upload-file
    * - Files > 20MB: chunked flow (init → parts → complete)
    */
@@ -186,64 +220,75 @@ export default function App() {
     name: string; finalName: string; size: number;
     uploadId: string; extModified: boolean; mimeType: string;
   }> => {
-    const label = `${file.name} (${fileIndex + 1}/${totalFiles})`;
+    const originalName = file.name;
+    const label = `${originalName} (${fileIndex + 1}/${totalFiles})`;
 
     // ── Validate file size ──
     if (file.size > MAX_FILE_SIZE) {
-      throw new Error(`"${file.name}" excede el límite de 5 GB.`);
+      throw new Error(`"${originalName}" excede el límite de 5 GB.`);
+    }
+
+    // ── Compress unsupported file types to real ZIP ──
+    let uploadFile = file;
+    let wasCompressed = false;
+    if (needsZipCompression(file.name)) {
+      setSubmitStep(`Comprimiendo ${label} a ZIP...`);
+      setUploadProgress({ fileName: originalName, percent: 0 });
+      uploadFile = await compressFileToZip(file);
+      wasCompressed = true;
     }
 
     // ── Small file: existing single-request flow ──
-    if (file.size <= SMALL_FILE_THRESHOLD) {
+    if (uploadFile.size <= SMALL_FILE_THRESHOLD) {
       setSubmitStep(`Subiendo ${label}...`);
-      setUploadProgress({ fileName: file.name, percent: 0 });
+      setUploadProgress({ fileName: originalName, percent: 0 });
 
       const fd = new FormData();
-      fd.append("file", file, file.name);
+      fd.append("file", uploadFile, uploadFile.name);
       const res = await fetch("/api/upload-file", { method: "POST", body: fd });
 
       // Guard against Cloudflare returning HTML (e.g. body too large)
       const text = await res.text();
       let data: any;
       try { data = JSON.parse(text); } catch {
-        throw new Error(`Respuesta inesperada del servidor al subir "${file.name}". Puede que el archivo sea demasiado grande.`);
+        throw new Error(`Respuesta inesperada del servidor al subir "${originalName}". Puede que el archivo sea demasiado grande.`);
       }
 
       if (!res.ok || !data.success) {
-        throw new Error(data.error || `Error al subir "${file.name}"`);
+        throw new Error(data.error || `Error al subir "${originalName}"`);
       }
 
-      setUploadProgress({ fileName: file.name, percent: 100 });
+      setUploadProgress({ fileName: originalName, percent: 100 });
 
       return {
-        name: file.name,
+        name: originalName,
         finalName: data.finalName as string,
-        size: file.size,
+        size: file.size, // original size for display
         uploadId: data.id as string,
-        extModified: data.extModified as boolean,
+        extModified: wasCompressed || (data.extModified as boolean),
         mimeType: file.type || "application/octet-stream",
       };
     }
 
     // ── Large file: chunked flow ──
-    const numberOfParts = Math.ceil(file.size / CHUNK_SIZE);
+    const numberOfParts = Math.ceil(uploadFile.size / CHUNK_SIZE);
 
     // Step 1: Initialize the upload on Notion
     setSubmitStep(`Inicializando ${label} (${numberOfParts} partes)...`);
-    setUploadProgress({ fileName: file.name, percent: 0 });
+    setUploadProgress({ fileName: originalName, percent: 0 });
 
     const initRes = await fetch("/api/upload-init", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        filename: file.name,
-        mimeType: file.type,
-        fileSize: file.size,
+        filename: uploadFile.name,
+        mimeType: uploadFile.type,
+        fileSize: uploadFile.size,
       }),
     });
     const initData = await initRes.json();
     if (!initRes.ok || !initData.success) {
-      throw new Error(initData.error || `Error al inicializar upload de "${file.name}"`);
+      throw new Error(initData.error || `Error al inicializar upload de "${originalName}"`);
     }
 
     const { id: uploadId, uploadName, contentType, mode } = initData;
@@ -251,12 +296,12 @@ export default function App() {
     // Step 2: Send each chunk
     for (let partNumber = 1; partNumber <= numberOfParts; partNumber++) {
       const start = (partNumber - 1) * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, file.size);
-      const chunk = file.slice(start, end);
+      const end = Math.min(start + CHUNK_SIZE, uploadFile.size);
+      const chunk = uploadFile.slice(start, end);
 
       const pct = Math.round(((partNumber - 1) / numberOfParts) * 100);
       setSubmitStep(`Subiendo ${label} — parte ${partNumber}/${numberOfParts} (${pct}%)`);
-      setUploadProgress({ fileName: file.name, percent: pct });
+      setUploadProgress({ fileName: originalName, percent: pct });
 
       const chunkFd = new FormData();
       chunkFd.append("file", chunk, uploadName);
@@ -271,17 +316,17 @@ export default function App() {
       const partText = await partRes.text();
       let partData: any;
       try { partData = JSON.parse(partText); } catch {
-        throw new Error(`Respuesta inesperada al subir parte ${partNumber} de "${file.name}".`);
+        throw new Error(`Respuesta inesperada al subir parte ${partNumber} de "${originalName}".`);
       }
       if (!partRes.ok || !partData.success) {
-        throw new Error(partData.error || `Error en parte ${partNumber} de "${file.name}"`);
+        throw new Error(partData.error || `Error en parte ${partNumber} de "${originalName}"`);
       }
     }
 
     // Step 3: Complete the multi-part upload
     if (mode === "multi_part") {
       setSubmitStep(`Finalizando ${label}...`);
-      setUploadProgress({ fileName: file.name, percent: 99 });
+      setUploadProgress({ fileName: originalName, percent: 99 });
 
       const completeRes = await fetch("/api/upload-complete", {
         method: "POST",
@@ -290,18 +335,18 @@ export default function App() {
       });
       const completeData = await completeRes.json();
       if (!completeRes.ok || !completeData.success) {
-        throw new Error(completeData.error || `Error al completar upload de "${file.name}"`);
+        throw new Error(completeData.error || `Error al completar upload de "${originalName}"`);
       }
     }
 
-    setUploadProgress({ fileName: file.name, percent: 100 });
+    setUploadProgress({ fileName: originalName, percent: 100 });
 
     return {
-      name: file.name,
+      name: originalName,
       finalName: uploadName,
-      size: file.size,
+      size: file.size, // original size for display
       uploadId,
-      extModified: initData.extModified || false,
+      extModified: wasCompressed || (initData.extModified || false),
       mimeType: file.type || "application/octet-stream",
     };
   };
@@ -407,11 +452,18 @@ export default function App() {
 
   const activeMeta = selectedProjectId ? projectMeta[selectedProjectId] : null;
 
+  /** Check if expiration date is a valid, non-empty date string */
+  const hasValidExpiration = (() => {
+    if (!activeMeta?.expirationDate || activeMeta.expirationDate.trim() === "") return false;
+    const d = new Date(activeMeta.expirationDate);
+    return !isNaN(d.getTime());
+  })();
+
   const isProjectExpired = (() => {
-    if (!activeMeta?.expirationDate) return false;
-    const expDate = new Date(activeMeta.expirationDate);
+    if (!hasValidExpiration) return false;
+    const expDate = new Date(activeMeta!.expirationDate!);
     // If it is just a date (no T/time structure), include 23:59:59 of that day
-    if (!activeMeta.expirationDate.includes("T")) {
+    if (!activeMeta!.expirationDate!.includes("T")) {
       expDate.setHours(23, 59, 59, 999);
     }
     return new Date() > expDate;
@@ -599,7 +651,7 @@ export default function App() {
                         <h2 className="text-lg font-bold text-white">Haz un Envío</h2>
                         <hr className="border-white/5" />
                         
-                        {activeMeta?.expirationDate && !isProjectExpired && activeMeta?.isActive !== false && (
+                        {hasValidExpiration && !isProjectExpired && activeMeta?.isActive !== false && (
                           <div className="flex items-center gap-1.5 text-[11px] text-[#fbbf24] font-medium bg-[#1c120c]/60 border border-amber-900/30 px-3 py-2 rounded-xl">
                             <Clock className="w-3.5 h-3.5 shrink-0" />
                             <span>

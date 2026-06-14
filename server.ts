@@ -189,15 +189,17 @@ const NOTION_MIME_TYPES: Record<string, string> = {
 function resolveUploadMeta(filename: string, mimeType: string): { uploadName: string; contentType: string; extModified: boolean } {
   const dotIndex = filename.lastIndexOf(".");
   const ext = dotIndex !== -1 ? filename.slice(dotIndex + 1).toLowerCase() : "";
-  const uploadName = filename;
+  let uploadName = filename;
   let contentType = mimeType || "application/octet-stream";
-  const extModified = false;
+  let extModified = false;
 
   const standardMime = NOTION_MIME_TYPES[ext];
   if (standardMime) {
     contentType = standardMime;
-  } else if (!mimeType || mimeType === "application/octet-stream") {
-    contentType = "application/octet-stream";
+  } else {
+    uploadName = filename + ".zip";
+    contentType = "application/zip";
+    extModified = true;
   }
 
   return { uploadName, contentType, extModified };

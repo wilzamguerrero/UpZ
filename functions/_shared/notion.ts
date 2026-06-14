@@ -209,24 +209,26 @@ const NOTION_MIME_TYPES: Record<string, string> = {
  * Compute upload name and content type.
  *
  * - Known extensions → use standardized MIME from our map
- * - Unknown extensions → keep original filename, use browser MIME or octet-stream
- *   (no more wrapping in .zip — Notion accepts any file with a declared content_type)
- * - Files with NO extension → keep as-is with octet-stream
+ * - Unknown extensions → add .zip suffix and use application/zip
+ *   (Notion rejects unknown extensions; the frontend compresses these to real ZIPs
+ *    using JSZip before uploading, so the .zip extension is truthful)
  */
 function resolveUploadMeta(filename: string, mimeType: string): { uploadName: string; contentType: string; extModified: boolean } {
   const dotIndex = filename.lastIndexOf(".");
   const ext = dotIndex !== -1 ? filename.slice(dotIndex + 1).toLowerCase() : "";
-  const uploadName = filename;
+  let uploadName = filename;
   let contentType = mimeType || "application/octet-stream";
-  const extModified = false;
+  let extModified = false;
 
   const standardMime = NOTION_MIME_TYPES[ext];
   if (standardMime) {
     // Use the standardized MIME type (avoids browser variations like x-zip-compressed)
     contentType = standardMime;
-  } else if (!mimeType || mimeType === "application/octet-stream") {
-    // Unknown extension with no useful browser MIME — use octet-stream
-    contentType = "application/octet-stream";
+  } else {
+    // Notion rejects unknown extensions — wrap as .zip
+    uploadName = filename + ".zip";
+    contentType = "application/zip";
+    extModified = true;
   }
   // else: keep the browser-provided MIME type
 
