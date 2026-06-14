@@ -150,7 +150,8 @@ interface AdminPanelProps {
   } | null;
   refreshConfig: () => Promise<void>;
   projectMeta: Record<string, ProjectMeta>;
-  refreshProjectMeta: () => Promise<void>;
+  refreshProjectMeta: (projectId?: string) => Promise<void>;
+  applyProjectMetaUpdate: (projectId: string, meta: ProjectMeta) => void;
   onAdminPreviewChange?: (preview: {
     projectId: string;
     bgColor: string;
@@ -166,6 +167,7 @@ export default function AdminPanel({
   refreshConfig,
   projectMeta,
   refreshProjectMeta,
+  applyProjectMetaUpdate,
   onAdminPreviewChange
 }: AdminPanelProps) {
   // Config state
@@ -354,6 +356,24 @@ export default function AdminPanel({
   const handleSaveMeta = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedMetaProjectId) return;
+
+    const nextMeta: ProjectMeta = {
+      title: copyTitle,
+      description: copyDesc,
+      customFields: copyCustomFields,
+      expirationDate: copyExpiration,
+      backgroundImage: "",
+      bgBlur: 0,
+      bgColor: copyBgColor,
+      icon: copyIcon,
+      isActive: copyIsActive,
+      useDatabase: copyUseDatabase,
+      databaseId: copyDatabaseId,
+      dbColumns: copyDbColumns,
+      groupId: copyGroupId,
+      order: projectMeta[selectedMetaProjectId]?.order ?? 0,
+    };
+
     setIsSavingMeta(true);
     setMetaMessage(null);
     try {
@@ -362,27 +382,14 @@ export default function AdminPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectId: selectedMetaProjectId,
-          title: copyTitle,
-          description: copyDesc,
-          customFields: copyCustomFields,
-          expirationDate: copyExpiration,
-          backgroundImage: "",
-          bgBlur: 0,
-          bgColor: copyBgColor,
-          icon: copyIcon,
-          isActive: copyIsActive,
-          useDatabase: copyUseDatabase,
-          databaseId: copyDatabaseId,
-          dbColumns: copyDbColumns,
-          groupId: copyGroupId,
-          order: projectMeta[selectedMetaProjectId]?.order ?? 0,
+          ...nextMeta,
         }),
       });
       const data = await res.json();
       if (data.success) {
+        applyProjectMetaUpdate(selectedMetaProjectId, nextMeta);
         setMetaMessage({ type: "success", text: "┬íTextos guardados correctamente!" });
-        await refreshProjectMeta();
-        await refreshProjects();
+        await refreshProjectMeta(selectedMetaProjectId);
       } else {
         setMetaMessage({ type: "error", text: data.error || "No se pudieron guardar los textos." });
       }

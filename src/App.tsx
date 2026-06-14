@@ -80,6 +80,14 @@ const getCachedSelectedProjectId = (): string => {
 export default function App() {
   const { isLoaded: themeLoaded } = useTheme();
 
+  const persistProjectMetaCache = (meta: Record<string, ProjectMeta>) => {
+    try {
+      localStorage.setItem("cached_project_meta", JSON.stringify(meta));
+    } catch (err) {
+      console.error("Localstorage cache write issue", err);
+    }
+  };
+
   const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
   // Extra flag: loader stays until the selected project's meta has been resolved at least once
   const [isMetaSettled, setIsMetaSettled] = useState(false);
@@ -100,6 +108,20 @@ export default function App() {
 
   // Project meta copywriting customization
   const [projectMeta, setProjectMeta] = useState<Record<string, ProjectMeta>>(getCachedProjectMeta);
+
+  const applyProjectMetaUpdate = (projectId: string, metaPatch: ProjectMeta) => {
+    setProjectMeta((prev: Record<string, ProjectMeta>) => {
+      const next = {
+        ...prev,
+        [projectId]: {
+          ...(prev[projectId] || {}),
+          ...metaPatch,
+        },
+      };
+      persistProjectMetaCache(next);
+      return next;
+    });
+  };
 
   // Admin dynamic authentication states
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
@@ -162,17 +184,18 @@ export default function App() {
     return () => clearTimeout(t);
   }, [isInitialLoadDone, selectedProjectId, projectMeta]);
 
-  const fetchProjectMeta = async () => {
+  const fetchProjectMeta = async (projectId?: string) => {
+    if (projectId) {
+      await fetchProjectMetaForProject(projectId);
+      return;
+    }
+
     try {
       const res = await fetch("/api/project-meta");
       const data = await res.json();
       if (data.success) {
         setProjectMeta(data.meta || {});
-        try {
-          localStorage.setItem("cached_project_meta", JSON.stringify(data.meta || {}));
-        } catch (err) {
-          console.error("Localstorage cache write issue", err);
-        }
+        persistProjectMetaCache(data.meta || {});
       }
     } catch (e) {
       console.error("Error setting up project meta details", e);
@@ -237,19 +260,14 @@ export default function App() {
       const res = await fetch(`/api/project-meta?projectId=${projId}`);
       const data = await res.json();
       if (data.success && data.meta) {
-        setProjectMeta((prev) => {
-          const existing = prev[projId] || {};
-          return {
-            ...prev,
-            [projId]: {
-              ...existing,
-              ...data.meta,
-              // Never overwrite existing non-empty values with empty ones from Notion
-              icon: data.meta.icon || existing.icon || "",
-              bgColor: data.meta.bgColor || existing.bgColor || "",
-              bgBlur: data.meta.bgBlur != null ? data.meta.bgBlur : (existing.bgBlur ?? 0),
-            },
-          };
+        const existing = projectMeta[projId] || {};
+        applyProjectMetaUpdate(projId, {
+          ...existing,
+          ...data.meta,
+          // Never overwrite existing non-empty values with empty ones from Notion
+          icon: data.meta.icon || existing.icon || "",
+          bgColor: data.meta.bgColor || existing.bgColor || "",
+          bgBlur: data.meta.bgBlur != null ? data.meta.bgBlur : (existing.bgBlur ?? 0),
         });
       }
     } catch (e) {
@@ -1412,6 +1430,7 @@ export default function App() {
                     refreshConfig={fetchConfig}
                     projectMeta={projectMeta}
                     refreshProjectMeta={fetchProjectMeta}
+                    applyProjectMetaUpdate={applyProjectMetaUpdate}
                     onAdminPreviewChange={setAdminPreview}
                   />
                 )}
