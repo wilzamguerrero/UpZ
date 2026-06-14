@@ -7,17 +7,33 @@
     "step3": "",
     "expirationDate": "Sin fecha límite asignada",
     "backgroundImage": "",
-    "isActive": true
+    "bgBlur": 0,
+    "bgColor": "#f5f011",
+    "isActive": true,
+    "customFields": [],
+    "useDatabase": false,
+    "databaseId": "",
+    "dbColumns": [],
+    "groupId": "",
+    "order": 0
   },
   "37f2640c-88f4-8184-b670-d191b002fb66": {
-    "title": "",
-    "description": "",
+    "title": "ererer",
+    "description": "ererer",
     "step1": "",
     "step2": "",
     "step3": "",
     "expirationDate": "",
     "backgroundImage": "",
-    "isActive": true
+    "bgBlur": 0,
+    "bgColor": "#34c759",
+    "isActive": true,
+    "customFields": [],
+    "useDatabase": false,
+    "databaseId": "",
+    "dbColumns": [],
+    "groupId": "",
+    "order": 0
   },
   "37f2640c-88f4-8115-b133-c06566f55bb1": {
     "title": "",

@@ -69,6 +69,8 @@ export interface ProjectMeta {
   bgBlur?: number;
   /** Flat solid background color (hex) used when no backgroundImage is set. */
   bgColor?: string;
+  /** Lucide icon name shown in the corner box of the landing card. */
+  icon?: string;
 }
 
 export interface FileAttachment {

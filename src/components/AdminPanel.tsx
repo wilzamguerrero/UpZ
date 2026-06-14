@@ -2,7 +2,21 @@
 import {
   Key, FolderPlus, FileSpreadsheet, Eye, EyeOff, Check,
   AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, Download, ArrowRight, Trash2,
-  Link, QrCode, Copy, GripVertical, Database, Table
+  Link, QrCode, Copy, GripVertical, Database, Table,
+  // Icon picker icons
+  UploadCloud, FileText, BookOpen, Code2, Palette, Microscope,
+  GraduationCap, Briefcase, Star, Zap, Globe, Music, Camera, Cpu, Layers, Award, Package, Rocket,
+  File, Folder, FolderOpen, Archive, Terminal, Server, Wifi, Monitor, Laptop, Smartphone,
+  HardDrive, Keyboard, Image, Film, Video, Headphones, Mic, Radio, Tv,
+  Sun, Moon, Cloud, Leaf, Mountain, Flower2, Snowflake, Flame,
+  Activity, Dumbbell, Trophy, Target, Heart, Bell, Phone, Users, User,
+  MessageCircle, Share2, ShoppingCart, Truck, Building2, Wallet, CreditCard,
+  Wrench, Hammer, Settings, Calculator, Ruler, PencilLine, Scissors,
+  Triangle, Hexagon, Hash, Percent, FlaskConical, Atom, Compass,
+  Gamepad2, Tv2, Newspaper, Map, Lightbulb, Wand2, Sparkles, Brain,
+  Lock, Shield, Eye as EyeIcon, Fingerprint, Bug, AlertTriangle,
+  ChartBar, ChartPie, TrendingUp, BarChart3, Sigma, FunctionSquare,
+  type LucideIcon
 } from "lucide-react";
 import { Project, Submission, NotionConfig, ProjectMeta, CustomField, DbColumn } from "../types";
 import DateTimePicker from "./DateTimePicker";
@@ -10,6 +24,108 @@ import GradingTable from "./GradingTable";
 
 const genId = () => `cf_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 const genColId = () => `col_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+const ICON_OPTIONS: { key: string; Icon: LucideIcon; label: string; cat: string }[] = [
+  // Archivos
+  { key: "UploadCloud", Icon: UploadCloud, label: "Subida", cat: "Archivos" },
+  { key: "FileText", Icon: FileText, label: "Documento", cat: "Archivos" },
+  { key: "File", Icon: File, label: "Archivo", cat: "Archivos" },
+  { key: "Folder", Icon: Folder, label: "Carpeta", cat: "Archivos" },
+  { key: "FolderOpen", Icon: FolderOpen, label: "Abierto", cat: "Archivos" },
+  { key: "Archive", Icon: Archive, label: "Archivo ZIP", cat: "Archivos" },
+  { key: "Download", Icon: Download, label: "Descargar", cat: "Archivos" },
+  { key: "Image", Icon: Image, label: "Imagen", cat: "Archivos" },
+  // Tecnología
+  { key: "Code2", Icon: Code2, label: "Código", cat: "Tecnología" },
+  { key: "Terminal", Icon: Terminal, label: "Terminal", cat: "Tecnología" },
+  { key: "Cpu", Icon: Cpu, label: "CPU", cat: "Tecnología" },
+  { key: "Server", Icon: Server, label: "Servidor", cat: "Tecnología" },
+  { key: "Database", Icon: Database, label: "Base datos", cat: "Tecnología" },
+  { key: "Wifi", Icon: Wifi, label: "WiFi", cat: "Tecnología" },
+  { key: "Monitor", Icon: Monitor, label: "Monitor", cat: "Tecnología" },
+  { key: "Laptop", Icon: Laptop, label: "Laptop", cat: "Tecnología" },
+  { key: "Smartphone", Icon: Smartphone, label: "Móvil", cat: "Tecnología" },
+  { key: "HardDrive", Icon: HardDrive, label: "Disco", cat: "Tecnología" },
+  { key: "Keyboard", Icon: Keyboard, label: "Teclado", cat: "Tecnología" },
+  // Educación
+  { key: "GraduationCap", Icon: GraduationCap, label: "Graduación", cat: "Educación" },
+  { key: "BookOpen", Icon: BookOpen, label: "Libro", cat: "Educación" },
+  { key: "Microscope", Icon: Microscope, label: "Microscopio", cat: "Educación" },
+  { key: "FlaskConical", Icon: FlaskConical, label: "Química", cat: "Educación" },
+  { key: "Atom", Icon: Atom, label: "Física", cat: "Educación" },
+  { key: "Calculator", Icon: Calculator, label: "Calculadora", cat: "Educación" },
+  { key: "Ruler", Icon: Ruler, label: "Regla", cat: "Educación" },
+  { key: "PencilLine", Icon: PencilLine, label: "Lápiz", cat: "Educación" },
+  { key: "Brain", Icon: Brain, label: "Mente", cat: "Educación" },
+  { key: "Sigma", Icon: Sigma, label: "Sigma", cat: "Educación" },
+  { key: "FunctionSquare", Icon: FunctionSquare, label: "Función", cat: "Educación" },
+  // Arte & Diseño
+  { key: "Palette", Icon: Palette, label: "Paleta", cat: "Arte" },
+  { key: "Layers", Icon: Layers, label: "Capas", cat: "Arte" },
+  { key: "Scissors", Icon: Scissors, label: "Tijeras", cat: "Arte" },
+  { key: "Wand2", Icon: Wand2, label: "Varita", cat: "Arte" },
+  { key: "Sparkles", Icon: Sparkles, label: "Brillos", cat: "Arte" },
+  { key: "Lightbulb", Icon: Lightbulb, label: "Idea", cat: "Arte" },
+  // Medios
+  { key: "Camera", Icon: Camera, label: "Cámara", cat: "Medios" },
+  { key: "Film", Icon: Film, label: "Película", cat: "Medios" },
+  { key: "Video", Icon: Video, label: "Video", cat: "Medios" },
+  { key: "Music", Icon: Music, label: "Música", cat: "Medios" },
+  { key: "Headphones", Icon: Headphones, label: "Audífonos", cat: "Medios" },
+  { key: "Mic", Icon: Mic, label: "Micrófono", cat: "Medios" },
+  { key: "Radio", Icon: Radio, label: "Radio", cat: "Medios" },
+  { key: "Tv", Icon: Tv, label: "TV", cat: "Medios" },
+  { key: "Newspaper", Icon: Newspaper, label: "Prensa", cat: "Medios" },
+  // Naturaleza
+  { key: "Sun", Icon: Sun, label: "Sol", cat: "Naturaleza" },
+  { key: "Moon", Icon: Moon, label: "Luna", cat: "Naturaleza" },
+  { key: "Cloud", Icon: Cloud, label: "Nube", cat: "Naturaleza" },
+  { key: "Snowflake", Icon: Snowflake, label: "Nieve", cat: "Naturaleza" },
+  { key: "Flame", Icon: Flame, label: "Fuego", cat: "Naturaleza" },
+  { key: "Leaf", Icon: Leaf, label: "Hoja", cat: "Naturaleza" },
+  { key: "Mountain", Icon: Mountain, label: "Montaña", cat: "Naturaleza" },
+  { key: "Flower2", Icon: Flower2, label: "Flor", cat: "Naturaleza" },
+  { key: "Globe", Icon: Globe, label: "Mundo", cat: "Naturaleza" },
+  // Logros
+  { key: "Award", Icon: Award, label: "Premio", cat: "Logros" },
+  { key: "Trophy", Icon: Trophy, label: "Trofeo", cat: "Logros" },
+  { key: "Star", Icon: Star, label: "Estrella", cat: "Logros" },
+  { key: "Zap", Icon: Zap, label: "Rayo", cat: "Logros" },
+  { key: "Rocket", Icon: Rocket, label: "Cohete", cat: "Logros" },
+  { key: "Target", Icon: Target, label: "Meta", cat: "Logros" },
+  { key: "Activity", Icon: Activity, label: "Actividad", cat: "Logros" },
+  { key: "Dumbbell", Icon: Dumbbell, label: "Gym", cat: "Logros" },
+  // Negocios
+  { key: "Briefcase", Icon: Briefcase, label: "Trabajo", cat: "Negocios" },
+  { key: "Building2", Icon: Building2, label: "Empresa", cat: "Negocios" },
+  { key: "Package", Icon: Package, label: "Paquete", cat: "Negocios" },
+  { key: "ShoppingCart", Icon: ShoppingCart, label: "Tienda", cat: "Negocios" },
+  { key: "Truck", Icon: Truck, label: "Envío", cat: "Negocios" },
+  { key: "Wallet", Icon: Wallet, label: "Cartera", cat: "Negocios" },
+  { key: "CreditCard", Icon: CreditCard, label: "Pago", cat: "Negocios" },
+  { key: "TrendingUp", Icon: TrendingUp, label: "Tendencia", cat: "Negocios" },
+  { key: "BarChart3", Icon: BarChart3, label: "Gráfica", cat: "Negocios" },
+  // Comunicación
+  { key: "Mail", Icon: Mail, label: "Correo", cat: "Comunicación" },
+  { key: "Phone", Icon: Phone, label: "Teléfono", cat: "Comunicación" },
+  { key: "MessageCircle", Icon: MessageCircle, label: "Chat", cat: "Comunicación" },
+  { key: "Bell", Icon: Bell, label: "Notif.", cat: "Comunicación" },
+  { key: "Share2", Icon: Share2, label: "Compartir", cat: "Comunicación" },
+  { key: "Users", Icon: Users, label: "Equipo", cat: "Comunicación" },
+  { key: "User", Icon: User, label: "Usuario", cat: "Comunicación" },
+  { key: "Heart", Icon: Heart, label: "Me gusta", cat: "Comunicación" },
+  // Herramientas
+  { key: "Settings", Icon: Settings, label: "Ajustes", cat: "Herramientas" },
+  { key: "Wrench", Icon: Wrench, label: "Llave", cat: "Herramientas" },
+  { key: "Hammer", Icon: Hammer, label: "Martillo", cat: "Herramientas" },
+  { key: "Compass", Icon: Compass, label: "Brújula", cat: "Herramientas" },
+  { key: "Map", Icon: Map, label: "Mapa", cat: "Herramientas" },
+  { key: "Shield", Icon: Shield, label: "Seguridad", cat: "Herramientas" },
+  { key: "Lock", Icon: Lock, label: "Candado", cat: "Herramientas" },
+  { key: "Fingerprint", Icon: Fingerprint, label: "Huella", cat: "Herramientas" },
+  { key: "Bug", Icon: Bug, label: "Debug", cat: "Herramientas" },
+  { key: "Gamepad2", Icon: Gamepad2, label: "Juego", cat: "Herramientas" },
+];
 
 const normalizeString = (s: string) => {
   return s
@@ -68,6 +184,8 @@ export default function AdminPanel({
   const [copyBgBlur, setCopyBgBlur] = useState(0);
   const [copyBgColor, setCopyBgColor] = useState("");
   const [copyIsActive, setCopyIsActive] = useState(true);
+  const [copyIcon, setCopyIcon] = useState("UploadCloud");
+  const [iconSearch, setIconSearch] = useState("");
   const [copyUseDatabase, setCopyUseDatabase] = useState(false);
   const [copyDatabaseId, setCopyDatabaseId] = useState("");
   const [copyDbColumns, setCopyDbColumns] = useState<DbColumn[]>([]);
@@ -140,6 +258,7 @@ export default function AdminPanel({
       setCopyBgBlur(typeof active.bgBlur === "number" ? active.bgBlur : 0);
       setCopyBgColor(active.bgColor || "");
       setCopyIsActive(active.isActive !== false);
+      setCopyIcon(active.icon || "UploadCloud");
       setCopyUseDatabase(!!active.useDatabase);
       setCopyDatabaseId(active.databaseId || "");
       setCopyDbColumns(Array.isArray(active.dbColumns) ? active.dbColumns : []);
@@ -178,6 +297,7 @@ export default function AdminPanel({
           backgroundImage: "",
           bgBlur: 0,
           bgColor: copyBgColor,
+          icon: copyIcon,
           isActive: copyIsActive,
           useDatabase: copyUseDatabase,
           databaseId: copyDatabaseId,
@@ -839,6 +959,78 @@ export default function AdminPanel({
                       }}
                     />
                   ))}
+                </div>
+              </div>
+
+              {/* Icon picker for the card corner box */}
+              <div className="border-t border-white/5 pt-4">
+                <label className="block text-xs font-semibold text-white/40 mb-2 uppercase tracking-wide">
+                  Icono del Proyecto
+                </label>
+                <p className="text-[10px] text-white/30 mb-2.5">
+                  Se muestra en la esquina superior derecha y flota como partículas en el fondo.
+                </p>
+
+                {/* Selected preview + search input */}
+                <div className="flex items-center gap-2 mb-2">
+                  {(() => {
+                    const found = ICON_OPTIONS.find(o => o.key === copyIcon);
+                    const SelectedIcon = found?.Icon ?? UploadCloud;
+                    return (
+                      <div className="w-9 h-9 shrink-0 flex items-center justify-center rounded-xl bg-white/10 border border-white/20 text-white">
+                        <SelectedIcon className="w-5 h-5" />
+                      </div>
+                    );
+                  })()}
+                  <div className="relative flex-1">
+                    <Search className="absolute left-2.5 top-2.5 w-3 h-3 text-white/30" />
+                    <input
+                      type="text"
+                      placeholder="Buscar icono..."
+                      value={iconSearch}
+                      onChange={(e) => setIconSearch(e.target.value)}
+                      className="w-full pl-7 pr-2.5 py-2 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white placeholder-white/20 transition-all"
+                    />
+                  </div>
+                </div>
+
+                {/* Scrollable grid */}
+                <div className="overflow-y-auto max-h-48 rounded-xl border border-white/5 bg-[#0a0a0a] p-1.5">
+                  {(() => {
+                    const query = iconSearch.toLowerCase();
+                    const filtered = ICON_OPTIONS.filter(
+                      ({ key, label, cat }) =>
+                        !query ||
+                        label.toLowerCase().includes(query) ||
+                        key.toLowerCase().includes(query) ||
+                        cat.toLowerCase().includes(query)
+                    );
+                    if (filtered.length === 0) {
+                      return (
+                        <p className="text-[10px] text-white/30 text-center py-4">Sin resultados para "{iconSearch}"</p>
+                      );
+                    }
+                    return (
+                      <div className="grid grid-cols-7 gap-1">
+                        {filtered.map(({ key, Icon, label }) => (
+                          <button
+                            key={key}
+                            type="button"
+                            title={label}
+                            onClick={() => setCopyIcon(key)}
+                            className={`flex flex-col items-center justify-center gap-0.5 p-1.5 rounded-lg border transition-all cursor-pointer ${
+                              copyIcon === key
+                                ? "bg-white/15 border-white/40 text-white"
+                                : "bg-transparent border-transparent text-white/40 hover:border-white/15 hover:text-white/70 hover:bg-white/5"
+                            }`}
+                          >
+                            <Icon className="w-4 h-4 shrink-0" />
+                            <span className="text-[7px] font-semibold truncate w-full text-center leading-tight">{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 

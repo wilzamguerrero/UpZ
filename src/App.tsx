@@ -1,8 +1,38 @@
 import React, { useState, useEffect } from "react";
 import {
   ShieldCheck, Mail, User, ListFilter, Send,
-  CheckCircle2, Loader2, ArrowRight, Settings2, RefreshCcw, AlertTriangle, Clock, EyeOff, AlertCircle, UploadCloud
+  CheckCircle2, Loader2, ArrowRight, Settings2, RefreshCcw, AlertTriangle, Clock, EyeOff, AlertCircle, UploadCloud,
+  FileText, BookOpen, Code2, Palette, Microscope, GraduationCap, Briefcase,
+  Star, Zap, Globe, Music, Camera, Cpu, Layers, Award, Package, Rocket,
+  File, Folder, FolderOpen, Archive, Terminal, Server, Wifi, Monitor, Laptop, Smartphone,
+  HardDrive, Keyboard, Image, Film, Video, Headphones, Mic, Radio, Tv,
+  Sun, Moon, Cloud, Leaf, Mountain, Flower2, Snowflake, Flame,
+  Activity, Dumbbell, Trophy, Target, Heart, Bell, Phone, Users,
+  MessageCircle, Share2, ShoppingCart, Truck, Building2, Wallet, CreditCard,
+  Wrench, Hammer, Settings, Calculator, Ruler, PencilLine, Scissors,
+  Hexagon, Hash, Percent, FlaskConical, Atom, Compass,
+  Gamepad2, Newspaper, Map, Lightbulb, Wand2, Sparkles, Brain,
+  Lock, Shield, Fingerprint, Bug,
+  TrendingUp, BarChart3, Sigma, FunctionSquare,
+  Download,
+  type LucideIcon
 } from "lucide-react";
+
+const ICON_MAP: Record<string, LucideIcon> = {
+  UploadCloud, FileText, BookOpen, Code2, Palette, Microscope,
+  GraduationCap, Briefcase, Star, Zap, Globe, Music, Camera, Cpu, Layers, Award, Package, Rocket,
+  File, Folder, FolderOpen, Archive, Terminal, Server, Wifi, Monitor, Laptop, Smartphone,
+  HardDrive, Keyboard, Image, Film, Video, Headphones, Mic, Radio, Tv,
+  Sun, Moon, Cloud, Leaf, Mountain, Flower2, Snowflake, Flame,
+  Activity, Dumbbell, Trophy, Target, Heart, Bell, Phone, Users,
+  MessageCircle, Share2, ShoppingCart, Truck, Building2, Wallet, CreditCard,
+  Wrench, Hammer, Settings, Calculator, Ruler, PencilLine, Scissors,
+  Hexagon, Hash, Percent, FlaskConical, Atom, Compass,
+  Gamepad2, Newspaper, Map, Lightbulb, Wand2, Sparkles, Brain,
+  Lock, Shield, Fingerprint, Bug,
+  TrendingUp, BarChart3, Sigma, FunctionSquare,
+  Download, Mail, User,
+};
 import { Project, ProjectMeta } from "./types";
 import Dropzone from "./components/Dropzone";
 import AdminPanel from "./components/AdminPanel";
@@ -686,6 +716,29 @@ export default function App() {
           />
         )}
 
+        {/* Floating particles layer — renders between background and card content */}
+        {activeTab === "upload" && (() => {
+          const iconKey = activeMeta?.icon || "UploadCloud";
+          const ParticleIcon = ICON_MAP[iconKey] ?? UploadCloud;
+          const iconColor = bgColorIsLight ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.18)';
+          return (
+            <div
+              className="particles-container"
+              style={{
+                '--particles-fade': currentBgColor || '#050505',
+              } as React.CSSProperties}
+            >
+              <div className="squares">
+                {Array.from({ length: 10 }).map((_, i) => (
+                  <div key={i} className="square icon-particle">
+                    <ParticleIcon style={{ width: '100%', height: '100%', color: iconColor }} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Dynamic Header Nav Bar */}
         {/* Minimal floating nav icons — no bar, no background */}
         <div className="fixed top-4 right-4 z-50 flex gap-1.5">
@@ -730,7 +783,7 @@ export default function App() {
               >
 
                 <div
-                  className="adaptive-card relative p-6 sm:p-8 backdrop-blur-xl"
+                  className="adaptive-card relative z-[2] p-6 sm:p-8 backdrop-blur-xl"
                   data-adaptive={hasBgColor ? (bgColorIsLight ? "light" : "dark") : "dark"}
                   style={{
                     backgroundColor: 'transparent',
@@ -742,14 +795,6 @@ export default function App() {
                     color: hasBgColor ? adaptiveText : undefined,
                   } as React.CSSProperties}
                 >
-                  {/* Card corner icon */}
-                  <div
-                    className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-lg"
-                    style={{ background: 'var(--border-subtle, rgba(255,255,255,0.05))', border: '1px solid var(--border-medium, rgba(255,255,255,0.1))' }}
-                  >
-                    <UploadCloud className="w-4 h-4" style={{ color: 'var(--accent, rgba(255,255,255,0.6))' }} />
-                  </div>
-
                   {submitSuccess ? (
                     // Submission Success feedback View
                     <motion.div

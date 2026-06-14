@@ -542,3 +542,144 @@ body {
 .hover-text-adaptive {
   transition: color 0.3s ease;
 }
+
+/* ── Floating particles / squares animation ─────────────────────────────── */
+.particles-container {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.particles-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 60vh;
+  background-image: linear-gradient(to bottom, var(--particles-fade, #050505) 0%, transparent 100%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.particles-container::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 20vh;
+  background-image: linear-gradient(to top, var(--particles-fade, #050505) 0%, transparent 100%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.particles-container .squares {
+  height: 100%;
+  display: flex;
+  justify-content: space-around;
+  overflow: hidden;
+}
+
+.particles-container .square {
+  animation: particleSquares 9.5s linear infinite;
+  align-self: flex-end;
+  width: 1em;
+  height: 1em;
+  transform: translateY(100%);
+  background: var(--particles-square-color, rgba(255, 255, 255, 0.06));
+  border-radius: 2px;
+}
+
+/* When particle contains an icon, remove background and show only the SVG */
+.particles-container .square.icon-particle {
+  background: transparent !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.particles-container .square.icon-particle svg {
+  flex-shrink: 0;
+}
+
+.particles-container .square:nth-child(2) {
+  height: 1.5em;
+  width: 3em;
+  animation-delay: 1s;
+  animation-duration: 17s;
+  filter: blur(5px);
+}
+
+.particles-container .square:nth-child(3) {
+  height: 2em;
+  width: 1em;
+  animation-delay: 1.5s;
+  animation-duration: 8s;
+}
+
+.particles-container .square:nth-child(4) {
+  height: 1em;
+  width: 1.5em;
+  animation-delay: 0.5s;
+  filter: blur(3px);
+  animation-duration: 13s;
+}
+
+.particles-container .square:nth-child(5) {
+  height: 1.25em;
+  width: 2em;
+  animation-delay: 4s;
+  filter: blur(2px);
+  animation-duration: 11s;
+}
+
+.particles-container .square:nth-child(6) {
+  height: 2.5em;
+  width: 2em;
+  animation-delay: 2s;
+  filter: blur(1px);
+  animation-duration: 9s;
+}
+
+.particles-container .square:nth-child(7) {
+  height: 5em;
+  width: 2em;
+  filter: blur(2.5px);
+  animation-duration: 12s;
+}
+
+.particles-container .square:nth-child(8) {
+  height: 1em;
+  width: 3em;
+  animation-delay: 5s;
+  filter: blur(6px);
+  animation-duration: 18s;
+}
+
+.particles-container .square:nth-child(9) {
+  height: 1.5em;
+  width: 2em;
+  filter: blur(0.5px);
+  animation-duration: 9s;
+}
+
+.particles-container .square:nth-child(10) {
+  height: 3em;
+  width: 2.4em;
+  animation-delay: 6s;
+  filter: blur(0.5px);
+  animation-duration: 12s;
+}
+
+@keyframes particleSquares {
+  from {
+    transform: translateY(100%) rotate(-50deg);
+  }
+  to {
+    transform: translateY(calc(-100vh - 100%)) rotate(20deg);
+  }
+}
