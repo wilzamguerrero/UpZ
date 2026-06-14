@@ -24,6 +24,7 @@ import GradingTable from "./GradingTable";
 
 const genId = () => `cf_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 const genColId = () => `col_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+const EMPTY_META_LOAD_SIGNATURE = "__missing__";
 
 const ICON_OPTIONS: { key: string; Icon: LucideIcon; label: string; cat: string }[] = [
   // Archivos
@@ -255,23 +256,15 @@ export default function AdminPanel({
     }
   }, [projects, selectedMetaProjectId]);
 
-  // Track last project ID for which we've loaded form fields — prevents refresh from overwriting user edits
-  const lastLoadedProjectId = React.useRef<string>("");
-
-  // Sync copywriting form fields ONLY when the selected project changes (not on every projectMeta refresh)
-  useEffect(() => {
-    if (!selectedMetaProjectId) return;
-    // Only reset fields when the project actually changes, not on projectMeta background refresh
-    if (lastLoadedProjectId.current === selectedMetaProjectId) return;
-    lastLoadedProjectId.current = selectedMetaProjectId;
-
-    const active = projectMeta[selectedMetaProjectId] || {
+  const loadProjectMetaIntoForm = (meta?: ProjectMeta) => {
+    const active = meta || {
       title: "Comparte tus archivos directo a Notion.",
       description: "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instantánea. Tus archivos se organizan de forma automática bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la página del proyecto que elijas.",
       expirationDate: "",
       backgroundImage: "",
       isActive: true
     };
+
     setCopyTitle(active.title || "");
     setCopyDesc(active.description || "");
 
@@ -286,6 +279,7 @@ export default function AdminPanel({
         return { id: genId(), label, value };
       });
     }
+
     setCopyCustomFields(fields);
     setCopyExpiration(active.expirationDate || "");
     setCopyBackground(active.backgroundImage || "");
@@ -298,6 +292,50 @@ export default function AdminPanel({
     setCopyDbColumns(Array.isArray(active.dbColumns) ? active.dbColumns : []);
     setCopyGroupId(active.groupId || "");
     setMetaMessage(null);
+  };
+
+  const getProjectMetaLoadSignature = (meta?: ProjectMeta) => {
+    if (!meta) return EMPTY_META_LOAD_SIGNATURE;
+    return JSON.stringify({
+      title: meta.title || "",
+      description: meta.description || "",
+      step1: meta.step1 || "",
+      step2: meta.step2 || "",
+      step3: meta.step3 || "",
+      customFields: Array.isArray(meta.customFields) ? meta.customFields : [],
+      expirationDate: meta.expirationDate || "",
+      backgroundImage: meta.backgroundImage || "",
+      bgBlur: typeof meta.bgBlur === "number" ? meta.bgBlur : 0,
+      bgColor: meta.bgColor || "",
+      isActive: meta.isActive !== false,
+      icon: meta.icon || "UploadCloud",
+      useDatabase: !!meta.useDatabase,
+      databaseId: meta.databaseId || "",
+      dbColumns: Array.isArray(meta.dbColumns) ? meta.dbColumns : [],
+      groupId: meta.groupId || "",
+    });
+  };
+
+  // Track last project ID for which we've loaded form fields — prevents refresh from overwriting user edits
+  const lastLoadedProjectId = React.useRef<string>("");
+  const lastLoadedMetaSignature = React.useRef<string>(EMPTY_META_LOAD_SIGNATURE);
+
+  // Sync copywriting form fields when the project changes, and once more if its metadata arrives later.
+  useEffect(() => {
+    if (!selectedMetaProjectId) return;
+
+    const activeMeta = projectMeta[selectedMetaProjectId];
+    const nextSignature = getProjectMetaLoadSignature(activeMeta);
+    const projectChanged = lastLoadedProjectId.current !== selectedMetaProjectId;
+    const shouldHydrateLateMeta = !projectChanged
+      && lastLoadedMetaSignature.current === EMPTY_META_LOAD_SIGNATURE
+      && nextSignature !== EMPTY_META_LOAD_SIGNATURE;
+
+    if (!projectChanged && !shouldHydrateLateMeta) return;
+
+    lastLoadedProjectId.current = selectedMetaProjectId;
+    lastLoadedMetaSignature.current = nextSignature;
+    loadProjectMetaIntoForm(activeMeta);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMetaProjectId, projectMeta]);
 
@@ -988,7 +1026,7 @@ export default function AdminPanel({
                 <div className="flex items-center gap-2">
                   <input
                     type="color"
-                    value={copyBgColor || "#0a0a0a"}
+                    value={copyBgColor || "#f5f011"}
                     onChange={(e) => setCopyBgColor(e.target.value)}
                     className="w-9 h-9 cursor-pointer bg-transparent border border-white/10 p-0.5 rounded-lg"
                     title="Elegir color de fondo"
@@ -1013,6 +1051,11 @@ export default function AdminPanel({
                     />
                   )}
                 </div>
+                {!copyBgColor && (
+                  <p className="text-[10px] text-white/30 mt-2">
+                    Este proyecto no tiene un color guardado todavía. El selector muestra un color temporal hasta que elijas uno y guardes.
+                  </p>
+                )}
                 {/* Quick color presets */}
                 <div className="flex flex-wrap gap-1.5 mt-2.5">
                   {["#f5f011", "#ffffff", "#f0f0f0", "#111111", "#0a0a0a", "#ff3b30", "#ff9500", "#34c759", "#007aff", "#af52de", "#ff2d55", "#e8d5b7"].map((hex) => (
