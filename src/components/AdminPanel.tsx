@@ -189,6 +189,33 @@ export default function AdminPanel({
   const [copyUseDatabase, setCopyUseDatabase] = useState(false);
   const [copyDatabaseId, setCopyDatabaseId] = useState("");
   const [copyDbColumns, setCopyDbColumns] = useState<DbColumn[]>([]);
+
+  const bgColorLuminance = (() => {
+    if (!copyBgColor) return null;
+    const hex = copyBgColor.replace("#", "").trim();
+    if (hex.length !== 3 && hex.length !== 6) return null;
+    const expanded = hex.length === 3
+      ? hex.split("").map((char) => char + char).join("")
+      : hex;
+    const r = parseInt(expanded.slice(0, 2), 16) / 255;
+    const g = parseInt(expanded.slice(2, 4), 16) / 255;
+    const b = parseInt(expanded.slice(4, 6), 16) / 255;
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  })();
+  const isBgColorLight = bgColorLuminance !== null && bgColorLuminance > 0.55;
+  const databaseSurface = copyBgColor
+    ? (isBgColorLight ? "rgba(0, 0, 0, 0.06)" : "rgba(255, 255, 255, 0.07)")
+    : "#0a0a0a";
+  const databaseBorder = copyBgColor
+    ? (isBgColorLight ? "rgba(0, 0, 0, 0.14)" : "rgba(255, 255, 255, 0.12)")
+    : "rgba(255, 255, 255, 0.05)";
+  const databaseText = copyBgColor
+    ? (isBgColorLight ? "#111111" : "#ffffff")
+    : "#ffffff";
+  const databaseMuted = copyBgColor
+    ? (isBgColorLight ? "rgba(17, 17, 17, 0.58)" : "rgba(255, 255, 255, 0.44)")
+    : "rgba(255, 255, 255, 0.30)";
+  const databaseAccent = copyBgColor || "var(--accent, #f5f011)";
   const [isCreatingDb, setIsCreatingDb] = useState(false);
   const [copyGroupId, setCopyGroupId] = useState("");
 
@@ -766,26 +793,41 @@ export default function AdminPanel({
 
               {/* Database mode (point 8) */}
               <div className="space-y-2 border-t border-white/5 pt-4">
-                <div className="flex items-center gap-2 p-1.5 bg-[#0d0d0d] border border-white/5 rounded-xl">
+                <div
+                  className="flex items-center gap-2 p-1.5 rounded-xl"
+                  style={{
+                    backgroundColor: databaseSurface,
+                    border: `1px solid ${databaseBorder}`,
+                    color: databaseText,
+                  }}
+                >
                   <input
                     type="checkbox"
                     id="use-database-checkbox"
                     checked={copyUseDatabase}
                     onChange={(e) => setCopyUseDatabase(e.target.checked)}
-                    className="w-4 h-4 rounded text-black border-white/10 bg-[#0d0d0d] focus:ring-0 cursor-pointer"
+                    className="w-4 h-4 rounded focus:ring-0 cursor-pointer"
+                    style={{ accentColor: databaseAccent }}
                   />
-                  <label htmlFor="use-database-checkbox" className="text-[11px] font-bold text-white/80 cursor-pointer select-none">
+                  <label htmlFor="use-database-checkbox" className="text-[11px] font-bold cursor-pointer select-none" style={{ color: databaseText }}>
                     Usar base de datos (tabla en Notion)
                   </label>
                 </div>
-                <p className="text-[10px] text-white/30">
+                <p className="text-[10px]" style={{ color: databaseMuted }}>
                   Sin base de datos: cada env├¡o crea un toggle por persona (modo actual). Con base de datos: cada env├¡o se guarda como fila en una tabla de Notion y puedes calificar.
                 </p>
 
                 {copyUseDatabase && (
-                  <div className="space-y-2 bg-[#0a0a0a] border border-white/5 rounded-xl p-3">
+                  <div
+                    className="space-y-2 rounded-xl p-3"
+                    style={{
+                      backgroundColor: databaseSurface,
+                      border: `1px solid ${databaseBorder}`,
+                      color: databaseText,
+                    }}
+                  >
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">
+                      <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: databaseMuted }}>
                         Columnas de control
                       </span>
                       <button
@@ -793,19 +835,20 @@ export default function AdminPanel({
                         onClick={() =>
                           setCopyDbColumns((prev) => [...prev, { id: genColId(), name: "", type: "text" }])
                         }
-                        className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer"
+                        className="text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
+                        style={{ color: databaseAccent }}
                       >
                         <Plus className="w-3 h-3" /> Agregar columna
                       </button>
                     </div>
 
                     {copyDbColumns.length === 0 ? (
-                      <p className="text-[10px] text-white/30 text-center py-1">
+                      <p className="text-[10px] text-center py-1" style={{ color: databaseMuted }}>
                         Ej: Nota, Estado, Comentarios. Nombre, Correo, Fecha y Archivos se a├▒aden autom├íticamente.
                       </p>
                     ) : (
                       copyDbColumns.map((col, idx) => (
-                        <div key={col.id} className="flex gap-1.5 items-center">
+                        <div key={col.id} className="flex flex-wrap items-center gap-1.5">
                           <input
                             type="text"
                             placeholder="Nombre (ej: Nota)"
@@ -815,7 +858,12 @@ export default function AdminPanel({
                                 prev.map((c, i) => (i === idx ? { ...c, name: e.target.value } : c))
                               )
                             }
-                            className="flex-1 px-2.5 py-2 bg-[#111] border border-white/10 rounded-lg text-xs focus:border-white/30 focus:outline-none text-white"
+                            className="min-w-[140px] flex-1 px-2.5 py-2 rounded-lg text-xs focus:outline-none"
+                            style={{
+                              backgroundColor: databaseSurface,
+                              border: `1px solid ${databaseBorder}`,
+                              color: databaseText,
+                            }}
                           />
                           <select
                             value={col.type}
@@ -824,7 +872,12 @@ export default function AdminPanel({
                                 prev.map((c, i) => (i === idx ? { ...c, type: e.target.value as DbColumn["type"] } : c))
                               )
                             }
-                            className="px-2 py-2 bg-[#111] border border-white/10 rounded-lg text-xs text-white cursor-pointer"
+                            className="px-2 py-2 rounded-lg text-xs cursor-pointer"
+                            style={{
+                              backgroundColor: databaseSurface,
+                              border: `1px solid ${databaseBorder}`,
+                              color: databaseText,
+                            }}
                           >
                             <option value="text">Texto</option>
                             <option value="number">N├║mero</option>
@@ -835,7 +888,12 @@ export default function AdminPanel({
                           <button
                             type="button"
                             onClick={() => setCopyDbColumns((prev) => prev.filter((_, i) => i !== idx))}
-                            className="p-2 text-red-400/60 hover:text-red-400 hover:bg-red-950/20 border border-white/5 rounded-lg transition-all cursor-pointer shrink-0"
+                            className="p-2 rounded-lg transition-all cursor-pointer shrink-0"
+                            style={{
+                              color: isBgColorLight ? "#b91c1c" : "#fecaca",
+                              backgroundColor: isBgColorLight ? "rgba(220, 38, 38, 0.08)" : "rgba(127, 29, 29, 0.18)",
+                              border: `1px solid ${databaseBorder}`,
+                            }}
                             title="Eliminar columna"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -846,7 +904,7 @@ export default function AdminPanel({
 
                     <div className="flex items-center justify-between gap-2 pt-1">
                       {copyDatabaseId ? (
-                        <span className="text-[10px] text-emerald-400 font-mono truncate flex items-center gap-1">
+                        <span className="text-[10px] font-mono truncate flex items-center gap-1" style={{ color: databaseAccent }}>
                           <Check className="w-3 h-3 shrink-0" /> BD: {copyDatabaseId.slice(0, 8)}...
                         </span>
                       ) : (
@@ -856,7 +914,12 @@ export default function AdminPanel({
                         type="button"
                         onClick={handleCreateDatabase}
                         disabled={isCreatingDb}
-                        className="text-[10px] font-semibold bg-white/10 hover:bg-white/15 text-white px-2.5 py-1.5 rounded-lg border border-white/10 transition-all disabled:opacity-50 cursor-pointer"
+                        className="text-[10px] font-semibold px-2.5 py-1.5 rounded-lg border transition-all disabled:opacity-50 cursor-pointer"
+                        style={{
+                          backgroundColor: databaseSurface,
+                          borderColor: databaseBorder,
+                          color: databaseText,
+                        }}
                       >
                         {isCreatingDb ? "Creando..." : copyDatabaseId ? "Recrear BD" : "Crear base de datos"}
                       </button>
