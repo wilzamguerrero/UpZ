@@ -47,7 +47,7 @@ function cleanNotionId(input: string): string {
 
 const BG_IMG_BLOCK_CAPTION = "__CERT_BG_IMG__";
 const NOTION_API_BASE_URL = "https://api.notion.com/v1";
-const NOTION_API_VER = "2022-06-28";
+const NOTION_API_VER = "2026-03-11";
 
 const NOTION_MIME_TYPES: Record<string, string> = {
   // Archives & Compressed

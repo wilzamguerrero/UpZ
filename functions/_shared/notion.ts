@@ -1,4 +1,4 @@
-const NOTION_VERSION = "2022-06-28";
+const NOTION_VERSION = "2026-03-11";
 const NOTION_BASE = "https://api.notion.com/v1";
 
 export interface Env {
@@ -181,6 +181,12 @@ function resolveUploadMeta(filename: string, mimeType: string): { uploadName: st
 /**
  * Upload a small file (≤ 20MB) directly to Notion using single-part upload.
  * Step 1: create the upload object → Step 2: send the file content.
+ *
+ * IMPORTANT: The file is re-wrapped as a Blob with the standardized content type
+ * so that the MIME type sent in the multipart form matches what was declared
+ * during the Create step. Browsers may report non-standard MIME types
+ * (e.g. "application/x-zip-compressed" instead of "application/zip") which
+ * causes Notion to reject the upload with a content-type mismatch error.
  */
 export async function uploadFileToNotion(
   file: File,
@@ -208,8 +214,12 @@ export async function uploadFileToNotion(
   }
 
   // Step 2: send the file content
+  // Re-wrap as Blob with the EXACT content type declared above so Notion accepts it.
+  const fileBuffer = await file.arrayBuffer();
+  const fileBlob = new Blob([fileBuffer], { type: contentType });
+
   const sendForm = new FormData();
-  sendForm.append("file", file, uploadName);
+  sendForm.append("file", fileBlob, uploadName);
 
   const sendRes = await fetch(upload.upload_url, {
     method: "POST",
@@ -240,6 +250,9 @@ export async function uploadFileToNotion(
  *   1. Create a multi_part file upload → get upload_url and complete_url
  *   2. Split file into chunks of ~10MB, send each with part_number
  *   3. POST to complete_url to finalize
+ *
+ * Each chunk is wrapped as a Blob with the standardized content type to
+ * prevent MIME type mismatch errors from the Notion API.
  */
 const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MiB per chunk (Notion recommends 10MB, min 5MB max 20MB)
 
@@ -352,4 +365,3 @@ export function cleanNotionId(input: string): string {
   }
   return trimmed;
 }
-
