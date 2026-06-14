@@ -166,6 +166,146 @@ export default function App() {
     setSelectedFiles((prev) => prev.filter((_, idx) => idx !== index));
   };
 
+  // ─── Upload progress state ───
+  const [uploadProgress, setUploadProgress] = useState<{ fileName: string; percent: number } | null>(null);
+
+  const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MiB — matches server-side chunk size
+  const SMALL_FILE_THRESHOLD = 20 * 1024 * 1024; // 20 MiB
+  const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB (Notion limit)
+
+  /**
+   * Upload a single file to Notion.
+   * - Files ≤ 20MB: single request to /api/upload-file
+   * - Files > 20MB: chunked flow (init → parts → complete)
+   */
+  const uploadOneFile = async (
+    file: File,
+    fileIndex: number,
+    totalFiles: number
+  ): Promise<{
+    name: string; finalName: string; size: number;
+    uploadId: string; extModified: boolean; mimeType: string;
+  }> => {
+    const label = `${file.name} (${fileIndex + 1}/${totalFiles})`;
+
+    // ── Validate file size ──
+    if (file.size > MAX_FILE_SIZE) {
+      throw new Error(`"${file.name}" excede el límite de 5 GB.`);
+    }
+
+    // ── Small file: existing single-request flow ──
+    if (file.size <= SMALL_FILE_THRESHOLD) {
+      setSubmitStep(`Subiendo ${label}...`);
+      setUploadProgress({ fileName: file.name, percent: 0 });
+
+      const fd = new FormData();
+      fd.append("file", file, file.name);
+      const res = await fetch("/api/upload-file", { method: "POST", body: fd });
+
+      // Guard against Cloudflare returning HTML (e.g. body too large)
+      const text = await res.text();
+      let data: any;
+      try { data = JSON.parse(text); } catch {
+        throw new Error(`Respuesta inesperada del servidor al subir "${file.name}". Puede que el archivo sea demasiado grande.`);
+      }
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || `Error al subir "${file.name}"`);
+      }
+
+      setUploadProgress({ fileName: file.name, percent: 100 });
+
+      return {
+        name: file.name,
+        finalName: data.finalName as string,
+        size: file.size,
+        uploadId: data.id as string,
+        extModified: data.extModified as boolean,
+        mimeType: file.type || "application/octet-stream",
+      };
+    }
+
+    // ── Large file: chunked flow ──
+    const numberOfParts = Math.ceil(file.size / CHUNK_SIZE);
+
+    // Step 1: Initialize the upload on Notion
+    setSubmitStep(`Inicializando ${label} (${numberOfParts} partes)...`);
+    setUploadProgress({ fileName: file.name, percent: 0 });
+
+    const initRes = await fetch("/api/upload-init", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filename: file.name,
+        mimeType: file.type,
+        fileSize: file.size,
+      }),
+    });
+    const initData = await initRes.json();
+    if (!initRes.ok || !initData.success) {
+      throw new Error(initData.error || `Error al inicializar upload de "${file.name}"`);
+    }
+
+    const { id: uploadId, uploadName, contentType, mode } = initData;
+
+    // Step 2: Send each chunk
+    for (let partNumber = 1; partNumber <= numberOfParts; partNumber++) {
+      const start = (partNumber - 1) * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const chunk = file.slice(start, end);
+
+      const pct = Math.round(((partNumber - 1) / numberOfParts) * 100);
+      setSubmitStep(`Subiendo ${label} — parte ${partNumber}/${numberOfParts} (${pct}%)`);
+      setUploadProgress({ fileName: file.name, percent: pct });
+
+      const chunkFd = new FormData();
+      chunkFd.append("file", chunk, uploadName);
+      chunkFd.append("upload_id", uploadId);
+      chunkFd.append("content_type", contentType);
+      chunkFd.append("upload_name", uploadName);
+      if (mode === "multi_part") {
+        chunkFd.append("part_number", String(partNumber));
+      }
+
+      const partRes = await fetch("/api/upload-part", { method: "POST", body: chunkFd });
+      const partText = await partRes.text();
+      let partData: any;
+      try { partData = JSON.parse(partText); } catch {
+        throw new Error(`Respuesta inesperada al subir parte ${partNumber} de "${file.name}".`);
+      }
+      if (!partRes.ok || !partData.success) {
+        throw new Error(partData.error || `Error en parte ${partNumber} de "${file.name}"`);
+      }
+    }
+
+    // Step 3: Complete the multi-part upload
+    if (mode === "multi_part") {
+      setSubmitStep(`Finalizando ${label}...`);
+      setUploadProgress({ fileName: file.name, percent: 99 });
+
+      const completeRes = await fetch("/api/upload-complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uploadId }),
+      });
+      const completeData = await completeRes.json();
+      if (!completeRes.ok || !completeData.success) {
+        throw new Error(completeData.error || `Error al completar upload de "${file.name}"`);
+      }
+    }
+
+    setUploadProgress({ fileName: file.name, percent: 100 });
+
+    return {
+      name: file.name,
+      finalName: uploadName,
+      size: file.size,
+      uploadId,
+      extModified: initData.extModified || false,
+      mimeType: file.type || "application/octet-stream",
+    };
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!senderName || !senderEmail || !selectedProjectId || selectedFiles.length === 0) {
@@ -176,54 +316,33 @@ export default function App() {
     setIsSubmitting(true);
     setSubmitError(null);
     setSubmitSuccess(null);
+    setUploadProgress(null);
 
     const chosenProj = projects.find(p => p.id === selectedProjectId);
     const projectName = chosenProj ? chosenProj.name : "";
 
-    // Step 1: Upload each file individually to Notion (parallel batches of 3)
+    // Step 1: Upload each file (sequentially to avoid rate limits)
     const fileRecords: {
       name: string; finalName: string; size: number;
       uploadId: string; extModified: boolean; mimeType: string;
     }[] = [];
 
     try {
-      const BATCH = 3;
-      for (let i = 0; i < selectedFiles.length; i += BATCH) {
-        const batch = selectedFiles.slice(i, i + BATCH);
-        setSubmitStep(
-          `Subiendo archivo${batch.length > 1 ? "s" : ""} ${i + 1}${batch.length > 1 ? `–${Math.min(i + BATCH, selectedFiles.length)}` : ""} de ${selectedFiles.length}...`
-        );
-
-        const results = await Promise.all(
-          batch.map(async (file) => {
-            const fd = new FormData();
-            fd.append("file", file, file.name);
-            const res = await fetch("/api/upload-file", { method: "POST", body: fd });
-            const data = await res.json();
-            if (!res.ok || !data.success) {
-              throw new Error(data.error || `Error al subir "${file.name}"`);
-            }
-            return {
-              name: file.name,
-              finalName: data.finalName as string,
-              size: file.size,
-              uploadId: data.id as string,
-              extModified: data.extModified as boolean,
-              mimeType: file.type || "application/octet-stream",
-            };
-          })
-        );
-        fileRecords.push(...results);
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const record = await uploadOneFile(selectedFiles[i], i, selectedFiles.length);
+        fileRecords.push(record);
       }
     } catch (err: any) {
       setSubmitError(err.message || "Error al subir archivos.");
       setIsSubmitting(false);
       setSubmitStep("");
+      setUploadProgress(null);
       return;
     }
 
-    // Step 2: POST only metadata + upload IDs to create the Notion toggle block
+    // Step 2: POST metadata + upload IDs to create the Notion toggle block
     setSubmitStep("Registrando en Notion...");
+    setUploadProgress(null);
     try {
       const res = await fetch("/api/submit", {
         method: "POST",
@@ -244,6 +363,7 @@ export default function App() {
     } finally {
       setIsSubmitting(false);
       setSubmitStep("");
+      setUploadProgress(null);
     }
   };
 
@@ -683,9 +803,22 @@ export default function App() {
                           <button
                             type="submit"
                             disabled={isSubmitting || selectedFiles.length === 0 || !selectedProjectId}
-                            className="w-full py-3.5 rounded-2xl bg-white hover:bg-white/95 disabled:bg-white/5 disabled:text-white/20 text-black font-extrabold text-xs tracking-wider uppercase transition-all select-none shadow-xs hover:shadow-sm cursor-pointer"
+                            className="w-full py-3.5 rounded-2xl bg-white hover:bg-white/95 disabled:bg-white/5 disabled:text-white/20 text-black font-extrabold text-xs tracking-wider uppercase transition-all select-none shadow-xs hover:shadow-sm cursor-pointer relative overflow-hidden"
                           >
-                            {isSubmitting ? (
+                            {isSubmitting && uploadProgress ? (
+                              <>
+                                {/* Progress bar background */}
+                                <div
+                                  className="absolute inset-0 bg-gradient-to-r from-emerald-400/30 to-emerald-500/20 transition-all duration-300 ease-out"
+                                  style={{ width: `${uploadProgress.percent}%` }}
+                                />
+                                <div className="relative flex items-center justify-center gap-2">
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                  <span className="truncate max-w-[70%]">{submitStep}</span>
+                                  <span className="font-mono text-[11px] bg-black/10 px-1.5 py-0.5 rounded">{uploadProgress.percent}%</span>
+                                </div>
+                              </>
+                            ) : isSubmitting ? (
                               <div className="flex items-center justify-center gap-2">
                                 <Loader2 className="w-4 h-4 animate-spin" />
                                 <span>{submitStep}</span>

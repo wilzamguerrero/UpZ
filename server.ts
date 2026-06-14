@@ -145,22 +145,59 @@ const NOTION_MIME_TYPES: Record<string, string> = {
   yaml: "text/yaml",
   yml: "text/yaml",
   tsv: "text/tab-separated-values",
+  // Creative / Design image formats
+  psd: "image/vnd.adobe.photoshop",
+  psb: "image/vnd.adobe.photoshop",
+  ai: "application/postscript",
+  eps: "application/postscript",
+  indd: "application/x-indesign",
+  raw: "image/x-raw",
+  cr2: "image/x-canon-cr2",
+  nef: "image/x-nikon-nef",
+  arw: "image/x-sony-arw",
+  dng: "image/x-adobe-dng",
+  xcf: "image/x-xcf",
+  sketch: "application/zip",
+  fig: "application/octet-stream",
+
+  // CAD / 3D
+  dwg: "application/acad",
+  dxf: "application/dxf",
+  stl: "model/stl",
+  obj: "model/obj",
+  fbx: "application/octet-stream",
+  blend: "application/x-blender",
+
+  // Programming / data
+  js: "text/javascript",
+  ts: "text/typescript",
+  py: "text/x-python",
+  java: "text/x-java",
+  c: "text/x-c",
+  cpp: "text/x-c++",
+  h: "text/x-c",
+  sql: "application/sql",
+  sh: "application/x-sh",
+  log: "text/plain",
+  ini: "text/plain",
+  cfg: "text/plain",
+  conf: "text/plain",
+  env: "text/plain",
+  toml: "text/plain",
 };
 
 function resolveUploadMeta(filename: string, mimeType: string): { uploadName: string; contentType: string; extModified: boolean } {
   const dotIndex = filename.lastIndexOf(".");
   const ext = dotIndex !== -1 ? filename.slice(dotIndex + 1).toLowerCase() : "";
-  let uploadName = filename;
+  const uploadName = filename;
   let contentType = mimeType || "application/octet-stream";
-  let extModified = false;
+  const extModified = false;
 
   const standardMime = NOTION_MIME_TYPES[ext];
   if (standardMime) {
     contentType = standardMime;
-  } else {
-    uploadName = filename + ".zip";
-    contentType = "application/zip";
-    extModified = true;
+  } else if (!mimeType || mimeType === "application/octet-stream") {
+    contentType = "application/octet-stream";
   }
 
   return { uploadName, contentType, extModified };
@@ -345,7 +382,11 @@ async function uploadLargeFileObjectToNotion(
   const initData = (await initResp.json()) as any;
   const { id: uploadId, upload_url, complete_url } = initData;
 
-  if (!upload_url || !complete_url) {
+  // Construct URLs — fall back to standard pattern if not in response
+  const uploadUrl = upload_url || `${NOTION_API_BASE_URL}/file_uploads/${uploadId}/send`;
+  const completeUrl = complete_url || `${NOTION_API_BASE_URL}/file_uploads/${uploadId}/complete`;
+
+  if (!uploadUrl) {
     throw new Error(`Notion did not return upload_url or complete_url: ${JSON.stringify(initData)}`);
   }
 
@@ -363,7 +404,7 @@ async function uploadLargeFileObjectToNotion(
       uploadName
     );
 
-    const partResp = await fetch(upload_url, {
+    const partResp = await fetch(uploadUrl, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${notionSecret}`,
@@ -379,7 +420,7 @@ async function uploadLargeFileObjectToNotion(
   }
 
   // Step 3: Complete the multi-part upload
-  const completeResp = await fetch(complete_url, {
+  const completeResp = await fetch(completeUrl, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${notionSecret}`,

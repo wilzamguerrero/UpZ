@@ -119,7 +119,7 @@ export default function Dropzone({ files, onFilesAdded, onFileRemoved }: Dropzon
             Arrastra tus archivos aquí o haz clic
           </h3>
           <p className="text-xs text-white/40 mt-1">
-            Cualquier tipo de archivo (Máx. 95MB)
+            Cualquier tipo de archivo (Máx. 5GB por archivo)
           </p>
         </div>
       </div>

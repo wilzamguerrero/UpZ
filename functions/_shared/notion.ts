@@ -84,6 +84,20 @@ const NOTION_MIME_TYPES: Record<string, string> = {
   heic: "image/heic",
   avif: "image/avif",
   apng: "image/apng",
+  // Creative / Design image formats
+  psd: "image/vnd.adobe.photoshop",
+  psb: "image/vnd.adobe.photoshop",
+  ai: "application/postscript",
+  eps: "application/postscript",
+  indd: "application/x-indesign",
+  raw: "image/x-raw",
+  cr2: "image/x-canon-cr2",
+  nef: "image/x-nikon-nef",
+  arw: "image/x-sony-arw",
+  dng: "image/x-adobe-dng",
+  xcf: "image/x-xcf",
+  sketch: "application/zip",
+  fig: "application/octet-stream",
 
   // Audio
   aac: "audio/aac",
@@ -156,37 +170,78 @@ const NOTION_MIME_TYPES: Record<string, string> = {
   yaml: "text/yaml",
   yml: "text/yaml",
   tsv: "text/tab-separated-values",
+
+  // CAD / 3D
+  dwg: "application/acad",
+  dxf: "application/dxf",
+  stl: "model/stl",
+  obj: "model/obj",
+  fbx: "application/octet-stream",
+  blend: "application/x-blender",
+
+  // Programming / data
+  js: "text/javascript",
+  ts: "text/typescript",
+  py: "text/x-python",
+  java: "text/x-java",
+  c: "text/x-c",
+  cpp: "text/x-c++",
+  h: "text/x-c",
+  rs: "text/x-rust",
+  go: "text/x-go",
+  rb: "text/x-ruby",
+  php: "text/x-php",
+  swift: "text/x-swift",
+  kt: "text/x-kotlin",
+  sql: "application/sql",
+  sh: "application/x-sh",
+  bat: "application/x-bat",
+  ps1: "application/x-powershell",
+  log: "text/plain",
+  ini: "text/plain",
+  cfg: "text/plain",
+  conf: "text/plain",
+  env: "text/plain",
+  toml: "text/plain",
 };
 
-/** Compute upload name and content type, adding .zip for unsupported extensions */
+/**
+ * Compute upload name and content type.
+ *
+ * - Known extensions → use standardized MIME from our map
+ * - Unknown extensions → keep original filename, use browser MIME or octet-stream
+ *   (no more wrapping in .zip — Notion accepts any file with a declared content_type)
+ * - Files with NO extension → keep as-is with octet-stream
+ */
 function resolveUploadMeta(filename: string, mimeType: string): { uploadName: string; contentType: string; extModified: boolean } {
   const dotIndex = filename.lastIndexOf(".");
   const ext = dotIndex !== -1 ? filename.slice(dotIndex + 1).toLowerCase() : "";
-  let uploadName = filename;
+  const uploadName = filename;
   let contentType = mimeType || "application/octet-stream";
-  let extModified = false;
+  const extModified = false;
 
   const standardMime = NOTION_MIME_TYPES[ext];
   if (standardMime) {
+    // Use the standardized MIME type (avoids browser variations like x-zip-compressed)
     contentType = standardMime;
-  } else {
-    uploadName = filename + ".zip";
-    contentType = "application/zip";
-    extModified = true;
+  } else if (!mimeType || mimeType === "application/octet-stream") {
+    // Unknown extension with no useful browser MIME — use octet-stream
+    contentType = "application/octet-stream";
   }
+  // else: keep the browser-provided MIME type
 
   return { uploadName, contentType, extModified };
 }
+
+// Re-export for use in upload-init.ts and other modules
+export { resolveUploadMeta, NOTION_VERSION, NOTION_BASE };
 
 /**
  * Upload a small file (≤ 20MB) directly to Notion using single-part upload.
  * Step 1: create the upload object → Step 2: send the file content.
  *
- * IMPORTANT: The file is re-wrapped as a Blob with the standardized content type
- * so that the MIME type sent in the multipart form matches what was declared
- * during the Create step. Browsers may report non-standard MIME types
- * (e.g. "application/x-zip-compressed" instead of "application/zip") which
- * causes Notion to reject the upload with a content-type mismatch error.
+ * The file is re-wrapped as a Blob with the standardized content type to
+ * prevent MIME type mismatch errors from the Notion API.
  */
 export async function uploadFileToNotion(
   file: File,
@@ -213,15 +268,16 @@ export async function uploadFileToNotion(
     throw new Error(`No se pudo crear el upload en Notion: ${JSON.stringify(upload)}`);
   }
 
-  // Step 2: send the file content
-  // Re-wrap as Blob with the EXACT content type declared above so Notion accepts it.
+  // Step 2: send the file content — re-wrap as Blob with correct MIME
   const fileBuffer = await file.arrayBuffer();
   const fileBlob = new Blob([fileBuffer], { type: contentType });
 
   const sendForm = new FormData();
   sendForm.append("file", fileBlob, uploadName);
 
-  const sendRes = await fetch(upload.upload_url, {
+  const sendUrl = upload.upload_url || `${NOTION_BASE}/file_uploads/${upload.id}/send`;
+
+  const sendRes = await fetch(sendUrl, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -245,16 +301,11 @@ export async function uploadFileToNotion(
 
 /**
  * Upload a large file (> 20MB, up to 5GB) to Notion using multi-part upload.
- *
- * Flow:
- *   1. Create a multi_part file upload → get upload_url and complete_url
- *   2. Split file into chunks of ~10MB, send each with part_number
- *   3. POST to complete_url to finalize
- *
- * Each chunk is wrapped as a Blob with the standardized content type to
- * prevent MIME type mismatch errors from the Notion API.
+ * NOTE: This function is used by the Express server (server.ts) where the full
+ *       file is available in memory. For Cloudflare Pages, browser-side chunking
+ *       is used instead (upload-init / upload-part / upload-complete endpoints).
  */
-const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MiB per chunk (Notion recommends 10MB, min 5MB max 20MB)
+const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MiB per chunk
 
 export async function uploadLargeFileToNotion(
   file: File,
@@ -286,12 +337,9 @@ export async function uploadLargeFileToNotion(
     throw new Error(`No se pudo crear el upload multi-part en Notion: ${JSON.stringify(upload)}`);
   }
 
-  const uploadUrl = upload.upload_url;
-  const completeUrl = upload.complete_url;
-
-  if (!uploadUrl || !completeUrl) {
-    throw new Error(`Notion no devolvió upload_url o complete_url: ${JSON.stringify(upload)}`);
-  }
+  // Construct URLs — fall back to standard pattern if not in response
+  const uploadUrl = upload.upload_url || `${NOTION_BASE}/file_uploads/${upload.id}/send`;
+  const completeUrl = upload.complete_url || `${NOTION_BASE}/file_uploads/${upload.id}/complete`;
 
   // Step 2: Upload each chunk sequentially
   const fileBuffer = await file.arrayBuffer();
