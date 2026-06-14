@@ -65,6 +65,8 @@ export interface ProjectMeta {
   databaseId?: string;
   /** Extra control columns (nota, estado, comentarios, etc). */
   dbColumns?: DbColumn[];
+  /** Blur intensity (0-20) applied to the background image. */
+  bgBlur?: number;
 }
 
 export interface FileAttachment {

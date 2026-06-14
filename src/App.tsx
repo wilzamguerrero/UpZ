@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { 
-  FolderSync, ShieldCheck, Mail, User, ListFilter, Send, 
+  ShieldCheck, Mail, User, ListFilter, Send, 
   CheckCircle2, Loader2, ArrowRight, Settings2, RefreshCcw, AlertTriangle, Clock, EyeOff, AlertCircle
 } from "lucide-react";
 import { Project, ProjectMeta } from "./types";
@@ -56,6 +56,9 @@ export default function App() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<any | null>(null);
 
+  // Background visual customization states
+  const [dominantColor, setDominantColor] = useState<{ r: number; g: number; b: number } | null>(null);
+
   // Load configuration, projects and copy text meta
   useEffect(() => {
     const cleanPath = window.location.pathname.replace(/^\/+/, "").replace(/\/+$/, "");
@@ -85,6 +88,47 @@ export default function App() {
     }
   }, [selectedProjectId]);
 
+  // Extract dominant color from background image for adaptive UI theming
+  useEffect(() => {
+    const bgImage = projectMeta[selectedProjectId]?.backgroundImage || null;
+    if (!bgImage) {
+      setDominantColor(null);
+      return;
+    }
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        const size = 60;
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, size, size);
+        const { data } = ctx.getImageData(0, 0, size, size);
+        let r = 0, g = 0, b = 0, count = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          r += data[i]; g += data[i + 1]; b += data[i + 2]; count++;
+        }
+        r = Math.round(r / count);
+        g = Math.round(g / count);
+        b = Math.round(b / count);
+        // Boost saturation so the extracted color is more vibrant
+        const avg = (r + g + b) / 3;
+        const boost = 1.9;
+        r = Math.min(255, Math.max(0, Math.round(avg + (r - avg) * boost)));
+        g = Math.min(255, Math.max(0, Math.round(avg + (g - avg) * boost)));
+        b = Math.min(255, Math.max(0, Math.round(avg + (b - avg) * boost)));
+        setDominantColor({ r, g, b });
+      } catch {
+        setDominantColor(null);
+      }
+    };
+    img.onerror = () => setDominantColor(null);
+    img.src = bgImage;
+  }, [selectedProjectId, projectMeta]);
+
   const fetchProjectMetaForProject = async (projId: string) => {
     try {
       const res = await fetch(`/api/project-meta?projectId=${projId}`);
@@ -92,7 +136,12 @@ export default function App() {
       if (data.success && data.meta) {
         setProjectMeta((prev) => ({
           ...prev,
-          [projId]: data.meta,
+          [projId]: {
+            ...(prev[projId] || {}),
+            ...data.meta,
+            // Preserve bgBlur from KV (prev) if Notion block returns null (old block without field)
+            bgBlur: data.meta.bgBlur != null ? data.meta.bgBlur : (prev[projId]?.bgBlur ?? 0),
+          },
         }));
       }
     } catch (e) {
@@ -501,71 +550,72 @@ export default function App() {
   const infoFields = displayCustomFields.filter((f) => !f.askSubmitter);
   const askFields = displayCustomFields.filter((f) => f.askSubmitter);
 
+  const hasBgImage = activeTab === "upload" && !!activeMeta?.backgroundImage;
+
+  // Adaptive color helpers derived from the dominant image color
+  const dc = hasBgImage ? dominantColor : null;
+  const overlayBg = dc
+    ? `rgba(${Math.round(dc.r * 0.22)},${Math.round(dc.g * 0.22)},${Math.round(dc.b * 0.22)},0.82)`
+    : "rgba(5,5,5,0.7)";
+  const cardBg = dc
+    ? `rgba(${Math.round(dc.r * 0.09)},${Math.round(dc.g * 0.09)},${Math.round(dc.b * 0.09)},0.93)`
+    : "#111111";
+  const fieldBg = dc
+    ? `rgba(${Math.round(dc.r * 0.05)},${Math.round(dc.g * 0.05)},${Math.round(dc.b * 0.05)},0.95)`
+    : "#0d0d0d";
+
   return (
-    <div className="min-h-screen bg-[#050505] flex flex-col antialiased text-[#e0e0e0] relative">
+    <div className={`min-h-screen flex flex-col antialiased text-[#e0e0e0] relative ${hasBgImage ? "bg-transparent" : "bg-[#050505]"}`}>
       
       {/* Dynamic Background Tile / Mosaic layer */}
-      {activeTab === "upload" && activeMeta?.backgroundImage && (
+      {hasBgImage && (
         <div 
           className="fixed inset-0 -z-50 pointer-events-none" 
           style={{
             backgroundImage: `url(${activeMeta.backgroundImage})`,
             backgroundRepeat: "repeat",
             backgroundSize: "auto",
+            filter: (activeMeta.bgBlur ?? 0) > 0 ? `blur(${activeMeta.bgBlur}px)` : undefined,
+            transform: (activeMeta.bgBlur ?? 0) > 0 ? "scale(1.06)" : undefined,
           }}
         />
       )}
       {/* Accessibility Contrast Dark Overlay layer */}
-      {activeTab === "upload" && activeMeta?.backgroundImage && (
-        <div className="fixed inset-0 bg-[#050505]/85 -z-40 pointer-events-none" />
+      {hasBgImage && (
+        <div className="fixed inset-0 -z-40 pointer-events-none" style={{ backgroundColor: overlayBg }} />
       )}
       
       {/* Dynamic Header Nav Bar */}
-      <header className="sticky top-0 z-50 bg-[#050505]/80 backdrop-blur-md border-b border-white/5">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-18 flex items-center justify-between">
-          
-          {/* Logo Brand */}
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-white text-black rounded-xl shadow-sm">
-              <FolderSync className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="font-bold text-white tracking-tight text-base block">Notion Drop</span>
-              <span className="text-[10px] text-white/40 font-mono block">WeTransfer Mode for Notion</span>
-            </div>
-          </div>
-
-          {/* Navigation toggles with framer motion pill */}
-          <div className="bg-white/5 p-1 rounded-full flex gap-1 relative select-none border border-white/10">
-            <button
-              id="tab-btn-upload"
-              onClick={() => { setActiveTab("upload"); handleFilesAdded([]); }}
-              className={`relative px-4 py-1.5 rounded-full text-xs font-semibold tracking-wide transition-all ${
-                activeTab === "upload" 
-                  ? "bg-white text-black shadow-2xs" 
-                  : "text-white/50 hover:text-white"
-              }`}
-            >
-              Entregar Archivos
-            </button>
-            <button
-              id="tab-btn-admin"
-              onClick={() => setActiveTab("admin")}
-              className={`relative px-4 py-1.5 rounded-full text-xs font-semibold tracking-wide transition-all flex items-center gap-1.5 ${
-                activeTab === "admin" 
-                  ? "bg-white text-black shadow-2xs" 
-                  : "text-white/50 hover:text-white"
-              }`}
-            >
-              <Settings2 className="w-3.5 h-3.5" />
-              Administración
-            </button>
-          </div>
-        </div>
-      </header>
+      {/* Minimal floating nav icons — no bar, no background */}
+      <div className="fixed top-4 right-4 z-50 flex gap-1.5">
+        <button
+          id="tab-btn-upload"
+          onClick={() => { setActiveTab("upload"); }}
+          title="Entregar Archivos"
+          className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${
+            activeTab === "upload"
+              ? "bg-white/15 text-white backdrop-blur-sm"
+              : "text-white/35 hover:text-white hover:bg-white/10"
+          }`}
+        >
+          <Send className="w-4 h-4" />
+        </button>
+        <button
+          id="tab-btn-admin"
+          onClick={() => setActiveTab("admin")}
+          title="Administración"
+          className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${
+            activeTab === "admin"
+              ? "bg-white/15 text-white backdrop-blur-sm"
+              : "text-white/35 hover:text-white hover:bg-white/10"
+          }`}
+        >
+          <Settings2 className="w-4 h-4" />
+        </button>
+      </div>
 
       {/* Primary Content Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="flex-1 w-full mx-auto px-5 sm:px-8 pt-14 pb-10">
         
         <AnimatePresence mode="wait">
           {activeTab === "upload" ? (
@@ -575,16 +625,12 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.25 }}
-              className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center py-4"
+              className="flex flex-col gap-8 py-4 max-w-2xl mx-auto w-full"
             >
               
-              {/* Left Column (Desktop Hero Explanation) */}
-              <div className="lg:col-span-5 space-y-6">
-                <div className="inline-flex items-center gap-2 bg-white/5 text-white/90 text-[11px] font-semibold px-3 py-1 rounded-full border border-white/10">
-                  <ShieldCheck className="w-4 h-4" /> Almacenado Seguro en Notion
-                </div>
-
-                <h1 className="text-4xl sm:text-5xl font-extrabold text-white tracking-tight leading-[1.1]">
+              {/* Info section above the form */}
+              <div className="space-y-4">
+                <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-[1.15]">
                   {displayTitle.includes("Notion") ? (
                     <>
                       {displayTitle.split("Notion")[0]}
@@ -601,7 +647,7 @@ export default function App() {
                 </p>
 
                 {infoFields.length > 0 && (
-                  <div className="border-t border-white/5 pt-6 space-y-4">
+                  <div className="border-t border-white/5 pt-4 space-y-3">
                     {infoFields.map((field, idx) => (
                       <div key={field.id} className="flex gap-3">
                         <span className="w-6 h-6 rounded-full bg-white/5 border border-white/10 text-white/60 text-xs font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
@@ -620,9 +666,12 @@ export default function App() {
                 )}
               </div>
 
-              {/* Right Column (The interactive Form Card) */}
-              <div className="lg:col-span-7">
-                <div className="bg-[#111111] rounded-3xl p-6 sm:p-8 border border-white/10 shadow-sm">
+              {/* Form card */}
+              <div>
+                <div
+                  className="adaptive-card rounded-3xl p-6 sm:p-8 border border-white/10 shadow-sm backdrop-blur-xl"
+                  style={{ backgroundColor: cardBg, '--field-bg': fieldBg } as React.CSSProperties}
+                >
                   
                   {submitSuccess ? (
                     // Submission Success feedback View
@@ -1071,13 +1120,7 @@ export default function App() {
 
       </main>
 
-      {/* Footer information */}
-      <footer className="bg-[#050505] border-t border-white/5 py-6 select-none">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center sm:flex sm:justify-between sm:items-center text-white/30 text-[11px] font-medium tracking-wide">
-          <p>© 2026 Notion Drop. Todos los derechos reservados.</p>
-          <p className="mt-2 sm:mt-0">Sincronización en la nube con API Oficial Notion Workspace</p>
-        </div>
-      </footer>
+      {/* Floating blur slider — REMOVED: blur is now configured in Admin settings */}
 
     </div>
   );

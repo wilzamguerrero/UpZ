@@ -58,6 +58,7 @@ export default function AdminPanel({
   const [copyCustomFields, setCopyCustomFields] = useState<CustomField[]>([]);
   const [copyExpiration, setCopyExpiration] = useState("");
   const [copyBackground, setCopyBackground] = useState("");
+  const [copyBgBlur, setCopyBgBlur] = useState(0);
   const [copyIsActive, setCopyIsActive] = useState(true);
   const [copyUseDatabase, setCopyUseDatabase] = useState(false);
   const [copyDatabaseId, setCopyDatabaseId] = useState("");
@@ -126,6 +127,7 @@ export default function AdminPanel({
       setCopyCustomFields(fields);
       setCopyExpiration(active.expirationDate || "");
       setCopyBackground(active.backgroundImage || "");
+      setCopyBgBlur(typeof active.bgBlur === "number" ? active.bgBlur : 0);
       setCopyIsActive(active.isActive !== false);
       setCopyUseDatabase(!!active.useDatabase);
       setCopyDatabaseId(active.databaseId || "");
@@ -151,6 +153,7 @@ export default function AdminPanel({
           customFields: copyCustomFields,
           expirationDate: copyExpiration,
           backgroundImage: copyBackground,
+          bgBlur: copyBgBlur,
           isActive: copyIsActive,
           useDatabase: copyUseDatabase,
           databaseId: copyDatabaseId,
@@ -920,6 +923,30 @@ export default function AdminPanel({
                     </button>
                   </div>
                 )}
+
+                {/* Blur intensity slider */}
+                <div className="mt-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-semibold text-white/40 uppercase tracking-wide">
+                      Desenfoque de Fondo
+                    </label>
+                    <span className="text-xs font-mono text-white/50">{copyBgBlur}px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={20}
+                    step={1}
+                    value={copyBgBlur}
+                    onChange={(e) => setCopyBgBlur(Number(e.target.value))}
+                    className="w-full cursor-pointer accent-white"
+                    style={{ height: "3px" }}
+                  />
+                  <div className="flex justify-between text-[9px] text-white/20 mt-0.5">
+                    <span>Sin desenfoque</span>
+                    <span>Máximo</span>
+                  </div>
+                </div>
               </div>
 
               {metaMessage && (

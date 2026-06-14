@@ -1,14 +1,17 @@
-import { json, uploadFileToNotion, type Env } from "../../_shared/notion";
+import { json, notionFetch, uploadFileToNotion, listChildren, appendChildren, deleteBlock, type Env } from "../../_shared/notion";
+
+const BG_BLOCK_CAPTION = "__UPZBG__";
 
 /**
- * POST /api/projects/upload-bg
+ * POST /api/projects/upload-bg?projectId=<id>
  * Persists a background image so it can be reused reliably.
  *
- * Preferred: store in R2 (FILES_BUCKET) and serve via /uploads/:filename,
- * which returns a permanent, publicly cacheable URL.
+ * Preferred: store in R2 (FILES_BUCKET) → permanent public URL.
  *
- * Fallback: if no R2 bucket is configured, upload to Notion (note: Notion file
- * URLs are signed/temporary and may expire).
+ * Fallback (Notion): upload via File Upload API, append the result as an
+ * image block inside the project's toggle, and return a stable proxy URL
+ * (/api/projects/bg-image?blockId=…) that always fetches the current
+ * Notion-signed URL on demand — no more expiring direct URLs.
  */
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { FILES_BUCKET } = context.env;
@@ -50,7 +53,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
   }
 
-  // ── Fallback: upload to Notion (URL may be temporary) ──
+  // ── Fallback: upload to Notion and store as an image block ──
   let notionSecret = context.env.NOTION_SECRET || "";
   if (context.env.SUBMISSIONS_KV) {
     try {
@@ -67,8 +70,51 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   try {
-    const { id: uploadId, finalName } = await uploadFileToNotion(file, notionSecret);
-    const fileUrl = `https://file.notion.so/f/f/${uploadId}/${encodeURIComponent(finalName)}`;
+    // Step 1: upload the binary to Notion's File Upload API
+    const { id: uploadId } = await uploadFileToNotion(file, notionSecret);
+
+    // Step 2: if we have a projectId, store the image as a block inside the
+    //         project so it gets a stable block ID we can proxy through.
+    const projectId = new URL(context.request.url).searchParams.get("projectId");
+    if (projectId) {
+      // Remove any previous bg image block for this project
+      try {
+        const children = await listChildren(projectId, notionSecret);
+        const old = (children.results || []).find(
+          (b: any) =>
+            b.type === "image" &&
+            (b.image?.caption || []).map((t: any) => t.plain_text).join("") === BG_BLOCK_CAPTION
+        );
+        if (old) await deleteBlock(old.id, notionSecret);
+      } catch { /* ignore cleanup errors */ }
+
+      // Append a new image block that references the file upload
+      try {
+        const appendResp: any = await appendChildren(
+          projectId,
+          [
+            {
+              object: "block",
+              type: "image",
+              image: {
+                type: "file_upload",
+                file_upload: { id: uploadId },
+                caption: [{ type: "text", text: { content: BG_BLOCK_CAPTION } }],
+              },
+            } as any,
+          ],
+          notionSecret
+        );
+        const blockId: string | undefined = appendResp.results?.[0]?.id;
+        if (blockId) {
+          const proxyUrl = `/api/projects/bg-image?blockId=${encodeURIComponent(blockId)}`;
+          return json({ success: true, url: proxyUrl, blockId });
+        }
+      } catch { /* fall through to direct URL */ }
+    }
+
+    // Last resort: return the direct (potentially-expiring) Notion URL
+    const fileUrl = `https://file.notion.so/f/f/${uploadId}/${encodeURIComponent(file.name)}`;
     return json({ success: true, url: fileUrl, uploadId });
   } catch (err: any) {
     return json({ error: `Error al subir imagen a Notion: ${err.message || "Error desconocido"}` }, 500);

@@ -62,6 +62,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
               customFields: Array.isArray(data.customFields) ? data.customFields : [],
               expirationDate: data.expirationDate || expirationDate,
               backgroundImage: data.backgroundImage || "",
+              bgBlur: typeof data.bgBlur === "number" ? data.bgBlur : null,
               isActive: data.isActive !== undefined ? !!data.isActive : true,
               groupId: data.groupId || "",
               order: typeof data.order === "number" ? data.order : undefined,
@@ -116,7 +117,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const {
     projectId, title, description, step1, step2, step3,
     customFields, expirationDate, backgroundImage, isActive,
-    groupId, order, useDatabase, databaseId, dbColumns,
+    groupId, order, useDatabase, databaseId, dbColumns, bgBlur,
   } = body;
 
   if (!projectId) {
@@ -159,6 +160,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     useDatabase: !!useDatabase,
     databaseId: (databaseId || "").trim(),
     dbColumns: cleanDbColumns,
+    bgBlur: typeof bgBlur === "number" ? bgBlur : 0,
   };
 
   if (notionSecret) {

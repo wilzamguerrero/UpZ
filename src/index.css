@@ -17,3 +17,10 @@ body {
   background-color: rgba(59, 130, 246, 0.05);
   border-color: #3b82f6;
 }
+
+/* Adaptive card: input/select backgrounds follow the --field-bg CSS variable */
+.adaptive-card input,
+.adaptive-card select,
+.adaptive-card textarea {
+  background-color: var(--field-bg, #0d0d0d);
+}
