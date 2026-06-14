@@ -67,6 +67,8 @@ export interface ProjectMeta {
   dbColumns?: DbColumn[];
   /** Blur intensity (0-20) applied to the background image. */
   bgBlur?: number;
+  /** Flat solid background color (hex) used when no backgroundImage is set. */
+  bgColor?: string;
 }
 
 export interface FileAttachment {

@@ -1,12 +1,15 @@
 import React, { useState, useEffect } from "react";
-import { 
-  ShieldCheck, Mail, User, ListFilter, Send, 
-  CheckCircle2, Loader2, ArrowRight, Settings2, RefreshCcw, AlertTriangle, Clock, EyeOff, AlertCircle
+import {
+  ShieldCheck, Mail, User, ListFilter, Send,
+  CheckCircle2, Loader2, ArrowRight, Settings2, RefreshCcw, AlertTriangle, Clock, EyeOff, AlertCircle, UploadCloud
 } from "lucide-react";
 import { Project, ProjectMeta } from "./types";
 import Dropzone from "./components/Dropzone";
 import AdminPanel from "./components/AdminPanel";
+import AppLoader from "./components/AppLoader";
+import { ScrambleReveal } from "./components/ScrambleText";
 import { motion, AnimatePresence } from "motion/react";
+import { useTheme } from "./ThemeContext";
 
 const normalizeString = (s: string) => {
   return s
@@ -18,13 +21,42 @@ const normalizeString = (s: string) => {
     .replace(/^-|-$/g, "");
 };
 
+const getCachedProjectMeta = (): Record<string, ProjectMeta> => {
+  try {
+    const cached = localStorage.getItem("cached_project_meta");
+    return cached ? JSON.parse(cached) : {};
+  } catch {
+    return {};
+  }
+};
+
+const getCachedProjects = (): Project[] => {
+  try {
+    const cached = localStorage.getItem("cached_projects");
+    return cached ? JSON.parse(cached) : [];
+  } catch {
+    return [];
+  }
+};
+
+const getCachedSelectedProjectId = (): string => {
+  try {
+    return localStorage.getItem("cached_selected_project_id") || "";
+  } catch {
+    return "";
+  }
+};
+
 export default function App() {
+  const { isLoaded: themeLoaded } = useTheme();
+
+  const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
   const [activeTab, setActiveTab] = useState<"upload" | "admin">("upload");
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [projects, setProjects] = useState<Project[]>(getCachedProjects);
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [isProjectLocked, setIsProjectLocked] = useState(false);
   const [lockedProjectName, setLockedProjectName] = useState("");
-  
+
   // App Config Info
   const [config, setConfig] = useState<{
     isConfigured: boolean;
@@ -35,7 +67,7 @@ export default function App() {
   } | null>(null);
 
   // Project meta copywriting customization
-  const [projectMeta, setProjectMeta] = useState<Record<string, ProjectMeta>>({});
+  const [projectMeta, setProjectMeta] = useState<Record<string, ProjectMeta>>(getCachedProjectMeta);
 
   // Admin dynamic authentication states
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
@@ -46,10 +78,10 @@ export default function App() {
   // Form states
   const [senderName, setSenderName] = useState("");
   const [senderEmail, setSenderEmail] = useState("");
-  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [selectedProjectId, setSelectedProjectId] = useState(getCachedSelectedProjectId);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [customValues, setCustomValues] = useState<Record<string, string>>({});
-  
+
   // Submit engine states
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStep, setSubmitStep] = useState<string>("");
@@ -58,15 +90,32 @@ export default function App() {
 
   // Background visual customization states
   const [dominantColor, setDominantColor] = useState<{ r: number; g: number; b: number } | null>(null);
+  const [adminPreview, setAdminPreview] = useState<{
+    projectId: string;
+    bgColor: string;
+    backgroundImage: string;
+    bgBlur: number;
+  } | null>(null);
 
   // Load configuration, projects and copy text meta
   useEffect(() => {
-    const cleanPath = window.location.pathname.replace(/^\/+/, "").replace(/\/+$/, "");
-    if (cleanPath.toLowerCase() === "admin") {
-      setActiveTab("admin");
-    }
-    fetchConfig();
-    fetchProjectMeta();
+    const initApp = async () => {
+      const cleanPath = window.location.pathname.replace(/^\/+/, "").replace(/\/+$/, "");
+      if (cleanPath.toLowerCase() === "admin") {
+        setActiveTab("admin");
+      }
+      try {
+        await Promise.all([
+          fetchConfig(),
+          fetchProjectMeta()
+        ]);
+      } catch (e) {
+        console.error("Error during initial app boot:", e);
+      } finally {
+        setIsInitialLoadDone(true);
+      }
+    };
+    initApp();
   }, []);
 
   const fetchProjectMeta = async () => {
@@ -75,6 +124,11 @@ export default function App() {
       const data = await res.json();
       if (data.success) {
         setProjectMeta(data.meta || {});
+        try {
+          localStorage.setItem("cached_project_meta", JSON.stringify(data.meta || {}));
+        } catch (err) {
+          console.error("Localstorage cache write issue", err);
+        }
       }
     } catch (e) {
       console.error("Error setting up project meta details", e);
@@ -85,6 +139,11 @@ export default function App() {
   useEffect(() => {
     if (selectedProjectId) {
       fetchProjectMetaForProject(selectedProjectId);
+      try {
+        localStorage.setItem("cached_selected_project_id", selectedProjectId);
+      } catch (err) {
+        console.error("Localstorage save selectedProjectId issue", err);
+      }
     }
   }, [selectedProjectId]);
 
@@ -156,7 +215,7 @@ export default function App() {
       if (data.success) {
         setConfig(data);
         if (data.isConfigured) {
-          fetchProjects();
+          await fetchProjects();
         }
       }
     } catch (e) {
@@ -171,6 +230,11 @@ export default function App() {
       const data = await res.json();
       if (data.success) {
         setProjects(data.projects);
+        try {
+          localStorage.setItem("cached_projects", JSON.stringify(data.projects));
+        } catch (err) {
+          console.error("Localstorage save projects issue", err);
+        }
 
         // Resolve path url matching
         const cleanPath = window.location.pathname.replace(/^\/+/, "").replace(/\/+$/, "");
@@ -180,7 +244,7 @@ export default function App() {
             const matchesSlug = normalizeString(p.name) === normalizeString(decodeURIComponent(cleanPath));
             return matchesId || matchesSlug;
           });
-          
+
           if (match) {
             setSelectedProjectId(match.id);
             setLockedProjectName(match.name);
@@ -226,17 +290,17 @@ export default function App() {
   // Extensions accepted by Notion's File Upload API (mirrors server-side NOTION_MIME_TYPES)
   const NOTION_SUPPORTED_EXTENSIONS = new Set([
     // Archives
-    "zip","gz","gzip","tar","7z","bz2","rar",
+    "zip", "gz", "gzip", "tar", "7z", "bz2", "rar",
     // Images
-    "png","jpg","jpeg","gif","webp","svg","bmp","tiff","tif","ico","heic","avif","apng",
+    "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff", "tif", "ico", "heic", "avif", "apng",
     // Audio
-    "aac","adts","mid","midi","mp3","mpga","m4a","m4b","oga","ogg","opus","wav","wma","weba","flac",
+    "aac", "adts", "mid", "midi", "mp3", "mpga", "m4a", "m4b", "oga", "ogg", "opus", "wav", "wma", "weba", "flac",
     // Video
-    "amv","asf","wmv","avi","f4v","flv","gifv","m4v","mp4","mkv","webm","mov","qt","mpeg","ogv","3gp","3g2",
+    "amv", "asf", "wmv", "avi", "f4v", "flv", "gifv", "m4v", "mp4", "mkv", "webm", "mov", "qt", "mpeg", "ogv", "3gp", "3g2",
     // Documents
-    "pdf","txt","csv","json","doc","dot","docx","dotx","xls","xlt","xla","xlsx","xltx",
-    "ppt","pot","pps","ppa","pptx","potx","rtf","md","markdown","html","htm","epub","xml","css",
-    "odt","ods","odp","ics","yaml","yml","tsv",
+    "pdf", "txt", "csv", "json", "doc", "dot", "docx", "dotx", "xls", "xlt", "xla", "xlsx", "xltx",
+    "ppt", "pot", "pps", "ppa", "pptx", "potx", "rtf", "md", "markdown", "html", "htm", "epub", "xml", "css",
+    "odt", "ods", "odp", "ics", "yaml", "yml", "tsv",
   ]);
 
   /** Check if a file needs to be compressed to ZIP for Notion compatibility */
@@ -525,7 +589,12 @@ export default function App() {
     return text;
   };
 
-  const activeMeta = selectedProjectId ? projectMeta[selectedProjectId] : null;
+  // Resolve active meta: if on admin tab, default to the adminPreview's projectId if present
+  const activeProjectId = activeTab === "admin"
+    ? (adminPreview?.projectId || selectedProjectId)
+    : selectedProjectId;
+
+  const activeMeta = activeProjectId ? projectMeta[activeProjectId] : null;
 
   /** Check if expiration date is a valid, non-empty date string */
   const hasValidExpiration = (() => {
@@ -550,132 +619,140 @@ export default function App() {
   const infoFields = displayCustomFields.filter((f) => !f.askSubmitter);
   const askFields = displayCustomFields.filter((f) => f.askSubmitter);
 
-  const hasBgImage = activeTab === "upload" && !!activeMeta?.backgroundImage;
+  // Read current visual properties supporting real-time preview editing in the admin panel
+  const currentBgColor = activeTab === "admin" && adminPreview && adminPreview.projectId === activeProjectId
+    ? adminPreview.bgColor
+    : (activeMeta?.bgColor || "");
 
-  // Adaptive color helpers derived from the dominant image color
-  const dc = hasBgImage ? dominantColor : null;
-  const overlayBg = dc
-    ? `rgba(${Math.round(dc.r * 0.22)},${Math.round(dc.g * 0.22)},${Math.round(dc.b * 0.22)},0.82)`
-    : "rgba(5,5,5,0.7)";
-  const cardBg = dc
-    ? `rgba(${Math.round(dc.r * 0.09)},${Math.round(dc.g * 0.09)},${Math.round(dc.b * 0.09)},0.93)`
-    : "#111111";
-  const fieldBg = dc
-    ? `rgba(${Math.round(dc.r * 0.05)},${Math.round(dc.g * 0.05)},${Math.round(dc.b * 0.05)},0.95)`
-    : "#0d0d0d";
+  const hasBgColor = !!currentBgColor;
+
+  // Adaptive text/field color for solid bgColor (light bg → dark text, dark bg → light text)
+  const bgColorLuminance = (() => {
+    if (!hasBgColor || !currentBgColor) return null;
+    const hex = currentBgColor.replace('#', '').trim();
+    let r = 0, g = 0, b = 0;
+    if (hex.length === 3) {
+      r = parseInt(hex[0] + hex[0], 16) / 255;
+      g = parseInt(hex[1] + hex[1], 16) / 255;
+      b = parseInt(hex[2] + hex[2], 16) / 255;
+    } else if (hex.length === 6) {
+      r = parseInt(hex.substring(0, 2), 16) / 255;
+      g = parseInt(hex.substring(2, 4), 16) / 255;
+      b = parseInt(hex.substring(4, 6), 16) / 255;
+    } else {
+      return null;
+    }
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  })();
+  const bgColorIsLight = bgColorLuminance !== null && bgColorLuminance > 0.5;
+  const adaptiveText = hasBgColor ? (bgColorIsLight ? '#111111' : '#f0f0f0') : undefined;
+  const adaptiveFieldBg = hasBgColor ? (bgColorIsLight ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.07)') : undefined;
+  const adaptiveFieldBorder = hasBgColor ? (bgColorIsLight ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.12)') : undefined;
+
+  // Dynamically sync the document body background color for a perfect seamless layout
+  useEffect(() => {
+    if (hasBgColor && currentBgColor) {
+      document.body.style.backgroundColor = currentBgColor;
+    } else {
+      document.body.style.backgroundColor = "";
+    }
+    return () => {
+      document.body.style.backgroundColor = "";
+    };
+  }, [hasBgColor, currentBgColor]);
 
   return (
-    <div className={`min-h-screen flex flex-col antialiased text-[#e0e0e0] relative ${hasBgImage ? "bg-transparent" : "bg-[#050505]"}`}>
-      
-      {/* Dynamic Background Tile / Mosaic layer */}
-      {hasBgImage && (
-        <div 
-          className="fixed inset-0 -z-50 pointer-events-none" 
-          style={{
-            backgroundImage: `url(${activeMeta.backgroundImage})`,
-            backgroundRepeat: "repeat",
-            backgroundSize: "auto",
-            filter: (activeMeta.bgBlur ?? 0) > 0 ? `blur(${activeMeta.bgBlur}px)` : undefined,
-            transform: (activeMeta.bgBlur ?? 0) > 0 ? "scale(1.06)" : undefined,
-          }}
-        />
-      )}
-      {/* Accessibility Contrast Dark Overlay layer */}
-      {hasBgImage && (
-        <div className="fixed inset-0 -z-40 pointer-events-none" style={{ backgroundColor: overlayBg }} />
-      )}
-      
-      {/* Dynamic Header Nav Bar */}
-      {/* Minimal floating nav icons — no bar, no background */}
-      <div className="fixed top-4 right-4 z-50 flex gap-1.5">
-        <button
-          id="tab-btn-upload"
-          onClick={() => { setActiveTab("upload"); }}
-          title="Entregar Archivos"
-          className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${
-            activeTab === "upload"
-              ? "bg-white/15 text-white backdrop-blur-sm"
-              : "text-white/35 hover:text-white hover:bg-white/10"
-          }`}
-        >
-          <Send className="w-4 h-4" />
-        </button>
-        <button
-          id="tab-btn-admin"
-          onClick={() => setActiveTab("admin")}
-          title="Administración"
-          className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${
-            activeTab === "admin"
-              ? "bg-white/15 text-white backdrop-blur-sm"
-              : "text-white/35 hover:text-white hover:bg-white/10"
-          }`}
-        >
-          <Settings2 className="w-4 h-4" />
-        </button>
-      </div>
+    <>
+      <AppLoader
+        visible={!themeLoaded || !isInitialLoadDone}
+        bgColor={currentBgColor}
+        isLight={bgColorIsLight}
+        textColor={adaptiveText}
+      />
+      <div className={`min-h-screen flex flex-col antialiased relative transition-opacity duration-300 ${(!themeLoaded || !isInitialLoadDone) ? 'opacity-0 pointer-events-none' : 'opacity-100 animate-fade-in'}`}
+        data-adaptive={hasBgColor ? (bgColorIsLight ? "light" : "dark") : "dark"}
+        data-has-bgcolor={hasBgColor ? "true" : "false"}
+        style={{
+          color: hasBgColor ? adaptiveText : 'var(--text-primary, #e0e0e0)',
+          backgroundColor: hasBgColor ? currentBgColor : 'var(--app-bg, #050505)'
+        }}
+      >
 
-      {/* Primary Content Container */}
-      <main className="flex-1 w-full mx-auto px-5 sm:px-8 pt-14 pb-10">
-        
-        <AnimatePresence mode="wait">
-          {activeTab === "upload" ? (
-            <motion.div
-              key="upload-view"
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.25 }}
-              className="flex flex-col gap-8 py-4 max-w-2xl mx-auto w-full"
-            >
-              
-              {/* Info section above the form */}
-              <div className="space-y-4">
-                <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight leading-[1.15]">
-                  {displayTitle.includes("Notion") ? (
-                    <>
-                      {displayTitle.split("Notion")[0]}
-                      <span className="text-white/60">Notion</span>
-                      {displayTitle.split("Notion")[1] || "."}
-                    </>
-                  ) : (
-                    displayTitle
-                  )}
-                </h1>
+        {/* Solid background color layer */}
+        {hasBgColor && (
+          <div
+            className="fixed inset-0 -z-50 pointer-events-none transition-all duration-300"
+            style={{ backgroundColor: currentBgColor }}
+          />
+        )}
 
-                <p className="text-sm text-white/40 leading-relaxed">
-                  {displayDescription}
-                </p>
+        {/* Dynamic Header Nav Bar */}
+        {/* Minimal floating nav icons — no bar, no background */}
+        <div className="fixed top-4 right-4 z-50 flex gap-1.5">
+          <button
+            id="tab-btn-upload"
+            onClick={() => { setActiveTab("upload"); setAdminPreview(null); }}
+            title="Entregar Archivos"
+            className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${activeTab === "upload"
+                ? "bg-black/15 backdrop-blur-sm"
+                : "hover:bg-black/10"
+              }`}
+            style={{ color: (hasBgColor && bgColorIsLight) ? '#111111' : 'rgba(255,255,255,0.6)' }}
+          >
+            <Send className="w-4 h-4" />
+          </button>
+          <button
+            id="tab-btn-admin"
+            onClick={() => setActiveTab("admin")}
+            title="Administración"
+            className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${activeTab === "admin"
+                ? "bg-black/15 backdrop-blur-sm"
+                : "hover:bg-black/10"
+              }`}
+            style={{ color: (hasBgColor && bgColorIsLight) ? '#111111' : 'rgba(255,255,255,0.6)' }}
+          >
+            <Settings2 className="w-4 h-4" />
+          </button>
+        </div>
 
-                {infoFields.length > 0 && (
-                  <div className="border-t border-white/5 pt-4 space-y-3">
-                    {infoFields.map((field, idx) => (
-                      <div key={field.id} className="flex gap-3">
-                        <span className="w-6 h-6 rounded-full bg-white/5 border border-white/10 text-white/60 text-xs font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
-                        <p className="text-xs text-white/40">
-                          {field.label ? (
-                            <>
-                              <strong className="text-white/80">{field.label}:</strong> {field.value}
-                            </>
-                          ) : (
-                            field.value
-                          )}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+        {/* Primary Content Container */}
+        <main className="flex-1 w-full mx-auto px-5 sm:px-8 pt-14 pb-10">
 
-              {/* Form card */}
-              <div>
+          <AnimatePresence mode="wait">
+            {activeTab === "upload" ? (
+              <motion.div
+                key="upload-view"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.25 }}
+                className="flex flex-col min-h-[calc(100vh-5rem)] justify-center py-8 max-w-2xl mx-auto w-full"
+              >
+
                 <div
-                  className="adaptive-card rounded-3xl p-6 sm:p-8 border border-white/10 shadow-sm backdrop-blur-xl"
-                  style={{ backgroundColor: cardBg, '--field-bg': fieldBg } as React.CSSProperties}
+                  className="adaptive-card relative p-6 sm:p-8 backdrop-blur-xl"
+                  data-adaptive={hasBgColor ? (bgColorIsLight ? "light" : "dark") : "dark"}
+                  style={{
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    boxShadow: 'none',
+                    borderRadius: 'var(--card-radius)',
+                    '--field-bg': hasBgColor ? adaptiveFieldBg : 'var(--field-bg-base, #0d0d0d)',
+                    '--field-border': hasBgColor ? adaptiveFieldBorder : undefined,
+                    color: hasBgColor ? adaptiveText : undefined,
+                  } as React.CSSProperties}
                 >
-                  
+                  {/* Card corner icon */}
+                  <div
+                    className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-lg"
+                    style={{ background: 'var(--border-subtle, rgba(255,255,255,0.05))', border: '1px solid var(--border-medium, rgba(255,255,255,0.1))' }}
+                  >
+                    <UploadCloud className="w-4 h-4" style={{ color: 'var(--accent, rgba(255,255,255,0.6))' }} />
+                  </div>
+
                   {submitSuccess ? (
                     // Submission Success feedback View
-                    <motion.div 
+                    <motion.div
                       initial={{ scale: 0.95, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
                       className="text-center py-8 space-y-6"
@@ -683,7 +760,7 @@ export default function App() {
                       <div className="w-16 h-16 bg-emerald-950/40 text-emerald-400 rounded-full flex items-center justify-center mx-auto border border-emerald-900/50">
                         <CheckCircle2 className="w-10 h-10" />
                       </div>
-                      
+
                       <div>
                         <h2 className="text-2xl font-bold text-white">¡Archivos Enviados!</h2>
                         <p className="text-xs text-white/40 mt-2">
@@ -717,19 +794,66 @@ export default function App() {
                       <button
                         id="submit-another-btn"
                         onClick={() => setSubmitSuccess(null)}
-                        className="py-2.5 px-6 rounded-xl bg-white hover:bg-white/95 text-black font-semibold text-xs tracking-wide transition-all pointer-events-auto"
+                        className="h-[44px] px-6 font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden pointer-events-auto"
+                        style={{
+                          '--btn-color': hasBgColor ? currentBgColor : "var(--accent, #f5f011)"
+                        } as React.CSSProperties}
                       >
-                        Enviar más archivos
+                        {/* Base black background filled container */}
+                        <div className="absolute inset-0 bg-[#000000] border border-black group-hover:bg-transparent group-hover:border-transparent transition-all duration-300 rounded-[4px] pointer-events-none" />
+
+                        {/* Diagonal stripes */}
+                        <div
+                          className="absolute inset-[1px] bg-[#000000] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px] stripes-overlay"
+                          style={{
+                            backgroundImage: `repeating-linear-gradient(119deg, currentColor 0px, currentColor 1px, transparent 1px, transparent 10px)`
+                          }}
+                        />
+
+                        {/* Corner marks for hover focus */}
+                        <span className="btn-motion-corner btn-motion-corner-tl" />
+                        <span className="btn-motion-corner btn-motion-corner-tr" />
+                        <span className="btn-motion-corner btn-motion-corner-bl" />
+                        <span className="btn-motion-corner btn-motion-corner-br" />
+
+                        <span className="relative z-10 flex items-center justify-center gap-2 font-extrabold transition-colors duration-300 font-mono hover-text-adaptive btn-text-content">
+                          Enviar más archivos
+                        </span>
                       </button>
                     </motion.div>
                   ) : (
                     // Regular Transfer Form
                     <form onSubmit={handleSubmit} className="space-y-6">
-                      
+
+                      {/* Header info inside card */}
+                      <div className="space-y-3 pb-1 pr-10">
+                        <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-[1.15]">
+                          <ScrambleReveal text={displayTitle} duration={900} delay={80} />
+                        </h2>
+                        <p className="text-sm text-white/40 leading-relaxed">{displayDescription}</p>
+                        {infoFields.length > 0 && (
+                          <div className="border-t border-white/5 pt-3 space-y-3">
+                            {infoFields.map((field, idx) => (
+                              <div key={field.id} className="flex gap-3">
+                                <span className="w-6 h-6 rounded-full bg-white/5 border border-white/10 text-white/60 text-xs font-bold flex items-center justify-center shrink-0">{idx + 1}</span>
+                                <p className="text-xs text-white/40">
+                                  {field.label ? (
+                                    <>
+                                      <strong className="text-white/80">{field.label}:</strong> {field.value}
+                                    </>
+                                  ) : (
+                                    field.value
+                                  )}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <hr className="border-white/5" />
+
                       <div className="space-y-4">
-                        <h2 className="text-lg font-bold text-white">Haz un Envío</h2>
-                        <hr className="border-white/5" />
-                        
                         {hasValidExpiration && !isProjectExpired && activeMeta?.isActive !== false && (
                           <div className="flex items-center gap-1.5 text-[11px] text-[#fbbf24] font-medium bg-[#1c120c]/60 border border-amber-900/30 px-3 py-2 rounded-xl">
                             <Clock className="w-3.5 h-3.5 shrink-0" />
@@ -786,7 +910,7 @@ export default function App() {
                         </div>
                       </div>
 
-                               {/* Submitter-filled custom fields (point 5C) */}
+                      {/* Submitter-filled custom fields (point 5C) */}
                       {askFields.length > 0 && (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           {askFields.map((field) => (
@@ -968,10 +1092,10 @@ export default function App() {
                             <p className="text-xs text-white/55 leading-relaxed max-w-sm mx-auto mt-2">
                               La fecha límite para cargar archivos en esta carpeta expiró el{" "}
                               <strong className="text-red-300">
-                                {new Date(activeMeta!.expirationDate!).toLocaleDateString('es-ES', { 
-                                  weekday: 'long', 
-                                  year: 'numeric', 
-                                  month: 'long', 
+                                {new Date(activeMeta!.expirationDate!).toLocaleDateString('es-ES', {
+                                  weekday: 'long',
+                                  year: 'numeric',
+                                  month: 'long',
                                   day: 'numeric',
                                   hour: activeMeta!.expirationDate!.includes("T") ? "2-digit" : undefined,
                                   minute: activeMeta!.expirationDate!.includes("T") ? "2-digit" : undefined,
@@ -1006,32 +1130,47 @@ export default function App() {
                           <button
                             type="submit"
                             disabled={isSubmitting || selectedFiles.length === 0 || !selectedProjectId}
-                            className="w-full py-3.5 rounded-2xl bg-white hover:bg-white/95 disabled:bg-white/5 disabled:text-white/20 text-black font-extrabold text-xs tracking-wider uppercase transition-all select-none shadow-xs hover:shadow-sm cursor-pointer relative overflow-hidden"
+                            className="w-full h-[52px] font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden"
+                            style={{
+                              '--btn-color': hasBgColor ? currentBgColor : "var(--accent, #f5f011)"
+                            } as React.CSSProperties}
                           >
-                            {isSubmitting && uploadProgress ? (
-                              <>
-                                {/* Progress bar background */}
-                                <div
-                                  className="absolute inset-0 bg-gradient-to-r from-emerald-400/30 to-emerald-500/20 transition-all duration-300 ease-out"
-                                  style={{ width: `${uploadProgress.percent}%` }}
-                                />
-                                <div className="relative flex items-center justify-center gap-2">
+                            {/* Base black background filled container */}
+                            <div className="absolute inset-0 bg-[#000000] border border-black group-hover:bg-transparent group-hover:border-transparent transition-all duration-300 rounded-[4px] pointer-events-none" />
+
+                            {/* Diagonal stripes */}
+                            <div
+                              className="absolute inset-[1px] bg-[#000000] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px] stripes-overlay"
+                              style={{
+                                backgroundImage: `repeating-linear-gradient(119deg, currentColor 0px, currentColor 1px, transparent 1px, transparent 10px)`
+                              }}
+                            />
+
+                            {/* Corner marks for hover focus */}
+                            <span className="btn-motion-corner btn-motion-corner-tl" />
+                            <span className="btn-motion-corner btn-motion-corner-tr" />
+                            <span className="btn-motion-corner btn-motion-corner-bl" />
+                            <span className="btn-motion-corner btn-motion-corner-br" />
+
+                            <div className="relative z-10 flex items-center justify-center gap-2 font-extrabold transition-colors duration-300">
+                              {isSubmitting && uploadProgress ? (
+                                <>
+                                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                                  <span className="truncate max-w-[70%] text-white font-semibold font-sans normal-case">{submitStep}</span>
+                                  <span className="font-mono text-[11px] bg-black/40 text-white px-2 py-0.5 rounded">{uploadProgress.percent}%</span>
+                                </>
+                              ) : isSubmitting ? (
+                                <div className="flex items-center justify-center gap-2 text-white font-sans normal-case">
                                   <Loader2 className="w-4 h-4 animate-spin" />
-                                  <span className="truncate max-w-[70%]">{submitStep}</span>
-                                  <span className="font-mono text-[11px] bg-black/10 px-1.5 py-0.5 rounded">{uploadProgress.percent}%</span>
+                                  <span>{submitStep}</span>
                                 </div>
-                              </>
-                            ) : isSubmitting ? (
-                              <div className="flex items-center justify-center gap-2">
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                                <span>{submitStep}</span>
-                              </div>
-                            ) : (
-                              <div className="flex items-center justify-center gap-2">
-                                <Send className="w-4 h-4" />
-                                <span>Transferir Archivos</span>
-                              </div>
-                            )}
+                              ) : (
+                                <div className="flex items-center justify-center gap-2 font-mono hover-text-adaptive">
+                                  <Send className="w-3.5 h-3.5 btn-text-content" />
+                                  <span className="btn-text-content">Transferir Archivos</span>
+                                </div>
+                              )}
+                            </div>
                           </button>
                         </>
                       )}
@@ -1040,88 +1179,144 @@ export default function App() {
                   )}
 
                 </div>
-              </div>
 
-            </motion.div>
-          ) : (
-            <motion.div
-              key="admin-view"
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              transition={{ duration: 0.25 }}
-              className="py-4"
-            >
-              {!isAdminAuthenticated ? (
-                <div className="max-w-md mx-auto my-12 bg-[#111111] rounded-3xl p-8 border border-white/10 shadow-lg space-y-6">
-                  <div className="text-center space-y-2">
-                    <div className="w-12 h-12 bg-white/5 text-white rounded-full flex items-center justify-center mx-auto border border-white/10">
-                      <ShieldCheck className="w-6 h-6" />
-                    </div>
-                    <h2 className="text-lg font-bold text-white tracking-tight">Acceso a Administración</h2>
-                    <p className="text-xs text-white/40 leading-relaxed">
-                      Por seguridad, introduce la contraseña configurada en tu Notion (dentro de un bloque de Cita / Quote).
-                    </p>
-                  </div>
-
-                  <form onSubmit={handleAdminLogin} className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
-                        Contraseña
-                      </label>
-                      <input
-                        type="password"
-                        required
-                        placeholder="••••••••"
-                        value={adminPasswordInput}
-                        onChange={(e) => setAdminPasswordInput(e.target.value)}
-                        className="w-full px-4 py-3 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none placeholder-white/20 transition-all text-white font-mono text-center"
-                      />
-                    </div>
-
-                    {loginError && (
-                      <div className="p-3 bg-red-950/30 border border-red-900/50 text-red-300 text-xs rounded-xl text-center leading-relaxed">
-                        {loginError}
+              </motion.div>
+            ) : (
+              <motion.div
+                key="admin-view"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.25 }}
+                className={`w-full mx-auto flex flex-col ${!isAdminAuthenticated ? "max-w-md min-h-[calc(100vh-5rem)] justify-center py-8" : "max-w-5xl py-4"}`}
+              >
+                {!isAdminAuthenticated ? (
+                  <div
+                    className={`w-full p-8 space-y-6 rounded-3xl transition-all ${hasBgColor
+                        ? 'bg-transparent border-none shadow-none adaptive-card'
+                        : 'bg-[#111111] border border-white/10 shadow-lg'
+                      }`}
+                    data-adaptive={hasBgColor ? (bgColorIsLight ? "light" : "dark") : "dark"}
+                    style={{
+                      '--field-bg': hasBgColor ? adaptiveFieldBg : 'var(--field-bg-base, #0d0d0d)',
+                      '--field-border': hasBgColor ? adaptiveFieldBorder : 'rgba(255,255,255,0.1)',
+                    } as React.CSSProperties}
+                  >
+                    <div className="text-center space-y-2">
+                      <div
+                        className="w-12 h-12 rounded-full flex items-center justify-center mx-auto border"
+                        style={{
+                          backgroundColor: hasBgColor ? (bgColorIsLight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.05)') : 'rgba(255,255,255,0.05)',
+                          borderColor: hasBgColor ? (bgColorIsLight ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.1)') : 'rgba(255,255,255,0.1)',
+                          color: adaptiveText || '#ffffff'
+                        }}
+                      >
+                        <ShieldCheck className="w-6 h-6" />
                       </div>
-                    )}
+                      <h2
+                        className="text-lg font-bold tracking-tight"
+                        style={{ color: adaptiveText || '#ffffff' }}
+                      >
+                        Acceso a Administración
+                      </h2>
+                      <p
+                        className="text-xs leading-relaxed"
+                        style={{ color: hasBgColor ? (bgColorIsLight ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.4)') : 'rgba(255,255,255,0.4)' }}
+                      >
+                        Por seguridad, introduce la contraseña configurada en tu Notion (dentro de un bloque de Cita / Quote).
+                      </p>
+                    </div>
 
-                    <button
-                      type="submit"
-                      disabled={isLoggingIn}
-                      className="w-full py-3 rounded-xl bg-white hover:bg-white/90 disabled:bg-white/10 disabled:text-white/30 text-black font-semibold text-xs tracking-wider uppercase transition-all flex items-center justify-center gap-2 cursor-pointer animate-fade-in"
-                    >
-                      {isLoggingIn ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Validando...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>Ingresar</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </>
+                    <form onSubmit={handleAdminLogin} className="space-y-4">
+                      <div>
+                        <label
+                          className="block text-xs font-semibold mb-1.5 uppercase tracking-wide"
+                          style={{ color: hasBgColor ? (bgColorIsLight ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.4)') : 'rgba(255,255,255,0.4)' }}
+                        >
+                          Contraseña
+                        </label>
+                        <input
+                          type="password"
+                          required
+                          placeholder="••••••••"
+                          value={adminPasswordInput}
+                          onChange={(e) => setAdminPasswordInput(e.target.value)}
+                          className="w-full px-4 py-3 border rounded-xl text-sm focus:outline-none transition-all font-mono text-center"
+                          style={{
+                            backgroundColor: 'var(--field-bg)',
+                            borderColor: 'var(--field-border)',
+                            color: adaptiveText || '#ffffff'
+                          }}
+                        />
+                      </div>
+
+                      {loginError && (
+                        <div className="p-3 bg-red-950/30 border border-red-900/50 text-red-300 text-xs rounded-xl text-center leading-relaxed">
+                          {loginError}
+                        </div>
                       )}
-                    </button>
-                  </form>
-                </div>
-              ) : (
-                <AdminPanel
-                  projects={projects}
-                  refreshProjects={fetchProjects}
-                  config={config}
-                  refreshConfig={fetchConfig}
-                  projectMeta={projectMeta}
-                  refreshProjectMeta={fetchProjectMeta}
-                />
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
 
-      </main>
+                      <button
+                        type="submit"
+                        disabled={isLoggingIn}
+                        className="w-full h-[46px] font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden mt-2"
+                        style={{
+                          '--btn-color': hasBgColor ? currentBgColor : "var(--accent, #f5f011)"
+                        } as React.CSSProperties}
+                      >
+                        {/* Base black background filled container */}
+                        <div className="absolute inset-0 bg-[#000000] border border-black group-hover:bg-transparent group-hover:border-transparent transition-all duration-300 rounded-[4px] pointer-events-none" />
 
-      {/* Floating blur slider — REMOVED: blur is now configured in Admin settings */}
+                        {/* Diagonal stripes */}
+                        <div
+                          className="absolute inset-[1px] bg-[#000000] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px] stripes-overlay"
+                          style={{
+                            backgroundImage: `repeating-linear-gradient(119deg, currentColor 0px, currentColor 1px, transparent 1px, transparent 10px)`
+                          }}
+                        />
 
-    </div>
+                        {/* Corner marks for hover focus */}
+                        <span className="btn-motion-corner btn-motion-corner-tl" />
+                        <span className="btn-motion-corner btn-motion-corner-tr" />
+                        <span className="btn-motion-corner btn-motion-corner-bl" />
+                        <span className="btn-motion-corner btn-motion-corner-br" />
+
+                        <div className="relative z-10 flex items-center justify-center gap-2 font-extrabold transition-colors duration-300">
+                          {isLoggingIn ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span className="btn-text-content">Validando...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="btn-text-content">Ingresar</span>
+                              <ArrowRight className="w-3.5 h-3.5 btn-text-content" />
+                            </>
+                          )}
+                        </div>
+                      </button>
+                    </form>
+                  </div>
+                ) : (
+                  <AdminPanel
+                    projects={projects}
+                    refreshProjects={fetchProjects}
+                    config={config}
+                    refreshConfig={fetchConfig}
+                    projectMeta={projectMeta}
+                    refreshProjectMeta={fetchProjectMeta}
+                    onAdminPreviewChange={setAdminPreview}
+                  />
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+        </main>
+
+        {/* Floating blur slider — REMOVED: blur is now configured in Admin settings */}
+
+      </div>
+    </>
   );
 }

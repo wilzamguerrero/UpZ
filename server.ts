@@ -607,8 +607,8 @@ app.post("/api/admin/login", async (req, res) => {
 
     const quoteBlock = response.results.find((b: any) => b.type === "quote") as any;
     if (!quoteBlock || !quoteBlock.quote || !quoteBlock.quote.rich_text) {
-      return res.status(400).json({ 
-        error: "No se encontró ningún bloque de Cita (Quote/Cita con la barra vertical izquierda o línea de quote) en la página matriz de Notion. Por favor crea un bloque Cita en Notion (con tu contraseña ej: 123456) en la parte superior y vuelve a intentar." 
+      return res.status(400).json({
+        error: "No se encontró ningún bloque de Cita (Quote/Cita con la barra vertical izquierda o línea de quote) en la página matriz de Notion. Por favor crea un bloque Cita en Notion (con tu contraseña ej: 123456) en la parte superior y vuelve a intentar."
       });
     }
 
@@ -637,7 +637,7 @@ app.get("/api/project-meta", async (req, res) => {
     try {
       const notion = new Client({ auth: config.notionSecret });
       const response = await notion.blocks.children.list({ block_id: projectId as string });
-      
+
       const codeBlock = response.results.find((b: any) => b.type === "code" && b.code?.language === "json") as any;
       const quoteBlock = response.results.find((b: any) => b.type === "quote") as any;
       let expirationDate = "";
@@ -665,6 +665,14 @@ app.get("/api/project-meta", async (req, res) => {
               expirationDate: data.expirationDate || expirationDate,
               backgroundImage: data.backgroundImage || "",
               isActive: data.isActive !== undefined ? !!data.isActive : true,
+              bgColor: data.bgColor || "",
+              bgBlur: typeof data.bgBlur === "number" ? data.bgBlur : 0,
+              customFields: Array.isArray(data.customFields) ? data.customFields : [],
+              useDatabase: !!data.useDatabase,
+              databaseId: data.databaseId || "",
+              dbColumns: Array.isArray(data.dbColumns) ? data.dbColumns : [],
+              groupId: data.groupId || "",
+              order: typeof data.order === "number" ? data.order : 0,
             }
           });
         } catch (e) {
@@ -693,7 +701,25 @@ app.get("/api/project-meta", async (req, res) => {
 
 // 3.3. Set project customized copywriting meta directly to Notion & cached fallback
 app.post("/api/project-meta", async (req, res) => {
-  const { projectId, title, description, step1, step2, step3, expirationDate, backgroundImage, isActive } = req.body;
+  const {
+    projectId,
+    title,
+    description,
+    step1,
+    step2,
+    step3,
+    expirationDate,
+    backgroundImage,
+    isActive,
+    bgColor,
+    bgBlur,
+    customFields,
+    useDatabase,
+    databaseId,
+    dbColumns,
+    groupId,
+    order
+  } = req.body;
   if (!projectId) {
     return res.status(400).json({ error: "El ID del proyecto es obligatorio." });
   }
@@ -703,7 +729,7 @@ app.post("/api/project-meta", async (req, res) => {
     try {
       const notion = new Client({ auth: config.notionSecret });
       const response = await notion.blocks.children.list({ block_id: projectId });
-      
+
       const codeBlock = response.results.find((b: any) => b.type === "code" && b.code?.language === "json") as any;
       const quoteBlock = response.results.find((b: any) => b.type === "quote") as any;
 
@@ -715,7 +741,15 @@ app.post("/api/project-meta", async (req, res) => {
         step3: (step3 || "").trim(),
         expirationDate: (expirationDate || "").trim(),
         backgroundImage: (backgroundImage || "").trim(),
+        bgBlur: typeof bgBlur === "number" ? bgBlur : 0,
+        bgColor: (bgColor || "").trim(),
         isActive: isActive !== undefined ? !!isActive : true,
+        customFields: Array.isArray(customFields) ? customFields : [],
+        useDatabase: !!useDatabase,
+        databaseId: (databaseId || "").trim(),
+        dbColumns: Array.isArray(dbColumns) ? dbColumns : [],
+        groupId: (groupId || "").trim(),
+        order: typeof order === "number" ? order : 0,
       };
 
       const jsonString = JSON.stringify(metaPayload, null, 2);
@@ -819,7 +853,15 @@ app.post("/api/project-meta", async (req, res) => {
     step3: (step3 || "").trim(),
     expirationDate: (expirationDate || "").trim(),
     backgroundImage: (backgroundImage || "").trim(),
+    bgBlur: typeof bgBlur === "number" ? bgBlur : 0,
+    bgColor: (bgColor || "").trim(),
     isActive: isActive !== undefined ? !!isActive : true,
+    customFields: Array.isArray(customFields) ? customFields : [],
+    useDatabase: !!useDatabase,
+    databaseId: (databaseId || "").trim(),
+    dbColumns: Array.isArray(dbColumns) ? dbColumns : [],
+    groupId: (groupId || "").trim(),
+    order: typeof order === "number" ? order : 0,
   };
 
   saveProjectMeta(metaList);
@@ -835,7 +877,7 @@ app.get("/api/projects", async (req, res) => {
 
   try {
     const notion = new Client({ auth: config.notionSecret });
-    
+
     // List block children from the parent page
     const response = await notion.blocks.children.list({
       block_id: config.parentPageId,
@@ -849,7 +891,7 @@ app.get("/api/projects", async (req, res) => {
       .map((block: any) => {
         const meta = metaList[block.id] || {};
         const isActive = meta.isActive !== undefined ? meta.isActive : true;
-        
+
         if (block.type === "toggle") {
           const name = block.toggle.rich_text.map((rt: any) => rt.plain_text).join("").trim();
           return {
@@ -893,7 +935,7 @@ app.post("/api/projects", async (req, res) => {
 
   try {
     const notion = new Client({ auth: config.notionSecret });
-    
+
     // Create project as an expandable toggle block
     const result = await notion.blocks.children.append({
       block_id: config.parentPageId,

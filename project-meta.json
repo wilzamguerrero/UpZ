@@ -6,7 +6,37 @@
     "step2": "",
     "step3": "",
     "expirationDate": "Sin fecha límite asignada",
-    "backgroundImage": "/api/notion/blocks/37f2640c-88f4-81e6-be43-e688bda763a5/image",
+    "backgroundImage": "",
+    "isActive": true
+  },
+  "37f2640c-88f4-8184-b670-d191b002fb66": {
+    "title": "",
+    "description": "",
+    "step1": "",
+    "step2": "",
+    "step3": "",
+    "expirationDate": "",
+    "backgroundImage": "",
+    "isActive": true
+  },
+  "37f2640c-88f4-8115-b133-c06566f55bb1": {
+    "title": "",
+    "description": "",
+    "step1": "",
+    "step2": "",
+    "step3": "",
+    "expirationDate": "",
+    "backgroundImage": "",
+    "isActive": true
+  },
+  "37f2640c-88f4-8163-a2c2-cf050c92a232": {
+    "title": "",
+    "description": "",
+    "step1": "",
+    "step2": "",
+    "step3": "",
+    "expirationDate": "",
+    "backgroundImage": "",
     "isActive": true
   }
 }

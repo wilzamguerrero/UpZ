@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
 @theme {
@@ -8,19 +8,537 @@
 
 body {
   font-family: var(--font-sans);
-  background-color: #050505;
-  color: #e0e0e0;
+  background-color: var(--app-bg, #050505);
+  color: var(--text-primary, #e0e0e0);
+}
+
+/* ---- Theme-aware utility classes ----------------------------------------- */
+
+.t-card {
+  background-color: var(--card-bg);
+  border: var(--border-width) solid var(--card-border);
+  border-radius: var(--card-radius);
+}
+
+.t-field {
+  background-color: var(--field-bg-base) !important;
+  border-color: var(--field-border) !important;
+  border-radius: var(--field-radius) !important;
+  transition: border-color 0.15s ease;
+}
+
+.t-field:focus {
+  border-color: var(--accent) !important;
+  outline: none;
+}
+
+.t-pill {
+  border-radius: var(--pill-radius);
+}
+
+.t-btn-primary {
+  border-radius: var(--btn-radius) !important;
+}
+
+.t-heading {
+  font-weight: var(--heading-weight);
+  letter-spacing: var(--heading-tracking);
+}
+
+.t-divider {
+  border-color: var(--border-subtle);
+}
+
+.t-accent {
+  color: var(--accent);
+}
+
+.t-accent-bg {
+  background-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* ---- Adaptive card: image-derived field bg -------------------------------- */
+.adaptive-card input,
+.adaptive-card select,
+.adaptive-card textarea {
+  background-color: var(--field-bg, var(--field-bg-base, #0d0d0d)) !important;
+  border-radius: var(--field-radius) !important;
+  border-color: var(--field-border) !important;
+}
+
+/* ---- Brutal theme overrides ----------------------------------------------- */
+[data-theme="brutal"] .rounded-3xl,
+[data-theme="brutal"] .rounded-2xl {
+  border-radius: var(--card-radius) !important;
+}
+
+[data-theme="brutal"] .rounded-xl,
+[data-theme="brutal"] .rounded-lg {
+  border-radius: var(--field-radius) !important;
+}
+
+[data-theme="brutal"] .rounded-full {
+  border-radius: var(--pill-radius) !important;
 }
 
 /* Custom drag and drop visual styles */
 .file-dropzone-active {
   background-color: rgba(59, 130, 246, 0.05);
-  border-color: #3b82f6;
+  border-color: var(--accent, #3b82f6);
 }
 
-/* Adaptive card: input/select backgrounds follow the --field-bg CSS variable */
-.adaptive-card input,
-.adaptive-card select,
-.adaptive-card textarea {
-  background-color: var(--field-bg, #0d0d0d);
+/* ── Brutal theme overrides ────────────────────────────────────── */
+[data-theme="brutal"] body {
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+[data-theme="brutal"] .adaptive-card {
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+[data-theme="brutal"] hr {
+  background: repeating-linear-gradient(90deg,
+      var(--border-medium, rgba(255, 255, 255, 0.20)) 0,
+      var(--border-medium, rgba(255, 255, 255, 0.20)) 4px,
+      transparent 4px,
+      transparent 10px);
+  border: none;
+  height: 1px;
+}
+
+/* ── Light background adaptive overrides (data-adaptive="light") ────────── */
+[data-adaptive="light"] {
+  color: #111111;
+  --text-primary: #111111;
+}
+
+[data-adaptive="light"] label,
+[data-adaptive="light"] span,
+[data-adaptive="light"] p,
+[data-adaptive="light"] h1,
+[data-adaptive="light"] h2,
+[data-adaptive="light"] h3,
+[data-adaptive="light"] h4,
+[data-adaptive="light"] li {
+  color: #111111 !important;
+}
+
+[data-adaptive="light"] input,
+[data-adaptive="light"] textarea,
+[data-adaptive="light"] select {
+  background-color: rgba(0, 0, 0, 0.06) !important;
+  border-color: rgba(0, 0, 0, 0.15) !important;
+  color: #111111 !important;
+}
+
+[data-adaptive="light"] input::placeholder,
+[data-adaptive="light"] textarea::placeholder {
+  color: rgba(0, 0, 0, 0.4) !important;
+}
+
+[data-adaptive="light"] input:focus,
+[data-adaptive="light"] textarea:focus,
+[data-adaptive="light"] select:focus {
+  border-color: rgba(0, 0, 0, 0.4) !important;
+}
+
+[data-adaptive="light"] svg {
+  color: #111111 !important;
+}
+
+[data-adaptive="light"] hr {
+  background: repeating-linear-gradient(90deg,
+      rgba(0, 0, 0, 0.15) 0,
+      rgba(0, 0, 0, 0.15) 4px,
+      transparent 4px,
+      transparent 10px) !important;
+}
+
+[data-adaptive="light"] button[type="submit"],
+[data-adaptive="light"] button[type="button"].submit-btn {
+  background-color: #111111 !important;
+  color: #ffffff !important;
+}
+
+[data-adaptive="light"] .file-dropzone-active,
+[data-adaptive="light"] [class*="border-dashed"] {
+  border-color: rgba(0, 0, 0, 0.22) !important;
+}
+
+[data-adaptive="light"] [class*="border-white"] {
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+[data-adaptive="light"] [class*="bg-white/"] {
+  background-color: rgba(0, 0, 0, 0.05) !important;
+}
+
+[data-adaptive="light"] [class*="text-white/"] {
+  color: rgba(0, 0, 0, 0.55) !important;
+}
+
+[data-adaptive="light"] [class*="text-white"] {
+  color: #111111 !important;
+}
+
+/* Custom robust light overrides that map typical dark design patterns to elegant light ones */
+[data-adaptive="light"] .bg-\[\#111111\],
+[data-adaptive="light"] .bg-\[\#111\],
+[data-adaptive="light"] .bg-zinc-900,
+[data-adaptive="light"] .bg-neutral-900,
+[data-adaptive="light"] .bg-slate-900,
+[data-adaptive="light"] .bg-gray-900 {
+  background-color: rgba(0, 0, 0, 0.04) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+[data-adaptive="light"] .bg-\[\#0d0d0d\],
+[data-adaptive="light"] .bg-\[\#0a0a0a\],
+[data-adaptive="light"] .bg-black {
+  background-color: rgba(0, 0, 0, 0.05) !important;
+}
+
+[data-adaptive="light"] .bg-white\/5 {
+  background-color: rgba(0, 0, 0, 0.04) !important;
+}
+
+[data-adaptive="light"] .border-white\/10,
+[data-adaptive="light"] .border-white\/5,
+[data-adaptive="light"] .border-white\/20,
+[data-adaptive="light"] .border-zinc-800,
+[data-adaptive="light"] .border-neutral-800,
+[data-adaptive="light"] .border-slate-800 {
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+[data-adaptive="light"] .text-white\/40,
+[data-adaptive="light"] .text-white\/30,
+[data-adaptive="light"] .text-white\/20,
+[data-adaptive="light"] .text-slate-400,
+[data-adaptive="light"] .text-zinc-400,
+[data-adaptive="light"] .text-neutral-400,
+[data-adaptive="light"] .text-slate-500 {
+  color: rgba(0, 0, 0, 0.55) !important;
+}
+
+[data-adaptive="light"] .text-white,
+[data-adaptive="light"] .text-white\/90,
+[data-adaptive="light"] .text-white\/80,
+[data-adaptive="light"] .text-slate-100,
+[data-adaptive="light"] .text-slate-200,
+[data-adaptive="light"] .text-zinc-200 {
+  color: #111111 !important;
+}
+
+[data-adaptive="light"] .text-white\/70,
+[data-adaptive="light"] .text-white\/65,
+[data-adaptive="light"] .text-white\/60,
+[data-adaptive="light"] .text-white\/50,
+[data-adaptive="light"] .text-slate-300,
+[data-adaptive="light"] .text-zinc-300 {
+  color: rgba(0, 0, 0, 0.7) !important;
+}
+
+/* Light button conversions */
+[data-adaptive="light"] button.bg-white,
+[data-adaptive="light"] button.bg-slate-200,
+[data-adaptive="light"] a.bg-white {
+  background-color: #111111 !important;
+  color: #ffffff !important;
+}
+
+[data-adaptive="light"] button.bg-white:hover,
+[data-adaptive="light"] a.bg-white:hover {
+  background-color: #222222 !important;
+}
+
+[data-adaptive="light"] button.border-white\/20 {
+  border-color: rgba(0, 0, 0, 0.2) !important;
+  color: #111111 !important;
+}
+
+/* Scrollbars helper for light adaptive */
+[data-adaptive="light"] ::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.15) !important;
+}
+
+/* Custom robust overrides when a custom solid background color is active */
+
+/* 1. Make the client-facing upload card completely flat and transparent to blend with the solid color background */
+[data-has-bgcolor="true"] .adaptive-card {
+  background-color: transparent !important;
+  border: none !important;
+  border-width: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* 2. Style inner containers, helper list items, fields, and options nicely */
+[data-has-bgcolor="true"] .bg-\[\#0d0d0d\],
+[data-has-bgcolor="true"] .bg-\[\#0d0d0d\]\/50,
+[data-has-bgcolor="true"] .bg-\[\#0d0d0d\]\/25,
+[data-has-bgcolor="true"] .bg-\[\#0d0d0d\]\/20,
+[data-has-bgcolor="true"] .bg-\[\#0d0d0d\]\/35,
+[data-has-bgcolor="true"] .bg-\[\#0a0a0a\],
+[data-has-bgcolor="true"] .bg-white\/5 {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Dropdown selections (option tags) must have a dark background to be easily legible */
+[data-has-bgcolor="true"] select option,
+[data-has-bgcolor="true"] .adaptive-card select option,
+[data-has-bgcolor="true"] option {
+  background-color: #0c0c0c !important;
+  color: #ffffff !important;
+}
+
+/* 3. Dark background + custom color overrides */
+[data-has-bgcolor="true"][data-adaptive="dark"] {
+  color: #ffffff !important;
+}
+
+[data-has-bgcolor="true"][data-adaptive="dark"] .border-white\/10,
+[data-has-bgcolor="true"][data-adaptive="dark"] .border-white\/5,
+[data-has-bgcolor="true"][data-adaptive="dark"] .border-white\/20,
+[data-has-bgcolor="true"][data-adaptive="dark"] .border-zinc-800,
+[data-has-bgcolor="true"][data-adaptive="dark"] .border-neutral-800,
+[data-has-bgcolor="true"][data-adaptive="dark"] .border-slate-800,
+[data-has-bgcolor="true"][data-adaptive="dark"] .border-white\/12,
+[data-has-bgcolor="true"][data-adaptive="dark"] input,
+[data-has-bgcolor="true"][data-adaptive="dark"] select,
+[data-has-bgcolor="true"][data-adaptive="dark"] textarea,
+[data-has-bgcolor="true"][data-adaptive="dark"] .adaptive-card,
+[data-has-bgcolor="true"][data-adaptive="dark"] .border {
+  border-color: rgba(255, 255, 255, 0.18) !important;
+}
+
+[data-has-bgcolor="true"][data-adaptive="dark"] input,
+[data-has-bgcolor="true"][data-adaptive="dark"] select,
+[data-has-bgcolor="true"][data-adaptive="dark"] textarea {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+  color: #ffffff !important;
+}
+
+/* Text overrides in dark mode */
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-white\/40,
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-white\/30,
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-white\/20,
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-white\/50,
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-slate-400,
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-zinc-400 {
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-white\/70,
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-white\/65,
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-white\/60,
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-slate-300,
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-zinc-300,
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-slate-200 {
+  color: rgba(255, 255, 255, 0.78) !important;
+}
+
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-white,
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-white\/90,
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-white\/80,
+[data-has-bgcolor="true"][data-adaptive="dark"] .text-slate-100 {
+  color: #ffffff !important;
+}
+
+
+/* 4. Light background + custom color overrides */
+[data-has-bgcolor="true"][data-adaptive="light"] {
+  color: #000000 !important;
+}
+
+[data-has-bgcolor="true"][data-adaptive="light"] .border-white\/10,
+[data-has-bgcolor="true"][data-adaptive="light"] .border-white\/5,
+[data-has-bgcolor="true"][data-adaptive="light"] .border-white\/20,
+[data-has-bgcolor="true"][data-adaptive="light"] .border-zinc-800,
+[data-has-bgcolor="true"][data-adaptive="light"] .border-neutral-800,
+[data-has-bgcolor="true"][data-adaptive="light"] .border-slate-800,
+[data-has-bgcolor="true"][data-adaptive="light"] .border-white\/12,
+[data-has-bgcolor="true"][data-adaptive="light"] input,
+[data-has-bgcolor="true"][data-adaptive="light"] select,
+[data-has-bgcolor="true"][data-adaptive="light"] textarea,
+[data-has-bgcolor="true"][data-adaptive="light"] .adaptive-card,
+[data-has-bgcolor="true"][data-adaptive="light"] .border {
+  border-color: rgba(0, 0, 0, 0.18) !important;
+}
+
+[data-has-bgcolor="true"][data-adaptive="light"] input,
+[data-has-bgcolor="true"][data-adaptive="light"] select,
+[data-has-bgcolor="true"][data-adaptive="light"] textarea {
+  background-color: rgba(0, 0, 0, 0.04) !important;
+  color: #000000 !important;
+}
+
+/* Text overrides in light mode */
+[data-has-bgcolor="true"][data-adaptive="light"] .text-white/40,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-white/30,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-white/20,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-white/50,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-slate-400,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-zinc-400,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-white\/40,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-white\/30,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-white\/20,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-white\/50,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-slate-400,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-zinc-400 {
+  color: rgba(0, 0, 0, 0.5) !important;
+}
+
+[data-has-bgcolor="true"][data-adaptive="light"] .text-white/70,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-white/65,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-white/60,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-slate-300,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-zinc-300,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-slate-200,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-white\/70,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-white\/65,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-white\/60,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-slate-300,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-zinc-300,
+[data-has-bgcolor="true"][data-adaptive="light"] .text-slate-200 {
+  color: rgba(0, 0, 0, 0.78) !important;
+}
+
+/* Ensure headings etc. are solid black in light mode with solid bg */
+[data-has-bgcolor="true"][data-adaptive="light"] .text-slate-100,
+[data-has-bgcolor="true"][data-adaptive="light"] h1,
+[data-has-bgcolor="true"][data-adaptive="light"] h2,
+[data-has-bgcolor="true"][data-adaptive="light"] h3,
+[data-has-bgcolor="true"][data-adaptive="light"] strong,
+[data-has-bgcolor="true"][data-adaptive="light"] .font-semibold,
+[data-has-bgcolor="true"][data-adaptive="light"] .font-medium {
+  color: #000000 !important;
+}
+
+/* CSS support for our awesome premium Motion.dev retro button style */
+.btn-motion-retro {
+  position: relative;
+  overflow: hidden;
+  border-radius: 4px !important;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: none !important;
+  background-color: #000000 !important;
+  /* Use the specified --btn-color custom property, default to yellow/neon */
+  color: var(--btn-color, #f5f011) !important;
+  border: 1px solid #000000 !important;
+}
+
+/* Force children of .btn-motion-retro to use the button's color rules */
+.btn-motion-retro,
+.btn-motion-retro *,
+[data-has-bgcolor="true"] .btn-motion-retro *,
+[data-has-bgcolor="true"][data-adaptive="light"] .btn-motion-retro *,
+[data-has-bgcolor="true"][data-adaptive="dark"] .btn-motion-retro * {
+  color: var(--btn-color, #f5f011) !important;
+}
+
+/* On hover, set background and border transparent */
+.btn-motion-retro:not(:disabled):hover {
+  background-color: transparent !important;
+  border-color: transparent !important;
+}
+
+/* Adaptive text color changes based on light vs dark theme on hover */
+[data-adaptive="light"] .btn-motion-retro:not(:disabled):hover,
+[data-adaptive="light"] .btn-motion-retro:not(:disabled):hover *,
+[data-has-bgcolor="true"][data-adaptive="light"] .btn-motion-retro:not(:disabled):hover * {
+  color: #000000 !important;
+}
+
+[data-adaptive="dark"] .btn-motion-retro:not(:disabled):hover,
+[data-adaptive="dark"] .btn-motion-retro:not(:disabled):hover *,
+[data-has-bgcolor="true"][data-adaptive="dark"] .btn-motion-retro:not(:disabled):hover * {
+  color: #ffffff !important;
+}
+
+/* Disabled state */
+.btn-motion-retro:disabled {
+  cursor: not-allowed !important;
+  background-color: #000000 !important;
+  border-color: #000000 !important;
+}
+
+.btn-motion-retro:disabled *,
+[data-has-bgcolor="true"] .btn-motion-retro:disabled *,
+[data-has-bgcolor="true"][data-adaptive="light"] .btn-motion-retro:disabled *,
+[data-has-bgcolor="true"][data-adaptive="dark"] .btn-motion-retro:disabled * {
+  color: var(--btn-color, #f5f011) !important;
+  opacity: 0.85 !important;
+}
+
+.btn-motion-corner {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  opacity: 0;
+  transition: transform 0.3s ease, opacity 0.3s ease;
+  z-index: 15;
+}
+
+.btn-motion-retro:hover .btn-motion-corner {
+  opacity: 1;
+}
+
+.btn-motion-corner-tl {
+  top: 0;
+  left: 0;
+  border-top: 2px solid currentColor;
+  border-left: 2px solid currentColor;
+  transform: translate(-3px, -3px);
+}
+
+.btn-motion-retro:hover .btn-motion-corner-tl {
+  transform: translate(0, 0);
+}
+
+.btn-motion-corner-tr {
+  top: 0;
+  right: 0;
+  border-top: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  transform: translate(3px, -3px);
+}
+
+.btn-motion-retro:hover .btn-motion-corner-tr {
+  transform: translate(0, 0);
+}
+
+.btn-motion-corner-bl {
+  bottom: 0;
+  left: 0;
+  border-bottom: 2px solid currentColor;
+  border-left: 2px solid currentColor;
+  transform: translate(-3px, 3px);
+}
+
+.btn-motion-retro:hover .btn-motion-corner-bl {
+  transform: translate(0, 0);
+}
+
+.btn-motion-corner-br {
+  bottom: 0;
+  right: 0;
+  border-bottom: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  transform: translate(3px, 3px);
+}
+
+.btn-motion-retro:hover .btn-motion-corner-br {
+  transform: translate(0, 0);
+}
+
+.hover-text-adaptive {
+  transition: color 0.3s ease;
 }

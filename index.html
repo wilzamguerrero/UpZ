@@ -1,9 +1,36 @@
 <!doctype html>
-<html lang="en">
+<html lang="es" data-theme="brutal">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
+    <title>Notion Drop</title>
+    <style>
+      /* Initial CSS variables (Brutal defaults) - prevents FOUC */
+      :root {
+        --app-bg: #0a0a0a;
+        --card-bg: transparent;
+        --card-border: transparent;
+        --card-radius: 0px;
+        --field-bg-base: rgba(255,255,255,0.04);
+        --field-border: rgba(255,255,255,0.10);
+        --field-radius: 0px;
+        --btn-radius: 0px;
+        --pill-radius: 0px;
+        --text-primary: #ffffff;
+        --text-secondary: rgba(255,255,255,0.70);
+        --text-muted: rgba(255,255,255,0.40);
+        --text-faint: rgba(255,255,255,0.15);
+        --border-subtle: rgba(255,255,255,0.05);
+        --border-medium: rgba(255,255,255,0.10);
+        --border-width: 1px;
+        --heading-weight: 900;
+        --heading-tracking: -0.04em;
+        --accent: #f5f011;
+        --accent-fg: #000000;
+        --loader-bg: #0a0a0a;
+      }
+      html, body { margin: 0; padding: 0; background-color: #0a0a0a; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
