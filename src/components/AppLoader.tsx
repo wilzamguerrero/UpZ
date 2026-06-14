@@ -32,9 +32,12 @@ export default function AppLoader({ visible, bgColor, isLight, textColor }: AppL
         <motion.div
           key="app-loader"
           initial={{ opacity: 1 }}
-          exit={{ opacity: 0, transition: { duration: 0.5, ease: [0.25, 0, 0.2, 1] } }}
+          exit={{ opacity: 0, transition: { duration: 0.45, ease: [0.25, 0, 0.2, 1] } }}
           className="fixed inset-0 z-[9999] flex flex-col items-center justify-center select-none"
-          style={{ backgroundColor: finalBgColor }}
+          style={{
+            backgroundColor: finalBgColor,
+            transition: 'background-color 0.35s ease',
+          }}
         >
           <motion.div
             initial={{ opacity: 0, y: 12 }}

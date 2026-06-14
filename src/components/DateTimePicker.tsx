@@ -5,6 +5,7 @@ interface DateTimePickerProps {
   value: string; // "YYYY-MM-DDTHH:mm" or ""
   onChange: (val: string) => void;
   placeholder?: string;
+  surfaceColor?: string;
 }
 
 const MONTH_NAMES = [
@@ -14,7 +15,52 @@ const MONTH_NAMES = [
 
 const WEEK_DAYS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
-export default function DateTimePicker({ value, onChange, placeholder = "Sin límite de fecha" }: DateTimePickerProps) {
+const normalizeHexColor = (color?: string): string | null => {
+  if (!color) return null;
+  const raw = color.trim().replace(/^#/, "");
+  if (!/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(raw)) return null;
+  const normalized = raw.length === 3
+    ? raw.split("").map((char) => char + char).join("")
+    : raw;
+  return `#${normalized.toLowerCase()}`;
+};
+
+const hexToRgb = (hex: string) => {
+  const normalized = normalizeHexColor(hex);
+  if (!normalized) return null;
+  const raw = normalized.slice(1);
+  return {
+    r: parseInt(raw.slice(0, 2), 16),
+    g: parseInt(raw.slice(2, 4), 16),
+    b: parseInt(raw.slice(4, 6), 16),
+  };
+};
+
+const mixHexColors = (base: string, target: string, ratio: number) => {
+  const baseRgb = hexToRgb(base);
+  const targetRgb = hexToRgb(target);
+  if (!baseRgb || !targetRgb) return base;
+  const weight = Math.max(0, Math.min(1, ratio));
+  const mixChannel = (from: number, to: number) => Math.round(from + (to - from) * weight);
+  return `#${[mixChannel(baseRgb.r, targetRgb.r), mixChannel(baseRgb.g, targetRgb.g), mixChannel(baseRgb.b, targetRgb.b)]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("")}`;
+};
+
+const getColorLuminance = (hex: string) => {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return 0;
+  const toLinear = (channel: number) => {
+    const srgb = channel / 255;
+    return srgb <= 0.03928 ? srgb / 12.92 : Math.pow((srgb + 0.055) / 1.055, 2.4);
+  };
+  const r = toLinear(rgb.r);
+  const g = toLinear(rgb.g);
+  const b = toLinear(rgb.b);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+
+export default function DateTimePicker({ value, onChange, placeholder = "Sin límite de fecha", surfaceColor }: DateTimePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   
   // Parse initial or current value
@@ -47,6 +93,9 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
         minutes = parseInt(timeParts[1], 10);
       }
       
+      if (isNaN(year) || isNaN(month) || isNaN(day) || isNaN(hours) || isNaN(minutes)) {
+        return { year: now.getFullYear(), month: now.getMonth(), day: now.getDate(), hours: 23, minutes: 59, hasValue: false };
+      }
       return { year, month, day, hours, minutes, hasValue: true };
     } catch (e) {
       return {
@@ -253,7 +302,7 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
 
   // Format date readable for Spanish
   const getReadableValue = () => {
-    if (!value || selectedDay === null) return placeholder;
+    if (!value || selectedDay === null || isNaN(selectedDay) || isNaN(selectedMonth) || isNaN(selectedYear)) return placeholder;
     try {
       const d = new Date(selectedYear, selectedMonth, selectedDay, selectedHours, selectedMinutes);
       const dayName = d.toLocaleDateString("es-ES", { weekday: "short" });
@@ -281,38 +330,98 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
     yearsRange.push(y);
   }
 
+  const resolvedSurfaceColor = normalizeHexColor(surfaceColor);
+  const isSurfaceLight = resolvedSurfaceColor ? getColorLuminance(resolvedSurfaceColor) > 0.58 : false;
+  const panelBg = resolvedSurfaceColor ?? "#050505";
+  const triggerBg = resolvedSurfaceColor
+    ? mixHexColors(panelBg, isSurfaceLight ? "#000000" : "#ffffff", isSurfaceLight ? 0.08 : 0.06)
+    : "#0d0d0d";
+  const headerBg = resolvedSurfaceColor
+    ? mixHexColors(panelBg, isSurfaceLight ? "#000000" : "#ffffff", isSurfaceLight ? 0.08 : 0.05)
+    : "#0d0d0d";
+  const sectionBg = resolvedSurfaceColor
+    ? mixHexColors(panelBg, isSurfaceLight ? "#000000" : "#ffffff", isSurfaceLight ? 0.05 : 0.03)
+    : "rgba(255,255,255,0.01)";
+  const cardBg = resolvedSurfaceColor
+    ? mixHexColors(panelBg, isSurfaceLight ? "#000000" : "#ffffff", isSurfaceLight ? 0.12 : 0.08)
+    : "#0a0a0a";
+  const borderColor = resolvedSurfaceColor
+    ? mixHexColors(panelBg, isSurfaceLight ? "#000000" : "#ffffff", isSurfaceLight ? 0.22 : 0.16)
+    : "rgba(255,255,255,0.15)";
+  const subtleBorder = resolvedSurfaceColor
+    ? mixHexColors(panelBg, isSurfaceLight ? "#000000" : "#ffffff", isSurfaceLight ? 0.18 : 0.12)
+    : "rgba(255,255,255,0.10)";
+  const faintBorder = resolvedSurfaceColor
+    ? mixHexColors(panelBg, isSurfaceLight ? "#000000" : "#ffffff", isSurfaceLight ? 0.12 : 0.08)
+    : "rgba(255,255,255,0.05)";
+  const textPrimary = resolvedSurfaceColor ? (isSurfaceLight ? "#111111" : "#ffffff") : "#ffffff";
+  const textSoft = resolvedSurfaceColor ? (isSurfaceLight ? "rgba(17,17,17,0.78)" : "rgba(255,255,255,0.78)") : "rgba(255,255,255,0.78)";
+  const textMuted = resolvedSurfaceColor ? (isSurfaceLight ? "rgba(17,17,17,0.52)" : "rgba(255,255,255,0.42)") : "rgba(255,255,255,0.40)";
+  const textFaint = resolvedSurfaceColor ? (isSurfaceLight ? "rgba(17,17,17,0.28)" : "rgba(255,255,255,0.22)") : "rgba(255,255,255,0.20)";
+  const todayBorder = resolvedSurfaceColor
+    ? mixHexColors(panelBg, "#10b981", isSurfaceLight ? 0.35 : 0.5)
+    : "rgba(16,185,129,0.40)";
+  const destructiveBg = resolvedSurfaceColor
+    ? mixHexColors(panelBg, isSurfaceLight ? "#dc2626" : "#7f1d1d", isSurfaceLight ? 0.12 : 0.18)
+    : undefined;
+  const destructiveBorder = resolvedSurfaceColor
+    ? mixHexColors(panelBg, isSurfaceLight ? "#991b1b" : "#fca5a5", isSurfaceLight ? 0.20 : 0.24)
+    : undefined;
+  const destructiveText = resolvedSurfaceColor ? (isSurfaceLight ? "#7f1d1d" : "#fecaca") : undefined;
+  const buttonAccent = resolvedSurfaceColor
+    ? (isSurfaceLight ? panelBg : mixHexColors(panelBg, "#ffffff", 0.45))
+    : "var(--accent, #f5f011)";
+  const selectedCellBg = "#000000";
+  const selectedCellAccent = buttonAccent;
+
   return (
     <div ref={containerRef} className="relative w-full">
       {/* Trigger Button Field styled exactly as requested */}
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between px-3.5 py-2.5 bg-[#0d0d0d] border border-white/10 hover:border-white/20 hover:bg-white/[0.02] rounded-xl text-left text-xs text-white transition-all cursor-pointer select-none"
+        className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-left text-xs transition-all cursor-pointer select-none"
+        style={{
+          backgroundColor: triggerBg,
+          border: `1px solid ${subtleBorder}`,
+          color: textPrimary,
+        }}
       >
         <div className="flex items-center gap-2.5 min-w-0">
           {selectedDay !== null ? (
             <CalendarDays className="w-4 h-4 text-emerald-400 shrink-0" />
           ) : (
-            <CalendarIcon className="w-4 h-4 text-white/30 shrink-0" />
+            <CalendarIcon className="w-4 h-4 shrink-0" style={{ color: textMuted }} />
           )}
-          <span className={`truncate font-medium ${selectedDay !== null ? "text-white font-semibold" : "text-white/40"}`}>
+          <span
+            className={`truncate font-medium ${selectedDay !== null ? "font-semibold" : ""}`}
+            style={{ color: selectedDay !== null ? textPrimary : textMuted }}
+          >
             {getReadableValue()}
           </span>
         </div>
-        <div className="flex items-center gap-1 shrink-0 text-white/30 hover:text-white/60 pl-2">
+        <div className="flex items-center gap-1 shrink-0 pl-2" style={{ color: textMuted }}>
           {selectedDay !== null && (
             <span 
               onClick={(e) => {
                 e.stopPropagation();
                 handleClear();
               }}
-              className="p-1 hover:bg-white/10 rounded-md transition-colors text-red-400/70 hover:text-red-400"
+              className="p-1 rounded-md transition-colors"
+              style={{ color: destructiveText || "rgba(248,113,113,0.7)" }}
               title="Quitar límite de fecha"
             >
               <X className="w-3.5 h-3.5" />
             </span>
           )}
-          <span className="text-[10px] bg-white/5 border border-white/10 px-1.5 py-0.5 rounded text-white/40 font-mono">
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded font-mono"
+            style={{
+              backgroundColor: sectionBg,
+              border: `1px solid ${faintBorder}`,
+              color: textMuted,
+            }}
+          >
             {selectedDay !== null ? "CAMBIAR" : "ABRIR CALENDARIO"}
           </span>
         </div>
@@ -320,28 +429,38 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
 
       {/* Graphical Calendar Popover Panel matching our high-end interface */}
       {isOpen && (
-        <div className="absolute left-0 right-0 lg:right-auto lg:w-[350px] mt-2 bg-[#050505] border border-white/15 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.8)] z-50 overflow-hidden animate-fade-in divide-y divide-white/5 font-sans">
+        <div
+          className="absolute left-0 right-0 lg:right-auto lg:w-[350px] mt-2 rounded-2xl z-50 overflow-hidden animate-fade-in divide-y divide-white/5 font-sans"
+          style={{
+            backgroundColor: panelBg,
+            border: `1px solid ${borderColor}`,
+            boxShadow: isSurfaceLight ? "0 20px 50px rgba(0,0,0,0.28)" : "0 20px 50px rgba(0,0,0,0.8)",
+            color: textPrimary,
+          }}
+        >
           
           {/* Section: Month and Year selectors header */}
-          <div className="p-3 bg-[#0d0d0d] flex items-center justify-between">
+          <div className="p-3 flex items-center justify-between" style={{ backgroundColor: headerBg }}>
             <div className="flex items-center gap-1">
               <select
                 value={viewMonth}
                 onChange={(e) => setViewMonth(parseInt(e.target.value, 10))}
-                className="bg-transparent text-xs font-bold text-white border-0 py-0.5 px-1 pr-5 focus:ring-0 cursor-pointer text-left"
+                className="bg-transparent text-xs font-bold border-0 py-0.5 px-1 pr-5 focus:ring-0 cursor-pointer text-left"
+                style={{ color: textPrimary }}
               >
                 {MONTH_NAMES.map((m, idx) => (
-                  <option key={m} value={idx} className="bg-[#050505] text-white py-1">{m}</option>
+                  <option key={m} value={idx} className="py-1">{m}</option>
                 ))}
               </select>
 
               <select
                 value={viewYear}
                 onChange={(e) => setViewYear(parseInt(e.target.value, 10))}
-                className="bg-transparent text-xs text-white/55 border-0 py-0.5 px-1 pr-5 focus:ring-0 cursor-pointer"
+                className="bg-transparent text-xs border-0 py-0.5 px-1 pr-5 focus:ring-0 cursor-pointer"
+                style={{ color: textMuted }}
               >
                 {yearsRange.map(yr => (
-                  <option key={yr} value={yr} className="bg-[#050505] text-white py-1">{yr}</option>
+                  <option key={yr} value={yr} className="py-1">{yr}</option>
                 ))}
               </select>
             </div>
@@ -350,14 +469,24 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
               <button
                 type="button"
                 onClick={handlePrevMonth}
-                className="p-1.5 hover:bg-white/5 text-white/60 hover:text-white border border-white/5 hover:border-white/10 rounded-lg transition-all cursor-pointer"
+                className="p-1.5 rounded-lg transition-all cursor-pointer"
+                style={{
+                  backgroundColor: sectionBg,
+                  color: textSoft,
+                  border: `1px solid ${faintBorder}`,
+                }}
               >
                 <ChevronLeft className="w-3.5 h-3.5" />
               </button>
               <button
                 type="button"
                 onClick={handleNextMonth}
-                className="p-1.5 hover:bg-white/5 text-white/60 hover:text-white border border-white/5 hover:border-white/10 rounded-lg transition-all cursor-pointer"
+                className="p-1.5 rounded-lg transition-all cursor-pointer"
+                style={{
+                  backgroundColor: sectionBg,
+                  color: textSoft,
+                  border: `1px solid ${faintBorder}`,
+                }}
               >
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
@@ -366,7 +495,10 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
 
           {/* Section: Days of the Week headers */}
           <div className="p-3">
-            <div className="grid grid-cols-7 gap-1 text-center mb-1 text-[10px] font-bold text-white/30 uppercase tracking-widest leading-none">
+            <div
+              className="grid grid-cols-7 gap-1 text-center mb-1 text-[10px] font-bold uppercase tracking-widest leading-none"
+              style={{ color: textMuted }}
+            >
               {WEEK_DAYS.map(day => (
                 <div key={day} className="py-1">{day}</div>
               ))}
@@ -383,17 +515,35 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
                     key={`${cell.year}-${cell.month}-${cell.day}-${idx}`}
                     type="button"
                     onClick={() => handleDaySelect(cell.day, cell.month, cell.year)}
-                    className={`aspect-square p-0 rounded-lg text-xs transition-all relative font-medium cursor-pointer flex items-center justify-center ${
-                      !cell.isCurrentMonth 
-                        ? "text-white/20 hover:text-white/40 hover:bg-white/[0.02]" 
+                    className="aspect-square p-0 rounded-lg text-xs transition-all relative cursor-pointer flex items-center justify-center hover:brightness-95"
+                    style={{
+                      color: !cell.isCurrentMonth
+                        ? textFaint
                         : cellIsSelected
-                          ? "bg-white text-black font-bold shadow-lg shadow-white/10" 
-                          : cellIsToday 
-                            ? "bg-white/10 text-white border border-emerald-500/40 font-bold" 
-                            : "text-white/80 hover:bg-[#111111] hover:text-white"
-                    }`}
+                          ? selectedCellAccent
+                          : cellIsToday
+                            ? textPrimary
+                            : textSoft,
+                      backgroundColor: cellIsSelected
+                        ? selectedCellBg
+                        : cellIsToday
+                          ? cardBg
+                          : "transparent",
+                      backgroundImage: cellIsSelected
+                        ? `repeating-linear-gradient(119deg, ${selectedCellAccent} 0px, ${selectedCellAccent} 1px, transparent 1px, transparent 8px)`
+                        : undefined,
+                      border: cellIsSelected
+                        ? `1px solid ${selectedCellAccent}`
+                        : cellIsToday && !cellIsSelected
+                          ? `1px solid ${todayBorder}`
+                          : "1px solid transparent",
+                      boxShadow: cellIsSelected
+                        ? (isSurfaceLight ? "0 8px 18px rgba(0,0,0,0.18)" : "0 8px 18px rgba(0,0,0,0.42)")
+                        : undefined,
+                      fontWeight: cellIsSelected ? 800 : 500,
+                    }}
                   >
-                    <span>{cell.day}</span>
+                    <div style={{ color: "inherit" }}>{cell.day}</div>
                     {cellIsToday && !cellIsSelected && (
                       <span className="absolute bottom-1 w-1 h-0.5 rounded-full bg-emerald-400" />
                     )}
@@ -404,35 +554,50 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
           </div>
 
           {/* Section: Quick Presets */}
-          <div className="p-2.5 bg-white/[0.01] flex flex-wrap items-center gap-1.5 justify-center">
+          <div className="p-2.5 flex flex-wrap items-center gap-1.5 justify-center" style={{ backgroundColor: sectionBg }}>
             <button
               type="button"
               onClick={() => applyPresetDays(0)}
-              className="px-2 py-1 bg-white/5 hover:bg-white/10 text-[9px] font-semibold text-white/70 hover:text-white rounded-md transition-all cursor-pointer uppercase tracking-wider"
+              className="px-2 py-1 text-[9px] font-semibold rounded-md transition-all cursor-pointer uppercase tracking-wider"
+              style={{
+                backgroundColor: cardBg,
+                border: `1px solid ${faintBorder}`,
+                color: textSoft,
+              }}
             >
               Hoy (Fin del día)
             </button>
             <button
               type="button"
               onClick={() => applyPresetDays(1)}
-              className="px-2 py-1 bg-white/5 hover:bg-white/10 text-[9px] font-semibold text-white/70 hover:text-white rounded-md transition-all cursor-pointer uppercase tracking-wider"
+              className="px-2 py-1 text-[9px] font-semibold rounded-md transition-all cursor-pointer uppercase tracking-wider"
+              style={{
+                backgroundColor: cardBg,
+                border: `1px solid ${faintBorder}`,
+                color: textSoft,
+              }}
             >
               Mañana
             </button>
             <button
               type="button"
               onClick={() => applyPresetDays(7)}
-              className="px-2 py-1 bg-white/5 hover:bg-white/10 text-[9px] font-semibold text-white/70 hover:text-white rounded-md transition-all cursor-pointer uppercase tracking-wider"
+              className="px-2 py-1 text-[9px] font-semibold rounded-md transition-all cursor-pointer uppercase tracking-wider"
+              style={{
+                backgroundColor: cardBg,
+                border: `1px solid ${faintBorder}`,
+                color: textSoft,
+              }}
             >
               En 1 Semana
             </button>
           </div>
 
           {/* Section: Time custom dial configuration */}
-          <div className="p-3 bg-white/[0.02] space-y-2">
+          <div className="p-3 space-y-2" style={{ backgroundColor: sectionBg }}>
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-white/40">
-                <Clock className="w-3.5 h-3.5 text-white/50" />
+              <div className="flex items-center gap-1.5" style={{ color: textMuted }}>
+                <Clock className="w-3.5 h-3.5" style={{ color: textMuted }} />
                 <span className="text-[10px] font-bold uppercase tracking-wider">Hora Límite (24H)</span>
               </div>
               <span className="text-xs font-mono font-bold text-emerald-400">
@@ -442,13 +607,17 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
 
             <div className="flex items-center gap-2">
               {/* Hour Scroll/Slider Dial */}
-              <div className="flex-1 flex flex-col gap-1 bg-[#0a0a0a] border border-white/5 rounded-xl p-1.5 text-center">
-                <span className="text-[9px] text-white/30 uppercase font-semibold">Hora</span>
+              <div
+                className="flex-1 flex flex-col gap-1 rounded-xl p-1.5 text-center"
+                style={{ backgroundColor: cardBg, border: `1px solid ${faintBorder}` }}
+              >
+                <span className="text-[9px] uppercase font-semibold" style={{ color: textMuted }}>Hora</span>
                 <div className="flex items-center justify-between gap-1">
                   <button
                     type="button"
                     onClick={() => handleHourChange(selectedHours - 1 < 0 ? 23 : selectedHours - 1)}
-                    className="w-6 h-6 hover:bg-white/5 text-white/40 hover:text-white rounded-lg transition-all font-bold text-xs select-none cursor-pointer"
+                    className="w-6 h-6 rounded-lg transition-all font-bold text-xs select-none cursor-pointer"
+                    style={{ color: textMuted }}
                   >
                     -
                   </button>
@@ -458,12 +627,14 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
                     max="23"
                     value={selectedHours}
                     onChange={(e) => handleHourChange(parseInt(e.target.value, 10) || 0)}
-                    className="w-10 bg-transparent text-center text-xs font-mono font-bold focus:outline-none border-0 p-0 text-white"
+                    className="w-10 bg-transparent text-center text-xs font-mono font-bold focus:outline-none border-0 p-0"
+                    style={{ color: textPrimary }}
                   />
                   <button
                     type="button"
                     onClick={() => handleHourChange((selectedHours + 1) % 24)}
-                    className="w-6 h-6 hover:bg-white/5 text-white/40 hover:text-white rounded-lg transition-all font-bold text-xs select-none cursor-pointer"
+                    className="w-6 h-6 rounded-lg transition-all font-bold text-xs select-none cursor-pointer"
+                    style={{ color: textMuted }}
                   >
                     +
                   </button>
@@ -471,13 +642,17 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
               </div>
 
               {/* Minute Scroll/Slider Dial */}
-              <div className="flex-1 flex flex-col gap-1 bg-[#0a0a0a] border border-white/5 rounded-xl p-1.5 text-center">
-                <span className="text-[9px] text-white/30 uppercase font-semibold">Minutos</span>
+              <div
+                className="flex-1 flex flex-col gap-1 rounded-xl p-1.5 text-center"
+                style={{ backgroundColor: cardBg, border: `1px solid ${faintBorder}` }}
+              >
+                <span className="text-[9px] uppercase font-semibold" style={{ color: textMuted }}>Minutos</span>
                 <div className="flex items-center justify-between gap-1">
                   <button
                     type="button"
                     onClick={() => handleMinuteChange(selectedMinutes - 5 < 0 ? 55 : selectedMinutes - 5)}
-                    className="w-6 h-6 hover:bg-white/5 text-white/40 hover:text-white rounded-lg transition-all font-bold text-xs select-none cursor-pointer"
+                    className="w-6 h-6 rounded-lg transition-all font-bold text-xs select-none cursor-pointer"
+                    style={{ color: textMuted }}
                   >
                     -
                   </button>
@@ -487,12 +662,14 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
                     max="59"
                     value={selectedMinutes}
                     onChange={(e) => handleMinuteChange(parseInt(e.target.value, 10) || 0)}
-                    className="w-10 bg-transparent text-center text-xs font-mono font-bold focus:outline-none border-0 p-0 text-white"
+                    className="w-10 bg-transparent text-center text-xs font-mono font-bold focus:outline-none border-0 p-0"
+                    style={{ color: textPrimary }}
                   />
                   <button
                     type="button"
                     onClick={() => handleMinuteChange((selectedMinutes + 5) % 60)}
-                    className="w-6 h-6 hover:bg-white/5 text-white/40 hover:text-white rounded-lg transition-all font-bold text-xs select-none cursor-pointer"
+                    className="w-6 h-6 rounded-lg transition-all font-bold text-xs select-none cursor-pointer"
+                    style={{ color: textMuted }}
                   >
                     +
                   </button>
@@ -502,11 +679,16 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
           </div>
 
           {/* Footer Controls */}
-          <div className="p-3 bg-[#0a0a0a] flex items-center justify-between gap-2">
+          <div className="p-3 flex items-center justify-between gap-2" style={{ backgroundColor: headerBg }}>
             <button
               type="button"
               onClick={handleClear}
-              className="flex-1 py-2 px-3 text-red-400 hover:text-red-350 bg-red-950/20 border border-red-900/10 hover:border-red-900/30 rounded-xl text-xs font-semibold hover:bg-red-950/30 transition-all cursor-pointer"
+              className="flex-1 py-2 px-3 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+              style={resolvedSurfaceColor ? {
+                backgroundColor: destructiveBg,
+                border: `1px solid ${destructiveBorder}`,
+                color: destructiveText,
+              } : undefined}
             >
               Quitar Límite
             </button>
@@ -520,10 +702,27 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
                 }
                 setIsOpen(false);
               }}
-              className="flex-1 py-2 px-3 bg-white hover:bg-white/90 text-black rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer"
+              className="flex-1 h-[38px] font-mono tracking-widest text-[11px] uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden"
+              style={{
+                '--btn-color': buttonAccent,
+              } as React.CSSProperties}
             >
-              <Check className="w-3.5 h-3.5 text-black stroke-[3px]" />
-              <span>Confirmar</span>
+              <div className="absolute inset-0 bg-[#000000] border border-black group-hover:bg-transparent group-hover:border-transparent transition-all duration-300 rounded-[4px] pointer-events-none" />
+              <div
+                className="absolute inset-[1px] bg-[#000000] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px] stripes-overlay"
+                style={{
+                  backgroundImage: "repeating-linear-gradient(119deg, currentColor 0px, currentColor 1px, transparent 1px, transparent 10px)",
+                }}
+              />
+              <span className="btn-motion-corner btn-motion-corner-tl" />
+              <span className="btn-motion-corner btn-motion-corner-tr" />
+              <span className="btn-motion-corner btn-motion-corner-bl" />
+              <span className="btn-motion-corner btn-motion-corner-br" />
+
+              <span className="relative z-10 flex items-center justify-center gap-1.5 font-extrabold transition-colors duration-300 font-mono hover-text-adaptive btn-text-content">
+                <Check className="w-3.5 h-3.5 stroke-[3px]" />
+                <span>Confirmar</span>
+              </span>
             </button>
           </div>
         </div>

@@ -81,6 +81,8 @@ export default function App() {
   const { isLoaded: themeLoaded } = useTheme();
 
   const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
+  // Extra flag: loader stays until the selected project's meta has been resolved at least once
+  const [isMetaSettled, setIsMetaSettled] = useState(false);
   const [activeTab, setActiveTab] = useState<"upload" | "admin">("upload");
   const [projects, setProjects] = useState<Project[]>(getCachedProjects);
   const [loadingProjects, setLoadingProjects] = useState(false);
@@ -147,6 +149,18 @@ export default function App() {
     };
     initApp();
   }, []);
+
+  // Once initial load is done + we have a project + its meta is known → mark settled
+  // A short additional delay lets the background color transition paint before fading the loader
+  useEffect(() => {
+    if (!isInitialLoadDone) return;
+    // If we have a selected project and its meta color is known, give 120ms for the bg to paint
+    // If no project / no color configured, settle immediately
+    const hasMeta = !!(selectedProjectId && projectMeta[selectedProjectId]);
+    const delay = hasMeta ? 120 : 0;
+    const t = setTimeout(() => setIsMetaSettled(true), delay);
+    return () => clearTimeout(t);
+  }, [isInitialLoadDone, selectedProjectId, projectMeta]);
 
   const fetchProjectMeta = async () => {
     try {
@@ -692,37 +706,41 @@ export default function App() {
   // Dynamically sync the document body background color for a perfect seamless layout
   useEffect(() => {
     if (hasBgColor && currentBgColor) {
+      document.body.style.transition = 'background-color 0.5s ease';
       document.body.style.backgroundColor = currentBgColor;
     } else {
+      document.body.style.transition = 'background-color 0.5s ease';
       document.body.style.backgroundColor = "";
     }
     return () => {
       document.body.style.backgroundColor = "";
+      document.body.style.transition = "";
     };
   }, [hasBgColor, currentBgColor]);
 
   return (
     <>
       <AppLoader
-        visible={!themeLoaded || !isInitialLoadDone}
+        visible={!themeLoaded || !isInitialLoadDone || !isMetaSettled}
         bgColor={currentBgColor}
         isLight={bgColorIsLight}
         textColor={adaptiveText}
       />
-      <div className={`min-h-screen flex flex-col antialiased relative transition-opacity duration-300 ${(!themeLoaded || !isInitialLoadDone) ? 'opacity-0 pointer-events-none' : 'opacity-100 animate-fade-in'}`}
+      <div className={`min-h-screen flex flex-col antialiased relative transition-opacity duration-300 ${(!themeLoaded || !isInitialLoadDone || !isMetaSettled) ? 'opacity-0 pointer-events-none' : 'opacity-100 animate-fade-in'}`}
         data-adaptive={hasBgColor ? (bgColorIsLight ? "light" : "dark") : "dark"}
         data-has-bgcolor={hasBgColor ? "true" : "false"}
         style={{
           color: hasBgColor ? adaptiveText : 'var(--text-primary, #e0e0e0)',
-          backgroundColor: hasBgColor ? currentBgColor : 'var(--app-bg, #050505)'
+          backgroundColor: hasBgColor ? currentBgColor : 'var(--app-bg, #050505)',
+          transition: 'background-color 0.5s ease, color 0.4s ease',
         }}
       >
 
         {/* Solid background color layer */}
         {hasBgColor && (
           <div
-            className="fixed inset-0 -z-50 pointer-events-none transition-all duration-300"
-            style={{ backgroundColor: currentBgColor }}
+            className="fixed inset-0 -z-50 pointer-events-none"
+            style={{ backgroundColor: currentBgColor, transition: 'background-color 0.5s ease' }}
           />
         )}
 
@@ -736,6 +754,7 @@ export default function App() {
               className="particles-container"
               style={{
                 '--particles-fade': currentBgColor || '#050505',
+                transition: 'all 0.5s ease',
               } as React.CSSProperties}
             >
               <div className="squares">
@@ -909,23 +928,56 @@ export default function App() {
                       <hr className="border-white/5" />
 
                       <div className="space-y-4">
-                        {hasValidExpiration && !isProjectExpired && activeMeta?.isActive !== false && (
-                          <div className="flex items-center gap-1.5 text-[11px] text-[#fbbf24] font-medium bg-[#1c120c]/60 border border-amber-900/30 px-3 py-2 rounded-xl">
-                            <Clock className="w-3.5 h-3.5 shrink-0" />
-                            <span>
-                              Entrega disponible hasta el:{" "}
-                              <span className="font-bold">
-                                {new Date(activeMeta.expirationDate).toLocaleDateString("es-ES", {
-                                  day: "numeric",
-                                  month: "long",
-                                  year: "numeric",
-                                  hour: activeMeta.expirationDate.includes("T") ? "2-digit" : undefined,
-                                  minute: activeMeta.expirationDate.includes("T") ? "2-digit" : undefined,
-                                })}
-                              </span>
-                            </span>
-                          </div>
-                        )}
+                        {hasValidExpiration && !isProjectExpired && activeMeta?.isActive !== false && (() => {
+                          // Inline countdown — re-renders every second via state in parent is too heavy,
+                          // so we use a small dedicated component
+                          const ExpiryBadge = () => {
+                            const [remaining, setRemaining] = React.useState(() => {
+                              const exp = new Date(activeMeta.expirationDate!);
+                              if (!activeMeta.expirationDate!.includes("T")) exp.setHours(23, 59, 59, 999);
+                              return Math.max(0, Math.floor((exp.getTime() - Date.now()) / 1000));
+                            });
+                            React.useEffect(() => {
+                              const id = setInterval(() => {
+                                const exp = new Date(activeMeta.expirationDate!);
+                                if (!activeMeta.expirationDate!.includes("T")) exp.setHours(23, 59, 59, 999);
+                                setRemaining(Math.max(0, Math.floor((exp.getTime() - Date.now()) / 1000)));
+                              }, 1000);
+                              return () => clearInterval(id);
+                            }, []);
+
+                            const d = Math.floor(remaining / 86400);
+                            const h = Math.floor((remaining % 86400) / 3600);
+                            const m = Math.floor((remaining % 3600) / 60);
+                            const s = remaining % 60;
+                            const pad = (n: number) => String(n).padStart(2, "0");
+
+                            const dateStr = new Date(activeMeta.expirationDate!).toLocaleDateString("es-ES", {
+                              day: "numeric",
+                              month: "long",
+                              year: "numeric",
+                              ...(activeMeta.expirationDate!.includes("T") ? { hour: "2-digit", minute: "2-digit" } : {}),
+                            });
+
+                            return (
+                              <div className="border-2 border-dashed border-amber-400/40 rounded-2xl px-4 py-3 flex flex-col gap-1.5">
+                                <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest" style={{ color: 'var(--accent, #f5f011)', opacity: 0.8 }}>
+                                  <Clock className="w-3.5 h-3.5 shrink-0" />
+                                  <span>Disponible · {dateStr}</span>
+                                </div>
+                                <div className="flex items-center gap-3 font-mono font-bold text-2xl tabular-nums" style={{ color: 'var(--accent, #f5f011)' }}>
+                                  {d > 0 && <span>{d}d</span>}
+                                  <span>{pad(h)}h</span>
+                                  <span className="opacity-40">:</span>
+                                  <span>{pad(m)}m</span>
+                                  <span className="opacity-40">:</span>
+                                  <span>{pad(s)}s</span>
+                                </div>
+                              </div>
+                            );
+                          };
+                          return <ExpiryBadge />;
+                        })()}
                       </div>
 
                       {/* Client parameters input fields */}

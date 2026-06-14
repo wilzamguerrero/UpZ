@@ -891,14 +891,15 @@ export default function AdminPanel({
 
               <div>
                 <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
-                  Fecha y Hora de Vencimiento (L├¡mite)
+                  Fecha y Hora de Vencimiento (Límite)
                 </label>
                 <DateTimePicker
                   value={copyExpiration}
                   onChange={setCopyExpiration}
+                  surfaceColor={copyBgColor}
                 />
                 <p className="text-[10px] text-white/30 mt-1">
-                  Establece el d├¡a y la hora l├¡mite. Pasado este momento, se inhabilitar├í la zona de carga para este proyecto.
+                  Establece el día y la hora límite. Pasado este momento, se inhabilitará la zona de carga para este proyecto.
                 </p>
               </div>
 

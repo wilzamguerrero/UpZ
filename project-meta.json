@@ -12,23 +12,30 @@
     "icon": "Keyboard",
     "isActive": true,
     "customFields": [],
-    "useDatabase": false,
+    "useDatabase": true,
     "databaseId": "",
-    "dbColumns": [],
+    "dbColumns": [
+      {
+        "id": "col_1781471306555_76g3e",
+        "name": "nota",
+        "type": "text"
+      }
+    ],
     "groupId": "",
     "order": 0
   },
   "37f2640c-88f4-8184-b670-d191b002fb66": {
-    "title": "ererer",
-    "description": "ererer",
+    "title": "Comparte tus archivos directo a Notion.",
+    "description": "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instantánea. Tus archivos se organizan de forma automática bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la página del proyecto que elijas.",
     "step1": "",
     "step2": "",
     "step3": "",
-    "expirationDate": "",
+    "expirationDate": "2026-06-15T23:59",
     "backgroundImage": "",
     "bgBlur": 0,
-    "bgColor": "#34c759",
-    "isActive": true,
+    "bgColor": "#f5f011",
+    "icon": "Calculator",
+    "isActive": false,
     "customFields": [],
     "useDatabase": false,
     "databaseId": "",
@@ -54,6 +61,15 @@
     "step3": "",
     "expirationDate": "",
     "backgroundImage": "",
-    "isActive": true
+    "bgBlur": 0,
+    "bgColor": "",
+    "icon": "",
+    "isActive": false,
+    "customFields": [],
+    "useDatabase": false,
+    "databaseId": "",
+    "dbColumns": [],
+    "groupId": "",
+    "order": 0
   }
 }
