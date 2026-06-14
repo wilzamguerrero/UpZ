@@ -21,6 +21,7 @@ import {
 import { Project, Submission, NotionConfig, ProjectMeta, CustomField, DbColumn } from "../types";
 import DateTimePicker from "./DateTimePicker";
 import GradingTable from "./GradingTable";
+import { useTheme } from "../ThemeContext";
 
 const genId = () => `cf_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 const genColId = () => `col_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -170,12 +171,23 @@ export default function AdminPanel({
   applyProjectMetaUpdate,
   onAdminPreviewChange
 }: AdminPanelProps) {
+  const { appearance, saveAppearance } = useTheme();
+
   // Config state
   const [notionSecret, setNotionSecret] = useState("");
   const [parentPageId, setParentPageId] = useState("");
   const [showSecret, setShowSecret] = useState(false);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  // Homepage appearance editor states
+  const [homeTitle, setHomeTitle] = useState(appearance.homeTitle);
+  const [homeMessage, setHomeMessage] = useState(appearance.homeMessage);
+  const [homeIcon, setHomeIcon] = useState(appearance.homeIcon);
+  const [homeBgColor, setHomeBgColor] = useState(appearance.homeBgColor);
+  const [homeIconSearch, setHomeIconSearch] = useState("");
+  const [isSavingHomeAppearance, setIsSavingHomeAppearance] = useState(false);
+  const [homeAppearanceMessage, setHomeAppearanceMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Copywriting editor states
   const [selectedMetaProjectId, setSelectedMetaProjectId] = useState("");
@@ -257,6 +269,13 @@ export default function AdminPanel({
       }
     }
   }, [projects, selectedMetaProjectId]);
+
+  useEffect(() => {
+    setHomeTitle(appearance.homeTitle);
+    setHomeMessage(appearance.homeMessage);
+    setHomeIcon(appearance.homeIcon);
+    setHomeBgColor(appearance.homeBgColor);
+  }, [appearance.homeTitle, appearance.homeMessage, appearance.homeIcon, appearance.homeBgColor]);
 
   const loadProjectMetaIntoForm = (meta?: ProjectMeta) => {
     const active = meta || {
@@ -397,6 +416,27 @@ export default function AdminPanel({
       setMetaMessage({ type: "error", text: "Error de red al intentar guardar los textos." });
     } finally {
       setIsSavingMeta(false);
+    }
+  };
+
+  const handleSaveHomeAppearance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingHomeAppearance(true);
+    setHomeAppearanceMessage(null);
+
+    try {
+      await saveAppearance({
+        ...appearance,
+        homeTitle,
+        homeMessage,
+        homeIcon,
+        homeBgColor,
+      });
+      setHomeAppearanceMessage({ type: "success", text: "Portada guardada correctamente." });
+    } catch {
+      setHomeAppearanceMessage({ type: "error", text: "No se pudo guardar la portada." });
+    } finally {
+      setIsSavingHomeAppearance(false);
     }
   };
 
@@ -697,11 +737,141 @@ export default function AdminPanel({
     }
   }
 
+  const filteredHomeIcons = ICON_OPTIONS.filter((option) => {
+    if (!homeIconSearch.trim()) return true;
+    const haystack = normalizeString(`${option.key} ${option.label} ${option.cat}`);
+    return haystack.includes(normalizeString(homeIconSearch));
+  });
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
       {/* Settings column */}
       <div className="col-span-1 space-y-8">
+
+        <div className="bg-[#111111] rounded-2xl p-6 border border-white/10 shadow-none">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2.5 bg-white/5 text-white rounded-xl">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold text-white">Portada de Inicio</h2>
+              <p className="text-xs text-white/40">Esta vista aparece solo en la raíz / y no muestra el formulario</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSaveHomeAppearance} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
+                Título Principal
+              </label>
+              <input
+                type="text"
+                required
+                value={homeTitle}
+                onChange={(e) => setHomeTitle(e.target.value)}
+                maxLength={140}
+                className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
+                Mensaje Central
+              </label>
+              <textarea
+                rows={4}
+                required
+                value={homeMessage}
+                onChange={(e) => setHomeMessage(e.target.value)}
+                maxLength={400}
+                className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all resize-y"
+              />
+            </div>
+
+            <div className="border-t border-white/5 pt-4">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-semibold text-white/40 uppercase tracking-wide">
+                  Color de Fondo de la Portada
+                </label>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={homeBgColor || "#050505"}
+                  onChange={(e) => setHomeBgColor(e.target.value)}
+                  className="w-9 h-9 cursor-pointer bg-transparent border border-white/10 p-0.5 rounded-lg"
+                />
+                <input
+                  type="text"
+                  value={homeBgColor}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (/^#?[0-9a-fA-F]{0,6}$/.test(value)) {
+                      setHomeBgColor(value.startsWith("#") || value === "" ? value : `#${value}`);
+                    }
+                  }}
+                  maxLength={7}
+                  className="flex-1 px-2.5 py-2 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs font-mono text-white focus:border-white/30 focus:outline-none transition-all"
+                />
+                <div className="w-9 h-9 shrink-0 rounded-lg border border-white/10" style={{ background: homeBgColor || "#050505" }} />
+              </div>
+            </div>
+
+            <div className="border-t border-white/5 pt-4 space-y-3">
+              <label className="block text-xs font-semibold text-white/40 uppercase tracking-wide">
+                Icono de la Portada
+              </label>
+              <input
+                type="text"
+                placeholder="Buscar icono..."
+                value={homeIconSearch}
+                onChange={(e) => setHomeIconSearch(e.target.value)}
+                className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all"
+              />
+              <div className="grid grid-cols-5 gap-2 max-h-48 overflow-y-auto pr-1">
+                {filteredHomeIcons.map(({ key, Icon }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setHomeIcon(key)}
+                    className={`h-11 rounded-xl border flex items-center justify-center transition-all cursor-pointer ${homeIcon === key ? "border-white bg-white/10 text-white" : "border-white/10 bg-[#0d0d0d] text-white/55 hover:text-white hover:border-white/25"}`}
+                    title={key}
+                  >
+                    <Icon className="w-4 h-4" />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {homeAppearanceMessage && (
+              <div className={`p-3 rounded-xl text-xs flex gap-2 items-center ${homeAppearanceMessage.type === "success" ? "bg-emerald-950/30 border border-emerald-900/40 text-emerald-300" : "bg-red-950/30 border border-red-900/50 text-red-300"}`}>
+                {homeAppearanceMessage.type === "success" ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+                <span>{homeAppearanceMessage.text}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isSavingHomeAppearance}
+              className="w-full h-[46px] font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden"
+              style={{ '--btn-color': "var(--accent, #f5f011)" } as React.CSSProperties}
+            >
+              <div className="absolute inset-0 bg-[#000000] border border-black group-hover:bg-transparent group-hover:border-transparent transition-all duration-300 rounded-[4px] pointer-events-none" />
+              <div
+                className="absolute inset-[1px] bg-[#000000] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px] stripes-overlay"
+                style={{ backgroundImage: `repeating-linear-gradient(119deg, currentColor 0px, currentColor 1px, transparent 1px, transparent 10px)` }}
+              />
+              <span className="btn-motion-corner btn-motion-corner-tl" />
+              <span className="btn-motion-corner btn-motion-corner-tr" />
+              <span className="btn-motion-corner btn-motion-corner-bl" />
+              <span className="btn-motion-corner btn-motion-corner-br" />
+              <span className="relative z-10 flex items-center justify-center gap-2 font-extrabold transition-colors duration-300 font-mono hover-text-adaptive btn-text-content">
+                {isSavingHomeAppearance ? "Guardando..." : "Guardar portada"}
+              </span>
+            </button>
+          </form>
+        </div>
 
         {/* Project Custom Copywriting */}
         <div className="bg-[#111111] rounded-2xl p-6 border border-white/10 shadow-none">

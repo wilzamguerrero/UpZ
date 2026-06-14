@@ -4,6 +4,10 @@ import { AppThemeId, themes, applyTheme } from './themes';
 export interface AppearanceConfig {
   themeId: AppThemeId;
   accentColor: string;
+  homeTitle: string;
+  homeMessage: string;
+  homeIcon: string;
+  homeBgColor: string;
 }
 
 interface ThemeContextValue {
@@ -12,9 +16,31 @@ interface ThemeContextValue {
   saveAppearance: (a: AppearanceConfig) => Promise<void>;
 }
 
-const DEFAULT_APPEARANCE: AppearanceConfig = {
+export const DEFAULT_APPEARANCE: AppearanceConfig = {
   themeId: 'brutal',
   accentColor: '#f5f011',
+  homeTitle: 'Comparte tus archivos directo a Notion.',
+  homeMessage: 'Accede al enlace directo de tu proyecto para cargar archivos. Desde esta portada solo se muestra el acceso de administración.',
+  homeIcon: 'Sparkles',
+  homeBgColor: '#050505',
+};
+
+const normalizeAppearance = (raw?: Partial<AppearanceConfig> | null): AppearanceConfig => {
+  const themeId = raw?.themeId === 'brutal' ? raw.themeId : DEFAULT_APPEARANCE.themeId;
+  const accentColor = (raw?.accentColor || DEFAULT_APPEARANCE.accentColor || '').trim() || DEFAULT_APPEARANCE.accentColor;
+  const homeTitle = (raw?.homeTitle || '').trim() || DEFAULT_APPEARANCE.homeTitle;
+  const homeMessage = (raw?.homeMessage || '').trim() || DEFAULT_APPEARANCE.homeMessage;
+  const homeIcon = (raw?.homeIcon || '').trim() || DEFAULT_APPEARANCE.homeIcon;
+  const homeBgColor = (raw?.homeBgColor || '').trim() || DEFAULT_APPEARANCE.homeBgColor;
+
+  return {
+    themeId,
+    accentColor,
+    homeTitle,
+    homeMessage,
+    homeIcon,
+    homeBgColor,
+  };
 };
 
 const ThemeContext = createContext<ThemeContextValue>({
@@ -29,10 +55,14 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [appearance, setAppearance] = useState<AppearanceConfig>(DEFAULT_APPEARANCE);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  const applyAndSet = useCallback((a: AppearanceConfig) => {
-    const theme = themes[a.themeId] ?? themes.midnight;
-    applyTheme(theme, a.accentColor || theme.defaultAccent);
-    setAppearance({ themeId: a.themeId, accentColor: a.accentColor || theme.defaultAccent });
+  const applyAndSet = useCallback((a?: Partial<AppearanceConfig> | null) => {
+    const normalized = normalizeAppearance(a);
+    const theme = themes[normalized.themeId] ?? themes.brutal;
+    applyTheme(theme, normalized.accentColor || theme.defaultAccent);
+    setAppearance({
+      ...normalized,
+      accentColor: normalized.accentColor || theme.defaultAccent,
+    });
   }, []);
 
   useEffect(() => {
@@ -40,7 +70,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       .then(r => r.json())
       .then(data => {
         if (data.success && data.appearance) {
-          applyAndSet(data.appearance as AppearanceConfig);
+          applyAndSet(data.appearance as Partial<AppearanceConfig>);
         } else {
           applyAndSet(DEFAULT_APPEARANCE);
         }
@@ -50,12 +80,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const saveAppearance = useCallback(async (a: AppearanceConfig) => {
-    applyAndSet(a);
+    const normalized = normalizeAppearance(a);
+    applyAndSet(normalized);
     try {
       await fetch('/api/appearance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(a),
+        body: JSON.stringify(normalized),
       });
     } catch {
       // Silently fail - UI already updated

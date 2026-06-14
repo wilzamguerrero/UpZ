@@ -69,8 +69,16 @@ const getCachedProjects = (): Project[] => {
   }
 };
 
+const getCurrentPathSlug = (): string => {
+  return window.location.pathname.replace(/^\/+/, "").replace(/\/+$/, "");
+};
+
 const getCachedSelectedProjectId = (): string => {
   try {
+    const cleanPath = getCurrentPathSlug();
+    if (!cleanPath || cleanPath.toLowerCase() === "admin") {
+      return "";
+    }
     return localStorage.getItem("cached_selected_project_id") || "";
   } catch {
     return "";
@@ -78,7 +86,9 @@ const getCachedSelectedProjectId = (): string => {
 };
 
 export default function App() {
-  const { isLoaded: themeLoaded } = useTheme();
+  const { isLoaded: themeLoaded, appearance } = useTheme();
+  const currentPathSlug = getCurrentPathSlug();
+  const isRootLandingPath = !currentPathSlug || currentPathSlug.toLowerCase() === "admin";
 
   const persistProjectMetaCache = (meta: Record<string, ProjectMeta>) => {
     try {
@@ -154,7 +164,7 @@ export default function App() {
   // Load configuration, projects and copy text meta
   useEffect(() => {
     const initApp = async () => {
-      const cleanPath = window.location.pathname.replace(/^\/+/, "").replace(/\/+$/, "");
+      const cleanPath = getCurrentPathSlug();
       if (cleanPath.toLowerCase() === "admin") {
         setActiveTab("admin");
       }
@@ -210,6 +220,12 @@ export default function App() {
         localStorage.setItem("cached_selected_project_id", selectedProjectId);
       } catch (err) {
         console.error("Localstorage save selectedProjectId issue", err);
+      }
+    } else {
+      try {
+        localStorage.removeItem("cached_selected_project_id");
+      } catch (err) {
+        console.error("Localstorage clear selectedProjectId issue", err);
       }
     }
   }, [selectedProjectId]);
@@ -304,7 +320,7 @@ export default function App() {
         }
 
         // Resolve path url matching
-        const cleanPath = window.location.pathname.replace(/^\/+/, "").replace(/\/+$/, "");
+        const cleanPath = getCurrentPathSlug();
         if (cleanPath && cleanPath.toLowerCase() !== "admin") {
           const match = data.projects.find((p: Project) => {
             const matchesId = p.id.toLowerCase() === cleanPath.toLowerCase() || p.id.replace(/-/g, "").toLowerCase() === cleanPath.toLowerCase();
@@ -318,9 +334,18 @@ export default function App() {
             setIsProjectLocked(true);
             return;
           }
+
+          setSelectedProjectId("");
+          setLockedProjectName("");
+          setIsProjectLocked(false);
+          return;
         }
 
-        if (data.projects.length > 0) {
+        setSelectedProjectId("");
+        setLockedProjectName("");
+        setIsProjectLocked(false);
+
+        if (data.projects.length > 0 && !isRootLandingPath) {
           // Only change selection if current one is not in the list (avoids triggering
           // fetchProjectMetaForProject unnecessarily and overwriting freshly saved data)
           const isCurrentValid = selectedProjectId && data.projects.some((p: any) => p.id === selectedProjectId);
@@ -666,6 +691,9 @@ export default function App() {
     ? (adminPreview?.projectId || selectedProjectId)
     : selectedProjectId;
 
+  const isHomeUploadView = activeTab === "upload" && isRootLandingPath && !selectedProjectId && !isProjectLocked;
+  const isRootExperience = isRootLandingPath && !selectedProjectId;
+
   const activeMeta = activeProjectId ? projectMeta[activeProjectId] : null;
 
   /** Check if expiration date is a valid, non-empty date string */
@@ -685,16 +713,21 @@ export default function App() {
     return new Date() > expDate;
   })();
 
-  const displayTitle = activeMeta?.title || "Comparte tus archivos directo a Notion.";
-  const displayDescription = activeMeta?.description || "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instantánea. Tus archivos se organizan de forma automática bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la página del proyecto que elijas.";
+  const displayTitle = isHomeUploadView
+    ? appearance.homeTitle
+    : (activeMeta?.title || "Comparte tus archivos directo a Notion.");
+  const displayDescription = isHomeUploadView
+    ? appearance.homeMessage
+    : (activeMeta?.description || "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instantánea. Tus archivos se organizan de forma automática bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la página del proyecto que elijas.");
   const displayCustomFields = activeMeta?.customFields || [];
   const infoFields = displayCustomFields.filter((f) => !f.askSubmitter);
   const askFields = displayCustomFields.filter((f) => f.askSubmitter);
+  const activeIconKey = isRootExperience ? appearance.homeIcon : (activeMeta?.icon || "UploadCloud");
 
   // Read current visual properties supporting real-time preview editing in the admin panel
   const currentBgColor = activeTab === "admin" && adminPreview && adminPreview.projectId === activeProjectId
     ? adminPreview.bgColor
-    : (activeMeta?.bgColor || "");
+    : (isRootExperience ? appearance.homeBgColor : (activeMeta?.bgColor || ""));
 
   const hasBgColor = !!currentBgColor;
 
@@ -764,8 +797,7 @@ export default function App() {
 
         {/* Floating particles layer — renders between background and card content */}
         {activeTab === "upload" && (() => {
-          const iconKey = activeMeta?.icon || "UploadCloud";
-          const ParticleIcon = ICON_MAP[iconKey] ?? UploadCloud;
+          const ParticleIcon = ICON_MAP[activeIconKey] ?? UploadCloud;
           const iconColor = bgColorIsLight ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.18)';
           return (
             <div
@@ -789,25 +821,27 @@ export default function App() {
         {/* Dynamic Header Nav Bar */}
         {/* Minimal floating nav icons — no bar, no background */}
         <div className="fixed top-4 right-4 z-50 flex gap-1.5">
-          <button
-            id="tab-btn-upload"
-            onClick={() => { setActiveTab("upload"); setAdminPreview(null); }}
-            title="Entregar Archivos"
-            className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${activeTab === "upload"
-                ? "bg-black/15 backdrop-blur-sm"
-                : "hover:bg-black/10"
-              }`}
-            style={{ color: (hasBgColor && bgColorIsLight) ? '#111111' : 'rgba(255,255,255,0.6)' }}
-          >
-            <Send className="w-4 h-4" />
-          </button>
+          {!isHomeUploadView && (
+            <button
+              id="tab-btn-upload"
+              onClick={() => { setActiveTab("upload"); setAdminPreview(null); }}
+              title="Entregar Archivos"
+              className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${activeTab === "upload"
+                  ? "bg-black/15 backdrop-blur-sm"
+                  : "hover:bg-black/10"
+                }`}
+              style={{ color: (hasBgColor && bgColorIsLight) ? '#111111' : 'rgba(255,255,255,0.6)' }}
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          )}
           <button
             id="tab-btn-admin"
             onClick={() => setActiveTab("admin")}
             title="Administración"
-            className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${activeTab === "admin"
-                ? "bg-black/15 backdrop-blur-sm"
-                : "hover:bg-black/10"
+            className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all border ${activeTab === "admin"
+                ? "bg-black/20 backdrop-blur-sm border-white/15"
+                : "bg-black/10 hover:bg-black/20 border-white/10"
               }`}
             style={{ color: (hasBgColor && bgColorIsLight) ? '#111111' : 'rgba(255,255,255,0.6)' }}
           >
@@ -842,7 +876,28 @@ export default function App() {
                     color: hasBgColor ? adaptiveText : undefined,
                   } as React.CSSProperties}
                 >
-                  {submitSuccess ? (
+                  {isHomeUploadView ? (() => {
+                    return (
+                      <div className="min-h-[70vh] flex items-center justify-center text-center">
+                        <div className="max-w-2xl mx-auto space-y-6 px-2">
+                          <div className="space-y-3">
+                            <h1
+                              className="text-3xl sm:text-5xl font-extrabold tracking-tight leading-[1.05]"
+                              style={{ color: adaptiveText || '#ffffff' }}
+                            >
+                              <ScrambleReveal text={displayTitle} duration={900} delay={80} />
+                            </h1>
+                            <p
+                              className="text-sm sm:text-base leading-relaxed max-w-xl mx-auto"
+                              style={{ color: hasBgColor ? (bgColorIsLight ? 'rgba(17,17,17,0.72)' : 'rgba(255,255,255,0.7)') : 'rgba(255,255,255,0.7)' }}
+                            >
+                              {displayDescription}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })() : submitSuccess ? (
                     // Submission Success feedback View
                     <motion.div
                       initial={{ scale: 0.95, opacity: 0 }}
@@ -1386,7 +1441,9 @@ export default function App() {
                         disabled={isLoggingIn}
                         className="w-full h-[46px] font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden mt-2"
                         style={{
-                          '--btn-color': hasBgColor ? currentBgColor : "var(--accent, #f5f011)"
+                          '--btn-color': hasBgColor
+                            ? (bgColorIsLight ? '#111111' : '#ffffff')
+                            : '#ffffff'
                         } as React.CSSProperties}
                       >
                         {/* Base black background filled container */}
@@ -1406,7 +1463,7 @@ export default function App() {
                         <span className="btn-motion-corner btn-motion-corner-bl" />
                         <span className="btn-motion-corner btn-motion-corner-br" />
 
-                        <div className="relative z-10 flex items-center justify-center gap-2 font-extrabold transition-colors duration-300">
+                        <span className="relative z-10 flex items-center justify-center gap-2 font-extrabold transition-colors duration-300 font-mono hover-text-adaptive btn-text-content">
                           {isLoggingIn ? (
                             <>
                               <Loader2 className="w-4 h-4 animate-spin" />
@@ -1418,7 +1475,7 @@ export default function App() {
                               <ArrowRight className="w-3.5 h-3.5 btn-text-content" />
                             </>
                           )}
-                        </div>
+                        </span>
                       </button>
                     </form>
                   </div>

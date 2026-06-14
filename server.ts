@@ -468,6 +468,51 @@ function saveConfig(config: { notionSecret: string; parentPageId: string }) {
 
 // Project Meta (copywriting customization per project) helper functions
 const PROJECT_META_FILE = path.join(process.cwd(), "project-meta.json");
+const APPEARANCE_FILE = path.join(process.cwd(), "appearance.json");
+const DEFAULT_APPEARANCE = {
+  themeId: "brutal",
+  accentColor: "#f5f011",
+  homeTitle: "Comparte tus archivos directo a Notion.",
+  homeMessage: "Accede al enlace directo de tu proyecto para cargar archivos. Desde esta portada solo se muestra el acceso de administración.",
+  homeIcon: "Sparkles",
+  homeBgColor: "#050505",
+};
+
+function normalizeAppearanceColor(value: unknown, fallback: string) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(raw) ? raw : fallback;
+}
+
+function normalizeAppearanceText(value: unknown, fallback: string, maxLength: number) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  return (raw || fallback).slice(0, maxLength);
+}
+
+function normalizeAppearance(payload: any) {
+  return {
+    themeId: payload?.themeId === "brutal" ? payload.themeId : DEFAULT_APPEARANCE.themeId,
+    accentColor: normalizeAppearanceColor(payload?.accentColor, DEFAULT_APPEARANCE.accentColor),
+    homeTitle: normalizeAppearanceText(payload?.homeTitle, DEFAULT_APPEARANCE.homeTitle, 140),
+    homeMessage: normalizeAppearanceText(payload?.homeMessage, DEFAULT_APPEARANCE.homeMessage, 400),
+    homeIcon: normalizeAppearanceText(payload?.homeIcon, DEFAULT_APPEARANCE.homeIcon, 64),
+    homeBgColor: normalizeAppearanceColor(payload?.homeBgColor, DEFAULT_APPEARANCE.homeBgColor),
+  };
+}
+
+function loadAppearance() {
+  if (fs.existsSync(APPEARANCE_FILE)) {
+    try {
+      return JSON.parse(fs.readFileSync(APPEARANCE_FILE, "utf-8"));
+    } catch (e) {
+      console.error("Error reading appearance file:", e);
+    }
+  }
+  return null;
+}
+
+function saveAppearance(appearance: any) {
+  fs.writeFileSync(APPEARANCE_FILE, JSON.stringify(appearance, null, 2), "utf-8");
+}
 
 function loadProjectMeta() {
   if (fs.existsSync(PROJECT_META_FILE)) {
@@ -585,6 +630,18 @@ app.post("/api/config/clear", (req, res) => {
     fs.unlinkSync(CONFIG_FILE);
   }
   res.json({ success: true, message: "Configuración eliminada" });
+});
+
+// 3.0. Global appearance config for theme + homepage
+app.get("/api/appearance", (req, res) => {
+  const appearance = loadAppearance();
+  res.json({ success: true, appearance });
+});
+
+app.post("/api/appearance", (req, res) => {
+  const appearance = normalizeAppearance(req.body || {});
+  saveAppearance(appearance);
+  res.json({ success: true, message: "Apariencia guardada correctamente." });
 });
 
 // 3.1. Admin Password Validation based on Notion Quote Block
