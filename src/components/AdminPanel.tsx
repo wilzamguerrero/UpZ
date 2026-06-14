@@ -228,43 +228,50 @@ export default function AdminPanel({
     }
   }, [projects, selectedMetaProjectId]);
 
-  // Sync copywriting form fields when project or metadata changes
-  useEffect(() => {
-    if (selectedMetaProjectId) {
-      const active = projectMeta[selectedMetaProjectId] || {
-        title: "Comparte tus archivos directo a Notion.",
-        description: "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instant├ínea. Tus archivos se organizan de forma autom├ítica bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la p├ígina del proyecto que elijas.",
-        expirationDate: "",
-        backgroundImage: "",
-        isActive: true
-      };
-      setCopyTitle(active.title || "");
-      setCopyDesc(active.description || "");
+  // Track last project ID for which we've loaded form fields — prevents refresh from overwriting user edits
+  const lastLoadedProjectId = React.useRef<string>("");
 
-      // Load custom fields; migrate legacy step1/2/3 if present and no customFields yet.
-      let fields: CustomField[] = Array.isArray(active.customFields) ? [...active.customFields] : [];
-      if (fields.length === 0) {
-        const legacy = [active.step1, active.step2, active.step3].filter(Boolean) as string[];
-        fields = legacy.map((txt) => {
-          const idx = txt.indexOf(":");
-          const label = idx > -1 ? txt.slice(0, idx).trim() : "Paso";
-          const value = idx > -1 ? txt.slice(idx + 1).trim() : txt.trim();
-          return { id: genId(), label, value };
-        });
-      }
-      setCopyCustomFields(fields);
-      setCopyExpiration(active.expirationDate || "");
-      setCopyBackground(active.backgroundImage || "");
-      setCopyBgBlur(typeof active.bgBlur === "number" ? active.bgBlur : 0);
-      setCopyBgColor(active.bgColor || "");
-      setCopyIsActive(active.isActive !== false);
-      setCopyIcon(active.icon || "UploadCloud");
-      setCopyUseDatabase(!!active.useDatabase);
-      setCopyDatabaseId(active.databaseId || "");
-      setCopyDbColumns(Array.isArray(active.dbColumns) ? active.dbColumns : []);
-      setCopyGroupId(active.groupId || "");
-      setMetaMessage(null);
+  // Sync copywriting form fields ONLY when the selected project changes (not on every projectMeta refresh)
+  useEffect(() => {
+    if (!selectedMetaProjectId) return;
+    // Only reset fields when the project actually changes, not on projectMeta background refresh
+    if (lastLoadedProjectId.current === selectedMetaProjectId) return;
+    lastLoadedProjectId.current = selectedMetaProjectId;
+
+    const active = projectMeta[selectedMetaProjectId] || {
+      title: "Comparte tus archivos directo a Notion.",
+      description: "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instantánea. Tus archivos se organizan de forma automática bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la página del proyecto que elijas.",
+      expirationDate: "",
+      backgroundImage: "",
+      isActive: true
+    };
+    setCopyTitle(active.title || "");
+    setCopyDesc(active.description || "");
+
+    // Load custom fields; migrate legacy step1/2/3 if present and no customFields yet.
+    let fields: CustomField[] = Array.isArray(active.customFields) ? [...active.customFields] : [];
+    if (fields.length === 0) {
+      const legacy = [active.step1, active.step2, active.step3].filter(Boolean) as string[];
+      fields = legacy.map((txt) => {
+        const idx = txt.indexOf(":");
+        const label = idx > -1 ? txt.slice(0, idx).trim() : "Paso";
+        const value = idx > -1 ? txt.slice(idx + 1).trim() : txt.trim();
+        return { id: genId(), label, value };
+      });
     }
+    setCopyCustomFields(fields);
+    setCopyExpiration(active.expirationDate || "");
+    setCopyBackground(active.backgroundImage || "");
+    setCopyBgBlur(typeof active.bgBlur === "number" ? active.bgBlur : 0);
+    setCopyBgColor(active.bgColor || "");
+    setCopyIsActive(active.isActive !== false);
+    setCopyIcon(active.icon || "UploadCloud");
+    setCopyUseDatabase(!!active.useDatabase);
+    setCopyDatabaseId(active.databaseId || "");
+    setCopyDbColumns(Array.isArray(active.dbColumns) ? active.dbColumns : []);
+    setCopyGroupId(active.groupId || "");
+    setMetaMessage(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMetaProjectId, projectMeta]);
 
   // Sync current editing visual customisations to parent App under adminPreview

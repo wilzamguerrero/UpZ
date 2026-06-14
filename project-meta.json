@@ -9,6 +9,7 @@
     "backgroundImage": "",
     "bgBlur": 0,
     "bgColor": "#f5f011",
+    "icon": "Keyboard",
     "isActive": true,
     "customFields": [],
     "useDatabase": false,

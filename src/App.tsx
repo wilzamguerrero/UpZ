@@ -223,15 +223,20 @@ export default function App() {
       const res = await fetch(`/api/project-meta?projectId=${projId}`);
       const data = await res.json();
       if (data.success && data.meta) {
-        setProjectMeta((prev) => ({
-          ...prev,
-          [projId]: {
-            ...(prev[projId] || {}),
-            ...data.meta,
-            // Preserve bgBlur from KV (prev) if Notion block returns null (old block without field)
-            bgBlur: data.meta.bgBlur != null ? data.meta.bgBlur : (prev[projId]?.bgBlur ?? 0),
-          },
-        }));
+        setProjectMeta((prev) => {
+          const existing = prev[projId] || {};
+          return {
+            ...prev,
+            [projId]: {
+              ...existing,
+              ...data.meta,
+              // Never overwrite existing non-empty values with empty ones from Notion
+              icon: data.meta.icon || existing.icon || "",
+              bgColor: data.meta.bgColor || existing.bgColor || "",
+              bgBlur: data.meta.bgBlur != null ? data.meta.bgBlur : (existing.bgBlur ?? 0),
+            },
+          };
+        });
       }
     } catch (e) {
       console.error("Error fetching dynamic project meta", e);
@@ -284,11 +289,16 @@ export default function App() {
         }
 
         if (data.projects.length > 0) {
-          const activeProjects = data.projects.filter((p: any) => p.isActive !== false);
-          if (activeProjects.length > 0) {
-            setSelectedProjectId(activeProjects[0].id);
-          } else {
-            setSelectedProjectId(data.projects[0].id);
+          // Only change selection if current one is not in the list (avoids triggering
+          // fetchProjectMetaForProject unnecessarily and overwriting freshly saved data)
+          const isCurrentValid = selectedProjectId && data.projects.some((p: any) => p.id === selectedProjectId);
+          if (!isCurrentValid) {
+            const activeProjects = data.projects.filter((p: any) => p.isActive !== false);
+            if (activeProjects.length > 0) {
+              setSelectedProjectId(activeProjects[0].id);
+            } else {
+              setSelectedProjectId(data.projects[0].id);
+            }
           }
         }
       } else {
