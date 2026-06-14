@@ -665,6 +665,14 @@ app.get("/api/project-meta", async (req, res) => {
               expirationDate: data.expirationDate || expirationDate,
               backgroundImage: data.backgroundImage || "",
               isActive: data.isActive !== undefined ? !!data.isActive : true,
+              bgColor: data.bgColor || "",
+              bgBlur: typeof data.bgBlur === "number" ? data.bgBlur : 0,
+              customFields: Array.isArray(data.customFields) ? data.customFields : [],
+              useDatabase: !!data.useDatabase,
+              databaseId: data.databaseId || "",
+              dbColumns: Array.isArray(data.dbColumns) ? data.dbColumns : [],
+              groupId: data.groupId || "",
+              order: typeof data.order === "number" ? data.order : 0,
             }
           });
         } catch (e) {
@@ -693,7 +701,25 @@ app.get("/api/project-meta", async (req, res) => {
 
 // 3.3. Set project customized copywriting meta directly to Notion & cached fallback
 app.post("/api/project-meta", async (req, res) => {
-  const { projectId, title, description, step1, step2, step3, expirationDate, backgroundImage, isActive } = req.body;
+  const {
+    projectId,
+    title,
+    description,
+    step1,
+    step2,
+    step3,
+    expirationDate,
+    backgroundImage,
+    isActive,
+    bgColor,
+    bgBlur,
+    customFields,
+    useDatabase,
+    databaseId,
+    dbColumns,
+    groupId,
+    order
+  } = req.body;
   if (!projectId) {
     return res.status(400).json({ error: "El ID del proyecto es obligatorio." });
   }
@@ -715,7 +741,15 @@ app.post("/api/project-meta", async (req, res) => {
         step3: (step3 || "").trim(),
         expirationDate: (expirationDate || "").trim(),
         backgroundImage: (backgroundImage || "").trim(),
+        bgBlur: typeof bgBlur === "number" ? bgBlur : 0,
+        bgColor: (bgColor || "").trim(),
         isActive: isActive !== undefined ? !!isActive : true,
+        customFields: Array.isArray(customFields) ? customFields : [],
+        useDatabase: !!useDatabase,
+        databaseId: (databaseId || "").trim(),
+        dbColumns: Array.isArray(dbColumns) ? dbColumns : [],
+        groupId: (groupId || "").trim(),
+        order: typeof order === "number" ? order : 0,
       };
 
       const jsonString = JSON.stringify(metaPayload, null, 2);
@@ -819,7 +853,15 @@ app.post("/api/project-meta", async (req, res) => {
     step3: (step3 || "").trim(),
     expirationDate: (expirationDate || "").trim(),
     backgroundImage: (backgroundImage || "").trim(),
+    bgBlur: typeof bgBlur === "number" ? bgBlur : 0,
+    bgColor: (bgColor || "").trim(),
     isActive: isActive !== undefined ? !!isActive : true,
+    customFields: Array.isArray(customFields) ? customFields : [],
+    useDatabase: !!useDatabase,
+    databaseId: (databaseId || "").trim(),
+    dbColumns: Array.isArray(dbColumns) ? dbColumns : [],
+    groupId: (groupId || "").trim(),
+    order: typeof order === "number" ? order : 0,
   };
 
   saveProjectMeta(metaList);
