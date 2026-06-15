@@ -86,12 +86,17 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     }
   }
 
-  // Fallback: return all cached metas from KV
+  // Fallback: return cached meta from KV
   if (SUBMISSIONS_KV) {
     try {
       const cached = await SUBMISSIONS_KV.get("project-meta");
       if (cached) {
-        return json({ success: true, meta: JSON.parse(cached) });
+        const allMeta = JSON.parse(cached);
+        // When a specific project was requested, return only that project's entry
+        if (projectId) {
+          return json({ success: true, meta: allMeta[projectId] || {} });
+        }
+        return json({ success: true, meta: allMeta });
       }
     } catch {
       // Ignore

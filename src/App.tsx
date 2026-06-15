@@ -825,36 +825,34 @@ export default function App() {
           );
         })()}
 
-        {/* Dynamic Header Nav Bar */}
-        {/* Minimal floating nav icons — no bar, no background */}
-        <div className="fixed top-4 right-4 z-50 flex gap-1.5">
-          {!isHomeUploadView && (
+        {/* Dynamic Header Nav Bar — only visible on root, hidden on shared project URLs */}
+        {isRootLandingPath && (
+          <div className="fixed top-4 right-4 z-50 flex gap-1.5">
+            {activeTab === "admin" && (
+              <button
+                id="tab-btn-upload"
+                onClick={() => { setActiveTab("upload"); setAdminPreview(null); }}
+                title="Volver"
+                className="w-9 h-9 flex items-center justify-center rounded-xl transition-all hover:bg-black/10"
+                style={{ color: (hasBgColor && bgColorIsLight) ? '#111111' : 'rgba(255,255,255,0.6)' }}
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            )}
             <button
-              id="tab-btn-upload"
-              onClick={() => { setActiveTab("upload"); setAdminPreview(null); }}
-              title="Entregar Archivos"
-              className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${activeTab === "upload"
-                  ? "bg-black/15 backdrop-blur-sm"
+              id="tab-btn-admin"
+              onClick={() => setActiveTab("admin")}
+              title="Administración"
+              className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all ${activeTab === "admin"
+                  ? "bg-black/20 backdrop-blur-sm"
                   : "hover:bg-black/10"
                 }`}
               style={{ color: (hasBgColor && bgColorIsLight) ? '#111111' : 'rgba(255,255,255,0.6)' }}
             >
-              <Send className="w-4 h-4" />
+              <Settings2 className="w-4 h-4" />
             </button>
-          )}
-          <button
-            id="tab-btn-admin"
-            onClick={() => setActiveTab("admin")}
-            title="Administración"
-            className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all border ${activeTab === "admin"
-                ? "bg-black/20 backdrop-blur-sm border-white/15"
-                : "bg-black/10 hover:bg-black/20 border-white/10"
-              }`}
-            style={{ color: (hasBgColor && bgColorIsLight) ? '#111111' : 'rgba(255,255,255,0.6)' }}
-          >
-            <Settings2 className="w-4 h-4" />
-          </button>
-        </div>
+          </div>
+        )}
 
         {/* Primary Content Container */}
         <main className="flex-1 w-full mx-auto px-5 sm:px-8 pt-14 pb-10">
@@ -1147,7 +1145,6 @@ export default function App() {
                         {isProjectLocked ? (
                           <div className="w-full px-4 py-3 bg-white/5 border border-white/20 rounded-xl flex items-center justify-between select-none">
                             <div className="flex items-center gap-2.5">
-                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
                               <span className="text-sm font-bold text-white tracking-wide">{lockedProjectName}</span>
                               {hasValidExpiration && (
                                 <span className="text-[10px] text-amber-300 font-medium px-1.5 py-0.5 bg-amber-950/30 border border-amber-900/30 rounded flex items-center gap-1">

@@ -161,6 +161,26 @@ interface AdminPanelProps {
   }) => void;
 }
 
+/** Returns a --btn-color value that is always legible on the black btn-motion-retro background.
+ *  - Accent/yellow if no bgColor is provided
+ *  - White if bgColor is dark (luminance ≤ 0.5)
+ *  - The bgColor itself if it's light (visible on black)
+ */
+function safeRetroColor(bgColor?: string | null): string {
+  if (!bgColor) return "var(--accent, #f5f011)";
+  const hex = bgColor.replace("#", "").trim();
+  if (hex.length !== 3 && hex.length !== 6) return "var(--accent, #f5f011)";
+  const expanded = hex.length === 3
+    ? hex.split("").map((c) => c + c).join("")
+    : hex;
+  const r = parseInt(expanded.slice(0, 2), 16) / 255;
+  const g = parseInt(expanded.slice(2, 4), 16) / 255;
+  const b = parseInt(expanded.slice(4, 6), 16) / 255;
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  // Dark color → use white so stripes/text stay visible on black button background
+  return lum <= 0.5 ? "#ffffff" : bgColor;
+}
+
 export default function AdminPanel({
   projects,
   refreshProjects,
@@ -818,7 +838,7 @@ export default function AdminPanel({
               type="submit"
               disabled={isSavingHomeAppearance}
               className="w-full h-[46px] font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden"
-              style={{ '--btn-color': "var(--accent, #f5f011)" } as React.CSSProperties}
+              style={{ '--btn-color': safeRetroColor(homeBgColor) } as React.CSSProperties}
             >
               <div className="absolute inset-0 bg-[#000000] border border-black group-hover:bg-transparent group-hover:border-transparent transition-all duration-300 rounded-[4px] pointer-events-none" />
               <div
@@ -1303,7 +1323,7 @@ export default function AdminPanel({
                 disabled={isSavingMeta}
                 className="w-full h-[46px] font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden"
                 style={{
-                  '--btn-color': copyBgColor ? copyBgColor : "var(--accent, #f5f011)"
+                  '--btn-color': safeRetroColor(copyBgColor)
                 }}
               >
                 {/* Base black background filled container */}
@@ -1369,7 +1389,7 @@ export default function AdminPanel({
               disabled={isCreatingProject || !newProjectName.trim() || !config?.isConfigured}
               className="px-5 h-[44px] font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden shrink-0"
               style={{
-                '--btn-color': copyBgColor ? copyBgColor : "var(--accent, #f5f011)"
+                '--btn-color': safeRetroColor(copyBgColor)
               }}
             >
               {/* Base black background filled container */}
