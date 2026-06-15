@@ -3,8 +3,9 @@ import { json, type Env } from "../_shared/notion";
 const DEFAULT_APPEARANCE = {
   themeId: "brutal",
   accentColor: "#f5f011",
-  homeTitle: "Comparte tus archivos directo a Notion.",
-  homeMessage: "Accede al enlace directo de tu proyecto para cargar archivos. Desde esta portada solo se muestra el acceso de administración.",
+  homeTitle: "ENVI",
+  homeTitleSize: 56,
+  homeMessage: "ENVI agiliza la entrega de archivos por proyecto. Desarrollado por wilzamguerrero.",
   homeIcon: "Sparkles",
   homeBgColor: "#050505",
 };
@@ -17,6 +18,12 @@ const normalizeColor = (value: unknown, fallback: string) => {
 const normalizeText = (value: unknown, fallback: string, maxLength: number) => {
   const raw = typeof value === "string" ? value.trim() : "";
   return (raw || fallback).slice(0, maxLength);
+};
+
+const normalizeTitleSize = (value: unknown, fallback: number) => {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(96, Math.max(36, Math.round(parsed)));
 };
 
 /** GET /api/appearance – returns saved appearance config from KV */
@@ -50,6 +57,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const themeId = allowedThemes.includes(body?.themeId) ? body.themeId : DEFAULT_APPEARANCE.themeId;
   const accentColor = normalizeColor(body?.accentColor, DEFAULT_APPEARANCE.accentColor);
   const homeTitle = normalizeText(body?.homeTitle, DEFAULT_APPEARANCE.homeTitle, 140);
+  const homeTitleSize = normalizeTitleSize(body?.homeTitleSize, DEFAULT_APPEARANCE.homeTitleSize);
   const homeMessage = normalizeText(body?.homeMessage, DEFAULT_APPEARANCE.homeMessage, 400);
   const homeIcon = normalizeText(body?.homeIcon, DEFAULT_APPEARANCE.homeIcon, 64);
   const homeBgColor = normalizeColor(body?.homeBgColor, DEFAULT_APPEARANCE.homeBgColor);
@@ -58,6 +66,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     themeId,
     accentColor,
     homeTitle,
+    homeTitleSize,
     homeMessage,
     homeIcon,
     homeBgColor,

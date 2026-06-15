@@ -1,6 +1,6 @@
 {
-  "name": "Notion File Drop",
-  "description": "Plataforma simple y funcional para compartir y subir archivos que se almacenan y organizan dentro de páginas de Notion mediante Toggle Lists por proyecto.",
+  "name": "ENVI",
+  "description": "ENVI agiliza la entrega de archivos por proyecto. Fue desarrollado por wilzamguerrero para compartir y organizar envíos de forma rápida dentro de Notion.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

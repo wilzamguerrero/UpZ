@@ -182,6 +182,7 @@ export default function AdminPanel({
 
   // Homepage appearance editor states
   const [homeTitle, setHomeTitle] = useState(appearance.homeTitle);
+  const [homeTitleSize, setHomeTitleSize] = useState(appearance.homeTitleSize);
   const [homeMessage, setHomeMessage] = useState(appearance.homeMessage);
   const [homeIcon, setHomeIcon] = useState(appearance.homeIcon);
   const [homeBgColor, setHomeBgColor] = useState(appearance.homeBgColor);
@@ -272,15 +273,16 @@ export default function AdminPanel({
 
   useEffect(() => {
     setHomeTitle(appearance.homeTitle);
+    setHomeTitleSize(appearance.homeTitleSize);
     setHomeMessage(appearance.homeMessage);
     setHomeIcon(appearance.homeIcon);
     setHomeBgColor(appearance.homeBgColor);
-  }, [appearance.homeTitle, appearance.homeMessage, appearance.homeIcon, appearance.homeBgColor]);
+  }, [appearance.homeTitle, appearance.homeTitleSize, appearance.homeMessage, appearance.homeIcon, appearance.homeBgColor]);
 
   const loadProjectMetaIntoForm = (meta?: ProjectMeta) => {
     const active = meta || {
-      title: "Comparte tus archivos directo a Notion.",
-      description: "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instantánea. Tus archivos se organizan de forma automática bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la página del proyecto que elijas.",
+      title: "ENVI",
+      description: "ENVI agiliza la entrega de archivos por proyecto. Comparte este enlace para recibir archivos de forma rápida y ordenada.",
       expirationDate: "",
       backgroundImage: "",
       isActive: true
@@ -428,6 +430,7 @@ export default function AdminPanel({
       await saveAppearance({
         ...appearance,
         homeTitle,
+        homeTitleSize,
         homeMessage,
         homeIcon,
         homeBgColor,
@@ -501,8 +504,8 @@ export default function AdminPanel({
 
   const handleToggleProjectActive = async (projId: string, currentActiveStatus: boolean) => {
     const existingMeta = projectMeta[projId] || {
-      title: "Comparte tus archivos directo a Notion.",
-      description: "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instant├ínea. Tus archivos se organizan de forma autom├ítica bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la p├ígina del proyecto que elijas.",
+      title: "ENVI",
+      description: "ENVI agiliza la entrega de archivos por proyecto. Comparte este enlace para recibir archivos de forma rápida y ordenada.",
       expirationDate: "",
       backgroundImage: ""
     };
@@ -750,14 +753,8 @@ export default function AdminPanel({
       <div className="col-span-1 space-y-8">
 
         <div className="bg-[#111111] rounded-2xl p-6 border border-white/10 shadow-none">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="p-2.5 bg-white/5 text-white rounded-xl">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-semibold text-white">Portada de Inicio</h2>
-              <p className="text-xs text-white/40">Esta vista aparece solo en la raíz / y no muestra el formulario</p>
-            </div>
+          <div className="mb-6">
+            <h2 className="text-base font-semibold text-white">Portada de Inicio</h2>
           </div>
 
           <form onSubmit={handleSaveHomeAppearance} className="space-y-4">
@@ -776,6 +773,27 @@ export default function AdminPanel({
             </div>
 
             <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold text-white/40 uppercase tracking-wide">
+                  Tamaño del Título
+                </label>
+                <span className="text-[11px] font-mono text-white/45">{homeTitleSize}px</span>
+              </div>
+              <input
+                type="range"
+                min={36}
+                max={96}
+                step={1}
+                value={homeTitleSize}
+                onChange={(e) => setHomeTitleSize(Number(e.target.value))}
+                className="w-full accent-[var(--accent)] cursor-pointer"
+              />
+              <p className="text-[10px] text-white/30 mt-1">
+                Ajusta el tamaño del título principal de la portada.
+              </p>
+            </div>
+
+            <div>
               <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
                 Mensaje Central
               </label>
@@ -787,6 +805,9 @@ export default function AdminPanel({
                 maxLength={400}
                 className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all resize-y"
               />
+              <p className="text-[10px] text-white/30 mt-1">
+                Usa Enter para hacer saltos de línea y mostrarlos más abajo en la portada.
+              </p>
             </div>
 
             <div className="border-t border-white/5 pt-4">
@@ -985,7 +1006,7 @@ export default function AdminPanel({
                 <input
                   type="text"
                   required
-                  placeholder="Ej: Comparte tus archivos directo a Notion."
+                  placeholder="Ej: ENVI"
                   value={copyTitle}
                   onChange={(e) => setCopyTitle(e.target.value)}
                   className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all"

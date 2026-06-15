@@ -5,6 +5,7 @@ export interface AppearanceConfig {
   themeId: AppThemeId;
   accentColor: string;
   homeTitle: string;
+  homeTitleSize: number;
   homeMessage: string;
   homeIcon: string;
   homeBgColor: string;
@@ -19,16 +20,24 @@ interface ThemeContextValue {
 export const DEFAULT_APPEARANCE: AppearanceConfig = {
   themeId: 'brutal',
   accentColor: '#f5f011',
-  homeTitle: 'Comparte tus archivos directo a Notion.',
-  homeMessage: 'Accede al enlace directo de tu proyecto para cargar archivos. Desde esta portada solo se muestra el acceso de administración.',
+  homeTitle: 'ENVI',
+  homeTitleSize: 56,
+  homeMessage: 'ENVI agiliza la entrega de archivos por proyecto. Desarrollado por wilzamguerrero.',
   homeIcon: 'Sparkles',
   homeBgColor: '#050505',
+};
+
+const normalizeTitleSize = (value: unknown, fallback: number): number => {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(96, Math.max(36, Math.round(parsed)));
 };
 
 const normalizeAppearance = (raw?: Partial<AppearanceConfig> | null): AppearanceConfig => {
   const themeId = raw?.themeId === 'brutal' ? raw.themeId : DEFAULT_APPEARANCE.themeId;
   const accentColor = (raw?.accentColor || DEFAULT_APPEARANCE.accentColor || '').trim() || DEFAULT_APPEARANCE.accentColor;
   const homeTitle = (raw?.homeTitle || '').trim() || DEFAULT_APPEARANCE.homeTitle;
+  const homeTitleSize = normalizeTitleSize(raw?.homeTitleSize, DEFAULT_APPEARANCE.homeTitleSize);
   const homeMessage = (raw?.homeMessage || '').trim() || DEFAULT_APPEARANCE.homeMessage;
   const homeIcon = (raw?.homeIcon || '').trim() || DEFAULT_APPEARANCE.homeIcon;
   const homeBgColor = (raw?.homeBgColor || '').trim() || DEFAULT_APPEARANCE.homeBgColor;
@@ -37,6 +46,7 @@ const normalizeAppearance = (raw?: Partial<AppearanceConfig> | null): Appearance
     themeId,
     accentColor,
     homeTitle,
+    homeTitleSize,
     homeMessage,
     homeIcon,
     homeBgColor,

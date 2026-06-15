@@ -694,6 +694,9 @@ export default function App() {
   const isHomeUploadView = activeTab === "upload" && isRootLandingPath && !selectedProjectId && !isProjectLocked;
   const isRootExperience = isRootLandingPath && !selectedProjectId;
 
+  const activeProjectName = activeProjectId
+    ? (projects.find((project) => project.id === activeProjectId)?.name || "")
+    : "";
   const activeMeta = activeProjectId ? projectMeta[activeProjectId] : null;
 
   /** Check if expiration date is a valid, non-empty date string */
@@ -713,12 +716,14 @@ export default function App() {
     return new Date() > expDate;
   })();
 
+  const hasLegacyProjectTitle = activeMeta?.title?.trim() === "Comparte tus archivos directo a Notion.";
+  const hasLegacyProjectDescription = activeMeta?.description?.trim() === "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instantánea. Tus archivos se organizan de forma automática bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la página del proyecto que elijas.";
   const displayTitle = isHomeUploadView
     ? appearance.homeTitle
-    : (activeMeta?.title || "Comparte tus archivos directo a Notion.");
+    : ((activeMeta?.title && !hasLegacyProjectTitle ? activeMeta.title : "") || activeProjectName || "ENVI");
   const displayDescription = isHomeUploadView
     ? appearance.homeMessage
-    : (activeMeta?.description || "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instantánea. Tus archivos se organizan de forma automática bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la página del proyecto que elijas.");
+    : ((activeMeta?.description && !hasLegacyProjectDescription ? activeMeta.description : "") || `ENVI agiliza la entrega de archivos para ${activeProjectName || "este proyecto"}. Comparte este enlace para recibir archivos de forma rápida y ordenada.`);
   const displayCustomFields = activeMeta?.customFields || [];
   const infoFields = displayCustomFields.filter((f) => !f.askSubmitter);
   const askFields = displayCustomFields.filter((f) => f.askSubmitter);
@@ -883,13 +888,19 @@ export default function App() {
                           <div className="space-y-3">
                             <h1
                               className="text-3xl sm:text-5xl font-extrabold tracking-tight leading-[1.05]"
-                              style={{ color: adaptiveText || '#ffffff' }}
+                              style={{
+                                color: adaptiveText || '#ffffff',
+                                fontSize: `clamp(2.25rem, 8vw, ${appearance.homeTitleSize}px)`,
+                              }}
                             >
                               <ScrambleReveal text={displayTitle} duration={900} delay={80} />
                             </h1>
                             <p
                               className="text-sm sm:text-base leading-relaxed max-w-xl mx-auto"
-                              style={{ color: hasBgColor ? (bgColorIsLight ? 'rgba(17,17,17,0.72)' : 'rgba(255,255,255,0.7)') : 'rgba(255,255,255,0.7)' }}
+                              style={{
+                                color: hasBgColor ? (bgColorIsLight ? 'rgba(17,17,17,0.72)' : 'rgba(255,255,255,0.7)') : 'rgba(255,255,255,0.7)',
+                                whiteSpace: 'pre-line',
+                              }}
                             >
                               {displayDescription}
                             </p>

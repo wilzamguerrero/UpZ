@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ScrambleCycle } from './ScrambleText';
 
 const LOADER_WORDS = [
-  'ENVIAR',
+  'ENVI',
   'RÁPIDO',
   'SIMPLE',
   'DISEÑO',
@@ -65,7 +65,7 @@ export default function AppLoader({ visible, bgColor, isLight, textColor }: AppL
               className="mt-5 text-[10px] font-mono uppercase tracking-[0.35em]"
               style={{ color: isLight ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.2)' }}
             >
-              notion drop
+              envi
             </div>
           </motion.div>
         </motion.div>

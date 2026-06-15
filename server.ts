@@ -5,11 +5,19 @@ import multer from "multer";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { Client } from "@notionhq/client";
+import {
+  buildPreviewSvg,
+  injectPreviewIntoHtml,
+  isRootLikePath,
+  normalizeAppearance,
+  resolvePreview,
+  type PreviewProject,
+} from "./functions/_shared/preview";
 
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT || 3000);
 
 // Middleware for parsing JSON and URL encoded data
 app.use(express.json());
@@ -472,8 +480,9 @@ const APPEARANCE_FILE = path.join(process.cwd(), "appearance.json");
 const DEFAULT_APPEARANCE = {
   themeId: "brutal",
   accentColor: "#f5f011",
-  homeTitle: "Comparte tus archivos directo a Notion.",
-  homeMessage: "Accede al enlace directo de tu proyecto para cargar archivos. Desde esta portada solo se muestra el acceso de administración.",
+  homeTitle: "ENVI",
+  homeTitleSize: 56,
+  homeMessage: "ENVI agiliza la entrega de archivos por proyecto. Desarrollado por wilzamguerrero.",
   homeIcon: "Sparkles",
   homeBgColor: "#050505",
 };
@@ -488,11 +497,18 @@ function normalizeAppearanceText(value: unknown, fallback: string, maxLength: nu
   return (raw || fallback).slice(0, maxLength);
 }
 
+function normalizeAppearanceTitleSize(value: unknown, fallback: number) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(96, Math.max(36, Math.round(parsed)));
+}
+
 function normalizeAppearance(payload: any) {
   return {
     themeId: payload?.themeId === "brutal" ? payload.themeId : DEFAULT_APPEARANCE.themeId,
     accentColor: normalizeAppearanceColor(payload?.accentColor, DEFAULT_APPEARANCE.accentColor),
     homeTitle: normalizeAppearanceText(payload?.homeTitle, DEFAULT_APPEARANCE.homeTitle, 140),
+    homeTitleSize: normalizeAppearanceTitleSize(payload?.homeTitleSize, DEFAULT_APPEARANCE.homeTitleSize),
     homeMessage: normalizeAppearanceText(payload?.homeMessage, DEFAULT_APPEARANCE.homeMessage, 400),
     homeIcon: normalizeAppearanceText(payload?.homeIcon, DEFAULT_APPEARANCE.homeIcon, 64),
     homeBgColor: normalizeAppearanceColor(payload?.homeBgColor, DEFAULT_APPEARANCE.homeBgColor),
@@ -547,6 +563,78 @@ function saveSubmission(submission: any) {
   const list = loadSubmissions();
   list.unshift(submission); // Add to beginning of array
   fs.writeFileSync(SUBMISSIONS_FILE, JSON.stringify(list, null, 2), "utf-8");
+}
+
+async function listProjectsFromNotion(): Promise<Array<PreviewProject & { type: string; url: string; isActive: boolean }>> {
+  const config = loadConfig();
+  if (!config.notionSecret || !config.parentPageId) {
+    return [];
+  }
+
+  const notion = new Client({ auth: config.notionSecret });
+  const response = await notion.blocks.children.list({
+    block_id: config.parentPageId,
+  });
+
+  const metaList = loadProjectMeta();
+
+  return response.results
+    .filter((block: any) => block.type === "toggle" || block.type === "child_page")
+    .map((block: any) => {
+      const meta = metaList[block.id] || {};
+      const isActive = meta.isActive !== undefined ? meta.isActive : true;
+
+      if (block.type === "toggle") {
+        const name = block.toggle.rich_text.map((rt: any) => rt.plain_text).join("").trim();
+        return {
+          id: block.id,
+          name: name || "Proyecto sin título",
+          type: "toggle",
+          url: `https://notion.so/${config.parentPageId.replace(/-/g, "")}#${block.id.replace(/-/g, "")}`,
+          isActive,
+        };
+      }
+
+      return {
+        id: block.id,
+        name: block.child_page.title || "Proyecto sin título",
+        type: "page",
+        url: `https://notion.so/${block.id.replace(/-/g, "")}`,
+        isActive,
+      };
+    });
+}
+
+function getServerOrigin(req: express.Request) {
+  const forwardedProto = req.get("x-forwarded-proto");
+  const protocol = forwardedProto ? forwardedProto.split(",")[0].trim() : req.protocol;
+  return `${protocol}://${req.get("host")}`;
+}
+
+async function resolveServerPreview(pathname: string) {
+  const appearance = normalizeAppearance(loadAppearance());
+  const metaMap = loadProjectMeta();
+
+  if (isRootLikePath(pathname)) {
+    return resolvePreview(pathname, appearance, [], metaMap);
+  }
+
+  let projects: PreviewProject[] = [];
+  try {
+    projects = await listProjectsFromNotion();
+  } catch (error: any) {
+    console.warn("Preview project resolution fallback:", error?.message || error);
+  }
+
+  return resolvePreview(pathname, appearance, projects, metaMap);
+}
+
+async function buildPreviewHtml(template: string, pathname: string, origin: string) {
+  const normalizedPath = pathname && pathname.startsWith("/") ? pathname : `/${pathname || ""}`;
+  const preview = await resolveServerPreview(normalizedPath);
+  const pageUrl = new URL(normalizedPath || "/", origin).toString();
+  const imageUrl = new URL(`/api/og?path=${encodeURIComponent(normalizedPath || "/")}`, origin).toString();
+  return injectPreviewIntoHtml(template, preview, pageUrl, imageUrl);
 }
 
 // Setup multer for file uploads
@@ -642,6 +730,22 @@ app.post("/api/appearance", (req, res) => {
   const appearance = normalizeAppearance(req.body || {});
   saveAppearance(appearance);
   res.json({ success: true, message: "Apariencia guardada correctamente." });
+});
+
+app.get("/api/og", async (req, res) => {
+  const requestedPath = typeof req.query.path === "string" ? req.query.path : "/";
+  const normalizedPath = requestedPath.startsWith("/") ? requestedPath : `/${requestedPath}`;
+
+  try {
+    const preview = await resolveServerPreview(normalizedPath);
+    const svg = await buildPreviewSvg(preview);
+    res.setHeader("Content-Type", "image/svg+xml; charset=UTF-8");
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.status(200).send(svg);
+  } catch (error: any) {
+    console.error("Error generating preview SVG:", error);
+    res.status(500).send("No se pudo generar la vista previa.");
+  }
 });
 
 // 3.1. Admin Password Validation based on Notion Quote Block
@@ -937,41 +1041,7 @@ app.get("/api/projects", async (req, res) => {
   }
 
   try {
-    const notion = new Client({ auth: config.notionSecret });
-
-    // List block children from the parent page
-    const response = await notion.blocks.children.list({
-      block_id: config.parentPageId,
-    });
-
-    const metaList = loadProjectMeta();
-
-    // Query projects as either toggle blocks or legacy child_page blocks
-    const projects = response.results
-      .filter((block: any) => block.type === "toggle" || block.type === "child_page")
-      .map((block: any) => {
-        const meta = metaList[block.id] || {};
-        const isActive = meta.isActive !== undefined ? meta.isActive : true;
-
-        if (block.type === "toggle") {
-          const name = block.toggle.rich_text.map((rt: any) => rt.plain_text).join("").trim();
-          return {
-            id: block.id,
-            name: name || "Proyecto sin título",
-            type: "toggle",
-            url: `https://notion.so/${config.parentPageId.replace(/-/g, "")}#${block.id.replace(/-/g, "")}`,
-            isActive,
-          };
-        } else {
-          return {
-            id: block.id,
-            name: block.child_page.title || "Proyecto sin título",
-            type: "page",
-            url: `https://notion.so/${block.id.replace(/-/g, "")}`,
-            isActive,
-          };
-        }
-      });
+    const projects = await listProjectsFromNotion();
 
     res.json({ success: true, projects });
   } catch (err: any) {
@@ -1359,19 +1429,41 @@ app.post("/api/submit", async (req, res) => {
 
 // Start server loading and integration with Vite for SPA framework
 async function start() {
+  let vite: Awaited<ReturnType<typeof createViteServer>> | null = null;
+
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
+    vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "spa",
+      appType: "custom",
     });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+    app.use(express.static(distPath, { index: false }));
   }
+
+  app.get("*", async (req, res) => {
+    try {
+      const templatePath = process.env.NODE_ENV !== "production"
+        ? path.join(process.cwd(), "index.html")
+        : path.join(process.cwd(), "dist", "index.html");
+      let template = fs.readFileSync(templatePath, "utf-8");
+
+      if (vite) {
+        template = await vite.transformIndexHtml(req.originalUrl, template);
+      }
+
+      const html = await buildPreviewHtml(template, req.path, getServerOrigin(req));
+      res.status(200).setHeader("Content-Type", "text/html; charset=UTF-8");
+      res.send(html);
+    } catch (error: any) {
+      if (vite) {
+        vite.ssrFixStacktrace(error);
+      }
+      console.error("Error rendering preview HTML:", error);
+      res.status(500).send("No se pudo renderizar la pagina.");
+    }
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
