@@ -504,12 +504,16 @@ export default function App() {
       throw new Error(initData.error || `Error al inicializar upload de "${originalName}"`);
     }
 
-    const { id: uploadId, uploadName, contentType, mode } = initData;
+    const { id: uploadId, uploadName, contentType, mode, uploadUrl, completeUrl } = initData;
 
-    // Step 2: Send each chunk through our backend proxy.
-    // Notion's send endpoint does NOT send CORS headers, so the browser blocks direct
-    // uploads from any origin. We proxy through Cloudflare Functions / Express instead.
-    // Chunks are 8 MiB to stay safely under Cloudflare's 100 MB request body limit.
+    // Step 2: Send each chunk directly to Notion using the pre-signed upload_url.
+    // Notion returns this URL pointing to their S3 bucket which has CORS configured.
+    // This bypasses Cloudflare entirely — no CPU/memory/body-size limits to worry about.
+    // Local dev falls back to the proxy because localhost can't reach Notion's S3 directly
+    // (CORS preflight fails for file:// or non-https origins).
+    const isLocalDev = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    const directUploadUrl = !isLocalDev && uploadUrl ? uploadUrl : null;
+
     for (let partNumber = 1; partNumber <= numberOfParts; partNumber++) {
       const start = (partNumber - 1) * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, uploadFile.size);
@@ -519,31 +523,46 @@ export default function App() {
       setSubmitStep(`Subiendo ${label} — parte ${partNumber}/${numberOfParts} (${pct}%)`);
       setUploadProgress({ fileName: originalName, percent: pct });
 
-      // Send the chunk as raw binary with metadata in headers.
-      // This lets the Cloudflare Worker stream it straight to Notion without buffering
-      // (avoids the 10 ms CPU limit and 128 MB memory limit).
-      const headers: Record<string, string> = {
-        "Content-Type": contentType || "application/octet-stream",
-        "X-Upload-Id": uploadId,
-        "X-Content-Type": contentType || "application/octet-stream",
-        "X-Upload-Name": uploadName,
-      };
-      if (mode === "multi_part") {
-        headers["X-Part-Number"] = String(partNumber);
-      }
+      if (directUploadUrl) {
+        // Direct upload to Notion's S3 — no proxy, no limits.
+        const fd = new FormData();
+        if (mode === "multi_part") {
+          fd.append("part_number", String(partNumber));
+        }
+        fd.append("file", chunk, uploadName);
 
-      const partRes = await fetch("/api/upload-part", {
-        method: "POST",
-        headers,
-        body: chunk,
-      });
-      const partText = await partRes.text();
-      let partData: any;
-      try { partData = JSON.parse(partText); } catch {
-        throw new Error(`Respuesta inesperada al subir parte ${partNumber} de "${originalName}".`);
-      }
-      if (!partRes.ok || !partData.success) {
-        throw new Error(partData.error || `Error en parte ${partNumber} de "${originalName}"`);
+        const partRes = await fetch(directUploadUrl, { method: "POST", body: fd });
+        if (!partRes.ok) {
+          const errText = await partRes.text();
+          let msg = errText;
+          try { msg = JSON.parse(errText).message || errText; } catch {}
+          throw new Error(`Error en parte ${partNumber} de "${originalName}": ${msg}`);
+        }
+      } else {
+        // Local dev: proxy through Express (avoids CORS).
+        const headers: Record<string, string> = {
+          "Content-Type": contentType || "application/octet-stream",
+          "X-Upload-Id": uploadId,
+          "X-Content-Type": contentType || "application/octet-stream",
+          "X-Upload-Name": uploadName,
+        };
+        if (mode === "multi_part") {
+          headers["X-Part-Number"] = String(partNumber);
+        }
+
+        const partRes = await fetch("/api/upload-part", {
+          method: "POST",
+          headers,
+          body: chunk,
+        });
+        const partText = await partRes.text();
+        let partData: any;
+        try { partData = JSON.parse(partText); } catch {
+          throw new Error(`Respuesta inesperada al subir parte ${partNumber} de "${originalName}".`);
+        }
+        if (!partRes.ok || !partData.success) {
+          throw new Error(partData.error || `Error en parte ${partNumber} de "${originalName}"`);
+        }
       }
     }
 
@@ -552,7 +571,12 @@ export default function App() {
       setSubmitStep(`Finalizando ${label}...`);
       setUploadProgress({ fileName: originalName, percent: 99 });
 
-      const completeRes = await fetch("/api/upload-complete", {
+      // Use Notion's complete_url directly if available (production), otherwise proxy.
+      const completeEndpoint = completeUrl && !isLocalDev
+        ? completeUrl
+        : "/api/upload-complete";
+
+      const completeRes = await fetch(completeEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ uploadId }),

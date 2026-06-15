@@ -82,7 +82,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return json({
       success: true,
       id: upload.id,
-      uploadUrl: upload.upload_url || `${NOTION_BASE}/file_uploads/${upload.id}/send`,
+      // upload_url is the pre-signed URL Notion returns for direct browser uploads.
+      // It points to a Notion-owned S3 bucket that has CORS configured, so the browser
+      // can POST chunks directly without going through Cloudflare (avoids the 10 ms
+      // CPU limit and 100 MB body limit of Cloudflare Workers Free).
+      uploadUrl: upload.upload_url,
       completeUrl: isMultiPart
         ? (upload.complete_url || `${NOTION_BASE}/file_uploads/${upload.id}/complete`)
         : null,
