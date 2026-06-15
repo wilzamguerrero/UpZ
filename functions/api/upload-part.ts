@@ -55,44 +55,54 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     // Build a new multipart body that wraps the incoming stream as the "file" part.
-    // Put part_number BEFORE the file — some parsers (including Notion's) only read
-    // the first few KB of the multipart body to find simple fields.
-    const newBoundary = "----NotionUpload" + crypto.randomUUID().replace(/-/g, "");
-    const partNumberPart = partNumber
-      ? new TextEncoder().encode(
+    // Put part_number BEFORE the file — Notion's parser only reads the first few KB
+    // of the multipart body to find simple fields.
+    const newBoundary = "----Nu" + crypto.randomUUID().replace(/-/g, "");
+    const enc = new TextEncoder();
+
+    const partNumberChunk = partNumber
+      ? enc.encode(
           `--${newBoundary}\r\n` +
           `Content-Disposition: form-data; name="part_number"\r\n\r\n` +
           `${partNumber}\r\n`
         )
       : null;
-    const filePartHeader = new TextEncoder().encode(
+    const fileHeaderChunk = enc.encode(
       `--${newBoundary}\r\n` +
       `Content-Disposition: form-data; name="file"; filename="${uploadName.replace(/"/g, "")}"\r\n` +
       `Content-Type: ${fileContentType}\r\n\r\n`
     );
-    const closing = new TextEncoder().encode(`\r\n--${newBoundary}--\r\n`);
+    const closingChunk = enc.encode(`\r\n--${newBoundary}--\r\n`);
 
     // Compose the body as a ReadableStream — no buffering of the 8 MB chunk.
-    const bodyStream = new ReadableStream({
-      async start(controller) {
-        if (partNumberPart) {
-          controller.enqueue(partNumberPart);
-        }
-        controller.enqueue(filePartHeader);
+    // We use a TransformStream to splice the file stream between the header and footer.
+    const { readable, writable } = new TransformStream();
+    const writer = writable.getWriter();
+
+    // Fire-and-forget the streaming pipeline so we don't block the response.
+    (async () => {
+      try {
+        if (partNumberChunk) await writer.write(partNumberChunk);
+        await writer.write(fileHeaderChunk);
+
         const reader = fileStream.getReader();
         try {
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-            controller.enqueue(value);
+            await writer.write(value);
           }
         } finally {
           reader.releaseLock();
         }
-        controller.enqueue(closing);
-        controller.close();
-      },
-    });
+
+        await writer.write(closingChunk);
+      } catch (e) {
+        // Swallow — the fetch will fail and we report the error below.
+      } finally {
+        try { await writer.close(); } catch {}
+      }
+    })();
 
     const sendRes = await fetch(sendUrl, {
       method: "POST",
@@ -101,7 +111,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         "Notion-Version": NOTION_VERSION,
         "Content-Type": `multipart/form-data; boundary=${newBoundary}`,
       },
-      body: bodyStream,
+      body: readable,
     });
 
     if (!sendRes.ok) {
