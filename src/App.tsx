@@ -519,16 +519,24 @@ export default function App() {
       setSubmitStep(`Subiendo ${label} — parte ${partNumber}/${numberOfParts} (${pct}%)`);
       setUploadProgress({ fileName: originalName, percent: pct });
 
-      const chunkFd = new FormData();
-      chunkFd.append("file", chunk, uploadName);
-      chunkFd.append("upload_id", uploadId);
-      chunkFd.append("content_type", contentType);
-      chunkFd.append("upload_name", uploadName);
+      // Send the chunk as raw binary with metadata in headers.
+      // This lets the Cloudflare Worker stream it straight to Notion without buffering
+      // (avoids the 10 ms CPU limit and 128 MB memory limit).
+      const headers: Record<string, string> = {
+        "Content-Type": contentType || "application/octet-stream",
+        "X-Upload-Id": uploadId,
+        "X-Content-Type": contentType || "application/octet-stream",
+        "X-Upload-Name": uploadName,
+      };
       if (mode === "multi_part") {
-        chunkFd.append("part_number", String(partNumber));
+        headers["X-Part-Number"] = String(partNumber);
       }
 
-      const partRes = await fetch("/api/upload-part", { method: "POST", body: chunkFd });
+      const partRes = await fetch("/api/upload-part", {
+        method: "POST",
+        headers,
+        body: chunk,
+      });
       const partText = await partRes.text();
       let partData: any;
       try { partData = JSON.parse(partText); } catch {

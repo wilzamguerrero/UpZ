@@ -18,16 +18,18 @@ async function getCredentials(env: Env): Promise<{ notionSecret: string }> {
 
 /**
  * POST /api/upload-part
- * Sends a single file chunk to Notion's file upload endpoint.
- * For single-part uploads, this is the only call needed after init.
- * For multi-part uploads, call this once per chunk.
+ * Streams a single file chunk directly to Notion's file upload endpoint.
  *
- * FormData fields:
- *   - file: the binary chunk
- *   - upload_id: Notion file upload ID
- *   - part_number: (multi-part only) 1-indexed part number
- *   - content_type: the standardized MIME type to use
- *   - upload_name: the filename to use in the upload
+ * The browser sends the chunk as the raw request body (Content-Type: application/octet-stream)
+ * with metadata in custom headers. We wrap it in a multipart/form-data stream and forward
+ * to Notion. This avoids buffering the chunk in memory (Cloudflare Workers has a 128 MB
+ * memory limit) and keeps CPU usage minimal.
+ *
+ * Headers:
+ *   - X-Upload-Id: Notion file upload ID
+ *   - X-Part-Number: (multi-part only) 1-indexed part number
+ *   - X-Content-Type: the standardized MIME type to use
+ *   - X-Upload-Name: the filename to use in the upload
  */
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { notionSecret } = await getCredentials(context.env);
@@ -35,22 +37,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return json({ error: "Notion no está configurado." }, 400);
   }
 
-  let formData: FormData;
-  try {
-    formData = await context.request.formData();
-  } catch {
-    return json({ error: "No se pudo leer el formulario." }, 400);
-  }
+  const uploadId = context.request.headers.get("x-upload-id");
+  const partNumber = context.request.headers.get("x-part-number");
+  const fileContentType = context.request.headers.get("x-content-type") || "application/octet-stream";
+  const uploadName = context.request.headers.get("x-upload-name") || "file";
 
-  const file = formData.get("file") as File | null;
-  const uploadId = formData.get("upload_id") as string | null;
-  const partNumber = formData.get("part_number") as string | null;
-  const contentType = formData.get("content_type") as string | null;
-  const uploadName = formData.get("upload_name") as string | null;
-
-  if (!file) {
-    return json({ error: "No se proporcionó el chunk de archivo." }, 400);
-  }
   if (!uploadId) {
     return json({ error: "Se requiere upload_id." }, 400);
   }
@@ -58,23 +49,57 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const sendUrl = `${NOTION_BASE}/file_uploads/${uploadId}/send`;
 
   try {
-    // Re-wrap the chunk as a Blob with the correct content type
-    const chunkBuffer = await file.arrayBuffer();
-    const chunkBlob = new Blob([chunkBuffer], { type: contentType || "application/octet-stream" });
-
-    const notionForm = new FormData();
-    if (partNumber) {
-      notionForm.append("part_number", partNumber);
+    const fileStream = context.request.body;
+    if (!fileStream) {
+      return json({ error: "No se proporcionó el chunk de archivo." }, 400);
     }
-    notionForm.append("file", chunkBlob, uploadName || "file");
+
+    // Build a new multipart body that wraps the incoming stream as the "file" part.
+    const newBoundary = "----NotionUpload" + crypto.randomUUID().replace(/-/g, "");
+    const preamble = new TextEncoder().encode(
+      `--${newBoundary}\r\n` +
+      `Content-Disposition: form-data; name="file"; filename="${uploadName.replace(/"/g, "")}"\r\n` +
+      `Content-Type: ${fileContentType}\r\n\r\n`
+    );
+    const partNumberPart = partNumber
+      ? new TextEncoder().encode(
+          `--${newBoundary}\r\n` +
+          `Content-Disposition: form-data; name="part_number"\r\n\r\n` +
+          `${partNumber}\r\n`
+        )
+      : null;
+    const closing = new TextEncoder().encode(`\r\n--${newBoundary}--\r\n`);
+
+    // Compose the body as a ReadableStream — no buffering of the 8 MB chunk.
+    const bodyStream = new ReadableStream({
+      async start(controller) {
+        controller.enqueue(preamble);
+        if (partNumberPart) {
+          controller.enqueue(partNumberPart);
+        }
+        const reader = fileStream.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            controller.enqueue(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+        controller.enqueue(closing);
+        controller.close();
+      },
+    });
 
     const sendRes = await fetch(sendUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${notionSecret}`,
         "Notion-Version": NOTION_VERSION,
+        "Content-Type": `multipart/form-data; boundary=${newBoundary}`,
       },
-      body: notionForm,
+      body: bodyStream,
     });
 
     if (!sendRes.ok) {
