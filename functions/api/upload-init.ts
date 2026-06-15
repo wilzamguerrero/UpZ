@@ -18,8 +18,8 @@ async function getCredentials(env: Env): Promise<{ notionSecret: string }> {
 
 /**
  * POST /api/upload-init
- * Creates a Notion file upload (single_part or multi_part).
- * Returns the upload ID and metadata needed for subsequent part uploads.
+ * Creates a Notion file upload using mode=external_url.
+ * The file is first uploaded to R2, then Notion downloads it from the R2 public URL.
  *
  * Body: { filename: string, mimeType: string, fileSize: number }
  */
@@ -27,6 +27,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { notionSecret } = await getCredentials(context.env);
   if (!notionSecret) {
     return json({ error: "Notion no está configurado." }, 400);
+  }
+
+  const bucket = context.env.FILES_BUCKET;
+  if (!bucket) {
+    return json({ error: "R2 no está configurado." }, 400);
   }
 
   let body: { filename?: string; mimeType?: string; fileSize?: number };
@@ -41,64 +46,21 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return json({ error: "Se requiere el nombre del archivo." }, 400);
   }
 
-  const CHUNK_SIZE = 8 * 1024 * 1024; // 8 MiB — safely under Cloudflare's 100 MB request body limit
-  const MULTI_PART_THRESHOLD = 20 * 1024 * 1024; // 20 MiB
   const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB (Notion paid workspace limit)
-
   if (fileSize > MAX_FILE_SIZE) {
     return json({ error: `El archivo excede el límite de 5 GB de Notion.` }, 413);
   }
 
   const { uploadName, contentType } = resolveUploadMeta(filename, mimeType);
-  const isMultiPart = fileSize > MULTI_PART_THRESHOLD;
-  const numberOfParts = isMultiPart ? Math.ceil(fileSize / CHUNK_SIZE) : 1;
 
-  try {
-    const createBody: any = {
-      filename: uploadName,
-      content_type: contentType,
-    };
+  // Generate a unique R2 key for this upload
+  const r2Key = `uploads/${crypto.randomUUID()}/${uploadName}`;
 
-    if (isMultiPart) {
-      createBody.mode = "multi_part";
-      createBody.number_of_parts = numberOfParts;
-    }
-
-    const createRes = await fetch(`${NOTION_BASE}/file_uploads`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${notionSecret}`,
-        "Notion-Version": NOTION_VERSION,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(createBody),
-    });
-
-    const upload = (await createRes.json()) as any;
-    if (!upload.id) {
-      throw new Error(`No se pudo crear el upload: ${JSON.stringify(upload)}`);
-    }
-
-    return json({
-      success: true,
-      id: upload.id,
-      // upload_url is the pre-signed URL Notion returns for direct browser uploads.
-      // It points to a Notion-owned S3 bucket that has CORS configured, so the browser
-      // can POST chunks directly without going through Cloudflare (avoids the 10 ms
-      // CPU limit and 100 MB body limit of Cloudflare Workers Free).
-      uploadUrl: upload.upload_url,
-      completeUrl: isMultiPart
-        ? (upload.complete_url || `${NOTION_BASE}/file_uploads/${upload.id}/complete`)
-        : null,
-      mode: isMultiPart ? "multi_part" : "single_part",
-      numberOfParts,
-      uploadName,
-      contentType,
-    });
-  } catch (err: any) {
-    return json(
-      { error: `Error al inicializar upload: ${err.message || "Error desconocido"}` },
-      500
-    );
-  }
+  return json({
+    success: true,
+    r2Key,
+    uploadName,
+    contentType,
+    fileSize,
+  });
 };

@@ -1,0 +1,33 @@
+# Cloudflare Pages configuration for UpZ
+# See: https://developers.cloudflare.com/workers/wrangler/configuration/
+
+name = "upz"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# ── R2 Bucket Binding ──────────────────────────────────────────────────────
+# Used by upload-init, upload-chunk, upload-finalize, and uploads/[[path]]
+# to store and serve large file uploads before Notion downloads them.
+#
+# Create the bucket first:
+#   npx wrangler r2 bucket create upz-files
+#
+# Then uncomment the binding below:
+[[r2_buckets]]
+binding = "FILES_BUCKET"
+bucket_name = "upz-files"
+
+# ── KV Namespace Binding (optional) ────────────────────────────────────────
+# Used for config overrides and appearance/project-meta caching.
+# Create the namespace first:
+#   npx wrangler kv namespace create SUBMISSIONS_KV
+#
+# Then replace the preview_id and id below with the values from the output:
+# [[kv_namespaces]]
+# binding = "SUBMISSIONS_KV"
+# id = ""
+# preview_id = ""
+
+# ── Secrets (set via CLI, NOT in this file) ─────────────────────────────────
+# npx wrangler secret put NOTION_SECRET
+# npx wrangler secret put NOTION_ID_PAGE

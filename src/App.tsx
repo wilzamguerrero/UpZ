@@ -484,11 +484,12 @@ export default function App() {
       };
     }
 
-    // ── Large file: chunked flow ──
-    const numberOfParts = Math.ceil(uploadFile.size / CHUNK_SIZE);
+    // ── Large file: upload to R2, then tell Notion to download it ──
+    const CHUNK_SIZE_R2 = 5 * 1024 * 1024; // 5 MiB per chunk for R2 multipart
+    const numberOfParts = Math.ceil(uploadFile.size / CHUNK_SIZE_R2);
 
-    // Step 1: Initialize the upload on Notion
-    setSubmitStep(`Inicializando ${label} (${numberOfParts} partes)...`);
+    // Step 1: Initialize — get an R2 key for this upload
+    setSubmitStep(`Inicializando ${label}...`);
     setUploadProgress({ fileName: originalName, percent: 0 });
 
     const initRes = await fetch("/api/upload-init", {
@@ -505,63 +506,82 @@ export default function App() {
       throw new Error(initData.error || `Error al inicializar upload de "${originalName}"`);
     }
 
-    const { id: uploadId, uploadName, contentType, mode } = initData;
+    const { r2Key, uploadName, contentType } = initData;
 
-    // Step 2: Send each chunk through our backend proxy.
-    // Notion's upload_url does NOT have CORS configured for arbitrary origins,
-    // so the browser blocks direct uploads. We proxy through Cloudflare Functions
-    // (production) or Express (local dev). Chunks are 5 MiB to stay within
-    // Cloudflare Workers Free's 10 ms CPU budget per request.
+    // Step 2: Initiate R2 multipart upload
+    const mpInitRes = await fetch("/api/upload-chunk", {
+      method: "POST",
+      headers: {
+        "X-R2-Key": r2Key,
+        "X-Content-Type": contentType || "application/octet-stream",
+      },
+      body: "",
+    });
+    const mpInitData = await mpInitRes.json();
+    if (!mpInitRes.ok || !mpInitData.success || mpInitData.action !== "init") {
+      throw new Error(mpInitData.error || `Error al iniciar multipart en R2`);
+    }
+    const r2UploadId = mpInitData.uploadId;
+
+    // Step 3: Upload each chunk to R2
+    const uploadedParts: { partNumber: number; etag: string }[] = [];
     for (let partNumber = 1; partNumber <= numberOfParts; partNumber++) {
-      const start = (partNumber - 1) * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, uploadFile.size);
+      const start = (partNumber - 1) * CHUNK_SIZE_R2;
+      const end = Math.min(start + CHUNK_SIZE_R2, uploadFile.size);
       const chunk = uploadFile.slice(start, end);
 
       const pct = Math.round(((partNumber - 1) / numberOfParts) * 100);
       setSubmitStep(`Subiendo ${label} — parte ${partNumber}/${numberOfParts} (${pct}%)`);
       setUploadProgress({ fileName: originalName, percent: pct });
 
-      // Send the chunk as raw binary with metadata in headers.
-      // The Cloudflare Worker streams it straight to Notion without buffering.
-      const headers: Record<string, string> = {
-        "Content-Type": contentType || "application/octet-stream",
-        "X-Upload-Id": uploadId,
-        "X-Content-Type": contentType || "application/octet-stream",
-        "X-Upload-Name": uploadName,
-      };
-      if (mode === "multi_part") {
-        headers["X-Part-Number"] = String(partNumber);
-      }
-
-      const partRes = await fetch("/api/upload-part", {
+      const partRes = await fetch("/api/upload-chunk", {
         method: "POST",
-        headers,
+        headers: {
+          "Content-Type": contentType || "application/octet-stream",
+          "X-R2-Key": r2Key,
+          "X-Upload-Id": r2UploadId,
+          "X-Part-Number": String(partNumber),
+        },
         body: chunk,
       });
-      const partText = await partRes.text();
-      let partData: any;
-      try { partData = JSON.parse(partText); } catch {
-        throw new Error(`Respuesta inesperada al subir parte ${partNumber} de "${originalName}".`);
-      }
+      const partData = await partRes.json();
       if (!partRes.ok || !partData.success) {
         throw new Error(partData.error || `Error en parte ${partNumber} de "${originalName}"`);
       }
+      uploadedParts.push({ partNumber, etag: partData.etag });
     }
 
-    // Step 3: Complete the multi-part upload
-    if (mode === "multi_part") {
-      setSubmitStep(`Finalizando ${label}...`);
-      setUploadProgress({ fileName: originalName, percent: 99 });
+    // Step 4: Complete R2 multipart upload
+    setSubmitStep(`Finalizando ${label} en almacenamiento...`);
+    setUploadProgress({ fileName: originalName, percent: 95 });
 
-      const completeRes = await fetch("/api/upload-complete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uploadId }),
-      });
-      const completeData = await completeRes.json();
-      if (!completeRes.ok || !completeData.success) {
-        throw new Error(completeData.error || `Error al completar upload de "${originalName}"`);
-      }
+    const completeRes = await fetch("/api/upload-chunk", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-R2-Key": r2Key,
+        "X-Upload-Id": r2UploadId,
+        "X-Complete": "true",
+      },
+      body: JSON.stringify({ parts: uploadedParts }),
+    });
+    const completeData = await completeRes.json();
+    if (!completeRes.ok || !completeData.success) {
+      throw new Error(completeData.error || `Error al completar upload en R2`);
+    }
+
+    // Step 5: Tell Notion to download the file from R2
+    setSubmitStep(`Importando ${label} a Notion...`);
+    setUploadProgress({ fileName: originalName, percent: 98 });
+
+    const finalizeRes = await fetch("/api/upload-finalize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ r2Key, uploadName, contentType }),
+    });
+    const finalizeData = await finalizeRes.json();
+    if (!finalizeRes.ok || !finalizeData.success) {
+      throw new Error(finalizeData.error || `Error al importar "${originalName}" a Notion`);
     }
 
     setUploadProgress({ fileName: originalName, percent: 100 });
@@ -569,8 +589,8 @@ export default function App() {
     return {
       name: originalName,
       finalName: uploadName,
-      size: file.size, // original size for display
-      uploadId,
+      size: file.size,
+      uploadId: finalizeData.id,
       extModified: wasCompressed || (initData.extModified || false),
       mimeType: file.type || "application/octet-stream",
     };
