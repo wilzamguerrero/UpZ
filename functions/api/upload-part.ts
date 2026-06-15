@@ -55,12 +55,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     // Build a new multipart body that wraps the incoming stream as the "file" part.
+    // Put part_number BEFORE the file — some parsers (including Notion's) only read
+    // the first few KB of the multipart body to find simple fields.
     const newBoundary = "----NotionUpload" + crypto.randomUUID().replace(/-/g, "");
-    const preamble = new TextEncoder().encode(
-      `--${newBoundary}\r\n` +
-      `Content-Disposition: form-data; name="file"; filename="${uploadName.replace(/"/g, "")}"\r\n` +
-      `Content-Type: ${fileContentType}\r\n\r\n`
-    );
     const partNumberPart = partNumber
       ? new TextEncoder().encode(
           `--${newBoundary}\r\n` +
@@ -68,15 +65,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           `${partNumber}\r\n`
         )
       : null;
+    const filePartHeader = new TextEncoder().encode(
+      `--${newBoundary}\r\n` +
+      `Content-Disposition: form-data; name="file"; filename="${uploadName.replace(/"/g, "")}"\r\n` +
+      `Content-Type: ${fileContentType}\r\n\r\n`
+    );
     const closing = new TextEncoder().encode(`\r\n--${newBoundary}--\r\n`);
 
     // Compose the body as a ReadableStream — no buffering of the 8 MB chunk.
     const bodyStream = new ReadableStream({
       async start(controller) {
-        controller.enqueue(preamble);
         if (partNumberPart) {
           controller.enqueue(partNumberPart);
         }
+        controller.enqueue(filePartHeader);
         const reader = fileStream.getReader();
         try {
           while (true) {
