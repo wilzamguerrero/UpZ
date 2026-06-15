@@ -1266,6 +1266,153 @@ app.post("/api/upload-file", upload.single("file"), async (req, res) => {
   }
 });
 
+// 7b. Init multi-part upload (returns Notion upload URL for direct browser→Notion upload)
+app.post("/api/upload-init", async (req, res) => {
+  const config = loadConfig();
+  if (!config.notionSecret) {
+    return res.status(400).json({ error: "Notion no está configurado." });
+  }
+
+  const { filename, mimeType = "", fileSize = 0 } = req.body || {};
+  if (!filename) {
+    return res.status(400).json({ error: "Se requiere el nombre del archivo." });
+  }
+
+  const CHUNK_SIZE = 10 * 1024 * 1024;
+  const MULTI_PART_THRESHOLD = 20 * 1024 * 1024;
+  const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024;
+
+  if (fileSize > MAX_FILE_SIZE) {
+    return res.status(413).json({ error: "El archivo excede el límite de 5 GB de Notion." });
+  }
+
+  const { uploadName, contentType } = resolveUploadMeta(filename, mimeType);
+  const isMultiPart = fileSize > MULTI_PART_THRESHOLD;
+  const numberOfParts = isMultiPart ? Math.ceil(fileSize / CHUNK_SIZE) : 1;
+
+  try {
+    const createBody: any = { filename: uploadName, content_type: contentType };
+    if (isMultiPart) {
+      createBody.mode = "multi_part";
+      createBody.number_of_parts = numberOfParts;
+    }
+
+    const createRes = await fetch(`${NOTION_API_BASE_URL}/file_uploads`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.notionSecret}`,
+        "Notion-Version": NOTION_API_VER,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(createBody),
+    });
+
+    const upload = (await createRes.json()) as any;
+    if (!upload.id) {
+      throw new Error(`No se pudo crear el upload: ${JSON.stringify(upload)}`);
+    }
+
+    res.json({
+      success: true,
+      id: upload.id,
+      uploadUrl: upload.upload_url || `${NOTION_API_BASE_URL}/file_uploads/${upload.id}/send`,
+      mode: isMultiPart ? "multi_part" : "single_part",
+      numberOfParts,
+      uploadName,
+      contentType,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: `Error al inicializar upload: ${err.message || "Error desconocido"}` });
+  }
+});
+
+// 7c. Complete multi-part upload
+app.post("/api/upload-complete", async (req, res) => {
+  const config = loadConfig();
+  if (!config.notionSecret) {
+    return res.status(400).json({ error: "Notion no está configurado." });
+  }
+
+  const { uploadId } = req.body || {};
+  if (!uploadId) {
+    return res.status(400).json({ error: "Se requiere uploadId." });
+  }
+
+  try {
+    const completeRes = await fetch(`${NOTION_API_BASE_URL}/file_uploads/${uploadId}/complete`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.notionSecret}`,
+        "Notion-Version": NOTION_API_VER,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!completeRes.ok) {
+      const errText = await completeRes.text();
+      throw new Error(`Notion rechazó el complete: ${completeRes.status} - ${errText}`);
+    }
+
+    const result = (await completeRes.json()) as any;
+    res.json({ success: true, id: uploadId, status: result.status, finalName: result.filename });
+  } catch (err: any) {
+    res.status(500).json({ error: `Error al completar upload: ${err.message || "Error desconocido"}` });
+  }
+});
+
+// 7d. Proxy a single chunk to Notion (local dev only — avoids CORS blocking the browser)
+app.post("/api/upload-part", upload.single("file"), async (req, res) => {
+  const config = loadConfig();
+  if (!config.notionSecret) {
+    return res.status(400).json({ error: "Notion no está configurado." });
+  }
+  if (!req.file) {
+    return res.status(400).json({ error: "No se proporcionó el chunk de archivo." });
+  }
+
+  const { upload_id, content_type, upload_name, part_number } = req.body || {};
+  if (!upload_id) {
+    return res.status(400).json({ error: "Se requiere upload_id." });
+  }
+
+  try {
+    const sendUrl = `${NOTION_API_BASE_URL}/file_uploads/${upload_id}/send`;
+    const notionForm = new FormData();
+    if (part_number) notionForm.append("part_number", String(part_number));
+    notionForm.append(
+      "file",
+      new Blob([new Uint8Array(fs.readFileSync(req.file.path))], { type: content_type || "application/octet-stream" }),
+      upload_name || "file"
+    );
+
+    const sendRes = await fetch(sendUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.notionSecret}`,
+        "Notion-Version": NOTION_API_VER,
+      },
+      body: notionForm,
+    });
+
+    if (!sendRes.ok) {
+      const errText = await sendRes.text();
+      throw new Error(`Notion rechazó el chunk: ${sendRes.status} - ${errText}`);
+    }
+
+    const result = (await sendRes.json()) as any;
+    try { fs.unlinkSync(req.file.path); } catch {}
+
+    res.json({
+      success: true,
+      id: result.id,
+      status: result.status,
+      partNumber: part_number ? parseInt(part_number, 10) : 1,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: `Error al enviar chunk: ${err.message || "Error desconocido"}` });
+  }
+});
+
 // 8. Submit files (creates Toggle block inside specific project child page using pre-uploaded fileIDs)
 app.post("/api/submit", async (req, res) => {
   const { senderName, senderEmail, projectId, projectName, fileRecords = [] } = req.body;
