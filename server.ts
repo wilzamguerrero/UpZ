@@ -356,7 +356,7 @@ async function uploadFileObjectToNotion(
 }
 
 // Helper: upload a large file (> 20MB) to Notion using multi-part chunked upload
-const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MiB per chunk
+const CHUNK_SIZE = 8 * 1024 * 1024; // 8 MiB per chunk — safely under Cloudflare's 100 MB body limit
 
 async function uploadLargeFileObjectToNotion(
   notionSecret: string,
@@ -1278,7 +1278,7 @@ app.post("/api/upload-init", async (req, res) => {
     return res.status(400).json({ error: "Se requiere el nombre del archivo." });
   }
 
-  const CHUNK_SIZE = 10 * 1024 * 1024;
+  const CHUNK_SIZE = 8 * 1024 * 1024; // 8 MiB — safely under Cloudflare's 100 MB request body limit
   const MULTI_PART_THRESHOLD = 20 * 1024 * 1024;
   const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024;
 

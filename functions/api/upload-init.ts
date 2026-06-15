@@ -41,7 +41,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return json({ error: "Se requiere el nombre del archivo." }, 400);
   }
 
-  const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MiB
+  const CHUNK_SIZE = 8 * 1024 * 1024; // 8 MiB — safely under Cloudflare's 100 MB request body limit
   const MULTI_PART_THRESHOLD = 20 * 1024 * 1024; // 20 MiB
   const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB (Notion paid workspace limit)
 

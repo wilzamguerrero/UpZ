@@ -380,7 +380,9 @@ export default function App() {
   // ─── Upload progress state ───
   const [uploadProgress, setUploadProgress] = useState<{ fileName: string; percent: number } | null>(null);
 
-  const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MiB — matches server-side chunk size
+  // 8 MiB chunks — safely under Cloudflare's 100 MB request body limit even with
+  // multipart/form-data overhead, and within Notion's 5–20 MB per-part range.
+  const CHUNK_SIZE = 8 * 1024 * 1024;
   const SMALL_FILE_THRESHOLD = 20 * 1024 * 1024; // 20 MiB
   const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB (Notion limit)
 
@@ -502,14 +504,12 @@ export default function App() {
       throw new Error(initData.error || `Error al inicializar upload de "${originalName}"`);
     }
 
-    const { id: uploadId, uploadName, contentType, mode, uploadUrl } = initData;
+    const { id: uploadId, uploadName, contentType, mode } = initData;
 
-    // Detect local dev: Notion's send endpoint doesn't send CORS headers, so the browser
-    // blocks direct uploads from localhost. In production (Cloudflare) we bypass the 100 MB
-    // body limit by uploading chunks straight to Notion.
-    const isLocalDev = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-
-    // Step 2: Send each chunk
+    // Step 2: Send each chunk through our backend proxy.
+    // Notion's send endpoint does NOT send CORS headers, so the browser blocks direct
+    // uploads from any origin. We proxy through Cloudflare Functions / Express instead.
+    // Chunks are 8 MiB to stay safely under Cloudflare's 100 MB request body limit.
     for (let partNumber = 1; partNumber <= numberOfParts; partNumber++) {
       const start = (partNumber - 1) * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, uploadFile.size);
@@ -519,9 +519,8 @@ export default function App() {
       setSubmitStep(`Subiendo ${label} — parte ${partNumber}/${numberOfParts} (${pct}%)`);
       setUploadProgress({ fileName: originalName, percent: pct });
 
-      const chunkBlob = new Blob([chunk], { type: contentType || "application/octet-stream" });
       const chunkFd = new FormData();
-      chunkFd.append("file", chunkBlob, uploadName);
+      chunkFd.append("file", chunk, uploadName);
       chunkFd.append("upload_id", uploadId);
       chunkFd.append("content_type", contentType);
       chunkFd.append("upload_name", uploadName);
@@ -529,18 +528,14 @@ export default function App() {
         chunkFd.append("part_number", String(partNumber));
       }
 
-      // Local dev: proxy through Express (avoids CORS). Production: direct to Notion (avoids 100 MB limit).
-      const partRes = await fetch(isLocalDev ? "/api/upload-part" : uploadUrl, {
-        method: "POST",
-        body: chunkFd,
-      });
+      const partRes = await fetch("/api/upload-part", { method: "POST", body: chunkFd });
       const partText = await partRes.text();
       let partData: any;
       try { partData = JSON.parse(partText); } catch {
         throw new Error(`Respuesta inesperada al subir parte ${partNumber} de "${originalName}".`);
       }
-      if (!partRes.ok || (!partData.success && !partData.id)) {
-        throw new Error(partData.message || partData.error || `Error en parte ${partNumber} de "${originalName}"`);
+      if (!partRes.ok || !partData.success) {
+        throw new Error(partData.error || `Error en parte ${partNumber} de "${originalName}"`);
       }
     }
 
