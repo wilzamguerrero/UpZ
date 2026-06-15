@@ -18,12 +18,10 @@ async function getCredentials(env: Env): Promise<{ notionSecret: string }> {
 
 /**
  * POST /api/upload-part
- * Streams a single file chunk directly to Notion's file upload endpoint.
+ * Forwards a single file chunk to Notion's file upload endpoint.
  *
  * The browser sends the chunk as the raw request body (Content-Type: application/octet-stream)
- * with metadata in custom headers. We wrap it in a multipart/form-data stream and forward
- * to Notion. This avoids buffering the chunk in memory (Cloudflare Workers has a 128 MB
- * memory limit) and keeps CPU usage minimal.
+ * with metadata in custom headers. We re-wrap it as multipart/form-data and forward to Notion.
  *
  * Headers:
  *   - X-Upload-Id: Notion file upload ID
@@ -49,69 +47,62 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const sendUrl = `${NOTION_BASE}/file_uploads/${uploadId}/send`;
 
   try {
+    // Use the request body directly as the multipart "file" part.
+    // Cloudflare Workers supports passing a ReadableStream as fetch body,
+    // and Notion accepts multipart/form-data with a streaming body.
+    // We construct a minimal multipart envelope around the raw stream.
     const fileStream = context.request.body;
     if (!fileStream) {
       return json({ error: "No se proporcionó el chunk de archivo." }, 400);
     }
 
-    // Build a new multipart body that wraps the incoming stream as the "file" part.
-    // Put part_number BEFORE the file — Notion's parser only reads the first few KB
-    // of the multipart body to find simple fields.
-    const newBoundary = "----Nu" + crypto.randomUUID().replace(/-/g, "");
+    const boundary = "----Nu" + crypto.randomUUID().replace(/-/g, "");
     const enc = new TextEncoder();
 
-    const partNumberChunk = partNumber
+    // Build the multipart body as a stream. part_number goes FIRST so Notion's
+    // parser finds it in the first few KB of the body.
+    const partNumberHeader = partNumber
       ? enc.encode(
-          `--${newBoundary}\r\n` +
+          `--${boundary}\r\n` +
           `Content-Disposition: form-data; name="part_number"\r\n\r\n` +
           `${partNumber}\r\n`
         )
       : null;
-    const fileHeaderChunk = enc.encode(
-      `--${newBoundary}\r\n` +
+    const fileHeader = enc.encode(
+      `--${boundary}\r\n` +
       `Content-Disposition: form-data; name="file"; filename="${uploadName.replace(/"/g, "")}"\r\n` +
       `Content-Type: ${fileContentType}\r\n\r\n`
     );
-    const closingChunk = enc.encode(`\r\n--${newBoundary}--\r\n`);
+    const closing = enc.encode(`\r\n--${boundary}--\r\n`);
 
-    // Compose the body as a ReadableStream — no buffering of the 8 MB chunk.
-    // We use a TransformStream to splice the file stream between the header and footer.
-    const { readable, writable } = new TransformStream();
-    const writer = writable.getWriter();
-
-    // Fire-and-forget the streaming pipeline so we don't block the response.
-    (async () => {
-      try {
-        if (partNumberChunk) await writer.write(partNumberChunk);
-        await writer.write(fileHeaderChunk);
-
+    const bodyStream = new ReadableStream({
+      start(controller) {
+        if (partNumberHeader) controller.enqueue(partNumberHeader);
+        controller.enqueue(fileHeader);
         const reader = fileStream.getReader();
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            await writer.write(value);
-          }
-        } finally {
-          reader.releaseLock();
-        }
-
-        await writer.write(closingChunk);
-      } catch (e) {
-        // Swallow — the fetch will fail and we report the error below.
-      } finally {
-        try { await writer.close(); } catch {}
-      }
-    })();
+        const pump = (): any => {
+          return reader.read().then(({ done, value }) => {
+            if (done) {
+              controller.enqueue(closing);
+              controller.close();
+              return;
+            }
+            controller.enqueue(value);
+            return pump();
+          });
+        };
+        return pump();
+      },
+    });
 
     const sendRes = await fetch(sendUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${notionSecret}`,
         "Notion-Version": NOTION_VERSION,
-        "Content-Type": `multipart/form-data; boundary=${newBoundary}`,
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
       },
-      body: readable,
+      body: bodyStream,
     });
 
     if (!sendRes.ok) {
