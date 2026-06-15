@@ -22,7 +22,14 @@ export const onRequest: PagesFunction<AssetEnv> = async (context) => {
   }
 
   const assetUrl = new URL("/index.html", url);
-  const assetResponse = await env.ASSETS.fetch(new Request(assetUrl.toString(), request));
+  // Use a clean string URL — never pass the original request as RequestInit because
+  // it copies the incoming redirect mode ('manual'), causing ASSETS to return any
+  // internal redirect back to the browser instead of following it, which loops.
+  const assetResponse = await env.ASSETS.fetch(assetUrl.toString());
+  // Guard: if ASSETS itself redirects for any reason, pass through instead of looping.
+  if (assetResponse.status >= 300) {
+    return context.next();
+  }
   if (!assetResponse.ok) {
     return assetResponse;
   }

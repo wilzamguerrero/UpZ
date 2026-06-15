@@ -718,11 +718,13 @@ export default function App() {
 
   const hasLegacyProjectTitle = activeMeta?.title?.trim() === "Comparte tus archivos directo a Notion.";
   const hasLegacyProjectDescription = activeMeta?.description?.trim() === "Nuestra plataforma te permite arrastrar y soltar cualquier documento de manera instantánea. Tus archivos se organizan de forma automática bajo un indicador desplegable (Toggle List) personalizado con tus datos, directamente en la página del proyecto que elijas.";
+  const HOME_TITLE = 'ENVI';
+  const HOME_MESSAGE = 'ENVI agiliza la entrega de archivos por proyecto.\nDesarrollado por wilzamguerrero.';
   const displayTitle = isHomeUploadView
-    ? appearance.homeTitle
+    ? HOME_TITLE
     : ((activeMeta?.title && !hasLegacyProjectTitle ? activeMeta.title : "") || activeProjectName || "ENVI");
   const displayDescription = isHomeUploadView
-    ? appearance.homeMessage
+    ? HOME_MESSAGE
     : ((activeMeta?.description && !hasLegacyProjectDescription ? activeMeta.description : "") || `ENVI agiliza la entrega de archivos para ${activeProjectName || "este proyecto"}. Comparte este enlace para recibir archivos de forma rápida y ordenada.`);
   const displayCustomFields = activeMeta?.customFields || [];
   const infoFields = displayCustomFields.filter((f) => !f.askSubmitter);
@@ -890,7 +892,7 @@ export default function App() {
                               className="text-3xl sm:text-5xl font-extrabold tracking-tight leading-[1.05]"
                               style={{
                                 color: adaptiveText || '#ffffff',
-                                fontSize: `clamp(2.25rem, 8vw, ${appearance.homeTitleSize}px)`,
+                                fontSize: 'clamp(2.25rem, 8vw, 56px)',
                               }}
                             >
                               <ScrambleReveal text={displayTitle} duration={900} delay={80} />

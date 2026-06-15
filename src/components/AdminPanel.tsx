@@ -181,9 +181,6 @@ export default function AdminPanel({
   const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Homepage appearance editor states
-  const [homeTitle, setHomeTitle] = useState(appearance.homeTitle);
-  const [homeTitleSize, setHomeTitleSize] = useState(appearance.homeTitleSize);
-  const [homeMessage, setHomeMessage] = useState(appearance.homeMessage);
   const [homeIcon, setHomeIcon] = useState(appearance.homeIcon);
   const [homeBgColor, setHomeBgColor] = useState(appearance.homeBgColor);
   const [homeIconSearch, setHomeIconSearch] = useState("");
@@ -272,12 +269,9 @@ export default function AdminPanel({
   }, [projects, selectedMetaProjectId]);
 
   useEffect(() => {
-    setHomeTitle(appearance.homeTitle);
-    setHomeTitleSize(appearance.homeTitleSize);
-    setHomeMessage(appearance.homeMessage);
     setHomeIcon(appearance.homeIcon);
     setHomeBgColor(appearance.homeBgColor);
-  }, [appearance.homeTitle, appearance.homeTitleSize, appearance.homeMessage, appearance.homeIcon, appearance.homeBgColor]);
+  }, [appearance.homeIcon, appearance.homeBgColor]);
 
   const loadProjectMetaIntoForm = (meta?: ProjectMeta) => {
     const active = meta || {
@@ -429,9 +423,9 @@ export default function AdminPanel({
     try {
       await saveAppearance({
         ...appearance,
-        homeTitle,
-        homeTitleSize,
-        homeMessage,
+        homeTitle: 'ENVI',
+        homeTitleSize: 56,
+        homeMessage: 'ENVI agiliza la entrega de archivos por proyecto.\nDesarrollado por wilzamguerrero.',
         homeIcon,
         homeBgColor,
       });
@@ -758,58 +752,6 @@ export default function AdminPanel({
           </div>
 
           <form onSubmit={handleSaveHomeAppearance} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
-                Título Principal
-              </label>
-              <input
-                type="text"
-                required
-                value={homeTitle}
-                onChange={(e) => setHomeTitle(e.target.value)}
-                maxLength={140}
-                className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all"
-              />
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-semibold text-white/40 uppercase tracking-wide">
-                  Tamaño del Título
-                </label>
-                <span className="text-[11px] font-mono text-white/45">{homeTitleSize}px</span>
-              </div>
-              <input
-                type="range"
-                min={36}
-                max={96}
-                step={1}
-                value={homeTitleSize}
-                onChange={(e) => setHomeTitleSize(Number(e.target.value))}
-                className="w-full accent-[var(--accent)] cursor-pointer"
-              />
-              <p className="text-[10px] text-white/30 mt-1">
-                Ajusta el tamaño del título principal de la portada.
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
-                Mensaje Central
-              </label>
-              <textarea
-                rows={4}
-                required
-                value={homeMessage}
-                onChange={(e) => setHomeMessage(e.target.value)}
-                maxLength={400}
-                className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all resize-y"
-              />
-              <p className="text-[10px] text-white/30 mt-1">
-                Usa Enter para hacer saltos de línea y mostrarlos más abajo en la portada.
-              </p>
-            </div>
-
             <div className="border-t border-white/5 pt-4">
               <div className="flex items-center justify-between mb-2">
                 <label className="text-xs font-semibold text-white/40 uppercase tracking-wide">
