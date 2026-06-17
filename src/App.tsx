@@ -151,6 +151,12 @@ export default function App() {
   const [submitStep, setSubmitStep] = useState<string>("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<any | null>(null);
+  const [titleKey, setTitleKey] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => setTitleKey((k) => k + 1), 3500);
+    return () => clearInterval(timer);
+  }, []);
 
   // Background visual customization states
   const [dominantColor, setDominantColor] = useState<{ r: number; g: number; b: number } | null>(null);
@@ -950,7 +956,7 @@ export default function App() {
                                 fontSize: 'clamp(2.25rem, 8vw, 56px)',
                               }}
                             >
-                              <ScrambleReveal text={displayTitle} duration={900} delay={80} />
+                              <ScrambleReveal key={titleKey} text={displayTitle} duration={900} delay={80} />
                             </h1>
                             <p
                               className="text-sm sm:text-base leading-relaxed max-w-xl mx-auto"
@@ -1006,7 +1012,7 @@ export default function App() {
                         <div className="space-y-1.5 pt-1.5">
                           {submitSuccess.files.map((file: any, fIdx: number) => (
                             <div key={fIdx} className="flex justify-between text-[11px] text-white/50 bg-[#111111] p-2 rounded-lg border border-white/5">
-                              <span className="truncate flex-1 pr-2">📎 {file.name}</span>
+                              <span className="truncate flex-1 pr-2"><File className="w-3.5 h-3.5 inline-block mr-1.5 -mt-0.5" />{file.name}</span>
                               <span className="font-mono text-white/30">{(file.size / (1024 * 1024)).toFixed(2)} MB</span>
                             </div>
                           ))}
@@ -1050,7 +1056,7 @@ export default function App() {
                       {/* Header info inside card */}
                       <div className="space-y-3 pb-1 pr-10">
                         <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight leading-[1.15]">
-                          <ScrambleReveal text={displayTitle} duration={900} delay={80} />
+                          <ScrambleReveal key={titleKey} text={displayTitle} duration={900} delay={80} />
                         </h2>
                         <p className="text-sm text-white/40 leading-relaxed">{displayDescription}</p>
                         {infoFields.length > 0 && (
@@ -1139,10 +1145,10 @@ export default function App() {
                             <input
                               type="text"
                               required
-                              placeholder="Ej: Laura Castro"
+                              placeholder=""
                               value={senderName}
                               onChange={(e) => setSenderName(e.target.value)}
-                              className="w-full pl-10 pr-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none placeholder-white/20 transition-all text-white"
+                              className="w-full pl-10 pr-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none text-white"
                             />
                           </div>
                         </div>
@@ -1156,10 +1162,10 @@ export default function App() {
                             <input
                               type="email"
                               required
-                              placeholder="Ej: laura@empresa.com"
+                              placeholder=""
                               value={senderEmail}
                               onChange={(e) => setSenderEmail(e.target.value)}
-                              className="w-full pl-10 pr-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none placeholder-white/20 transition-all text-white"
+                              className="w-full pl-10 pr-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none text-white"
                             />
                           </div>
                         </div>
@@ -1190,10 +1196,7 @@ export default function App() {
 
                       {/* Project selector logic from Notion listing */}
                       <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <label className="block text-xs font-semibold text-white/40 uppercase tracking-wide">
-                            {isProjectLocked ? "Carpeta de Destino en Notion" : "Selecciona Proyecto / Carpeta de Notion"}
-                          </label>
+                        <div className="flex items-center justify-end mb-1.5">
                           {!isProjectLocked && config?.isConfigured && (
                             <button
                               type="button"
@@ -1223,7 +1226,7 @@ export default function App() {
                                 </span>
                               )}
                             </div>
-                            <span className="text-[10px] text-white/40 font-mono tracking-wider uppercase bg-white/5 px-2 py-0.5 rounded-md border border-white/10">Enlace Directo Activo</span>
+                            <Globe className="w-4 h-4 text-white/40" title="Enlace directo activo" />
                           </div>
                         ) : loadingProjects ? (
                           <div className="w-full py-2.5 px-3 border border-white/5 rounded-xl bg-[#0d0d0d] flex items-center gap-2">
@@ -1419,6 +1422,9 @@ export default function App() {
                               )}
                             </div>
                           </button>
+                          <div className="text-right -mt-5.5">
+                            <span className="text-[10px] text-white/30 font-mono tracking-wide">Dev by WilZamGuerrero</span>
+                          </div>
                         </>
                       )}
 
