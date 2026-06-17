@@ -57,42 +57,70 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const sendUrl = `${NOTION_BASE}/file_uploads/${uploadId}/send`;
 
+  // Forward the chunk to Notion. Retry transient Notion errors (429/5xx) here on the edge,
+  // so a single hiccup doesn't bubble up to the browser as a hard failure.
+  const TRANSIENT = new Set([429, 500, 502, 503, 504, 529]);
+  const MAX_RETRIES = 4;
+
   try {
-    // Re-wrap the chunk as a Blob with the correct content type
-    const chunkBuffer = await file.arrayBuffer();
-    const chunkBlob = new Blob([chunkBuffer], { type: contentType || "application/octet-stream" });
+    // Re-wrap the chunk as a Blob with the correct content type.
+    // Stream straight from the uploaded File (no full arrayBuffer copy) to keep the
+    // Function's memory/CPU footprint low — important on the free plan.
+    const chunkBlob = file.slice(0, file.size, contentType || "application/octet-stream");
 
-    const notionForm = new FormData();
-    if (partNumber) {
-      notionForm.append("part_number", partNumber);
+    let lastStatus = 0;
+    let lastBody = "";
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      const notionForm = new FormData();
+      if (partNumber) {
+        notionForm.append("part_number", partNumber);
+      }
+      notionForm.append("file", chunkBlob, uploadName || "file");
+
+      const sendRes = await fetch(sendUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${notionSecret}`,
+          "Notion-Version": NOTION_VERSION,
+        },
+        body: notionForm,
+      });
+
+      if (sendRes.ok) {
+        const result = (await sendRes.json()) as any;
+        return json({
+          success: true,
+          status: result.status,
+          partNumber: partNumber ? parseInt(partNumber, 10) : 1,
+        });
+      }
+
+      lastStatus = sendRes.status;
+      lastBody = await sendRes.text();
+
+      // Only retry transient errors; client errors (4xx except 429) fail fast.
+      if (!TRANSIENT.has(sendRes.status) || attempt === MAX_RETRIES) {
+        break;
+      }
+
+      // Honor Retry-After when present, else exponential backoff (0.5s, 1s, 2s).
+      const retryAfter = parseInt(sendRes.headers.get("Retry-After") || "", 10);
+      const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1000
+        : 500 * Math.pow(2, attempt - 1);
+      await new Promise((r) => setTimeout(r, waitMs));
     }
-    notionForm.append("file", chunkBlob, uploadName || "file");
 
-    const sendRes = await fetch(sendUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${notionSecret}`,
-        "Notion-Version": NOTION_VERSION,
-      },
-      body: notionForm,
-    });
-
-    if (!sendRes.ok) {
-      const errText = await sendRes.text();
-      throw new Error(`Notion rechazó el chunk: ${sendRes.status} - ${errText}`);
-    }
-
-    const result = (await sendRes.json()) as any;
-
-    return json({
-      success: true,
-      status: result.status,
-      partNumber: partNumber ? parseInt(partNumber, 10) : 1,
-    });
+    return json(
+      { error: `Notion rechazó el chunk: ${lastStatus} - ${lastBody}` },
+      // Surface a 503 so the browser knows this is retryable.
+      TRANSIENT.has(lastStatus) ? 503 : 502
+    );
   } catch (err: any) {
     return json(
       { error: `Error al enviar chunk: ${err.message || "Error desconocido"}` },
-      500
+      503
     );
   }
 };

@@ -504,25 +504,27 @@ export default function App() {
 
     const { id: uploadId, uploadName, contentType, mode } = initData;
 
-    // Step 2: Send each chunk.
+    // Step 2: Send the chunks.
     // Every chunk is routed through our own /api/upload-part endpoint, which attaches the
     // Notion auth headers server-side. Each chunk is CHUNK_SIZE (10 MiB), well under
     // Cloudflare's 100 MB request-body limit, so large files (1+ GB) upload reliably.
-    // Each part is retried on transient network/5xx failures so a single dropped request
-    // doesn't cancel the whole upload.
-    const MAX_PART_RETRIES = 4;
+    //
+    // Notion allows parts to be sent concurrently and out of order, so we upload several
+    // at a time (PART_CONCURRENCY) to make large uploads much faster, while keeping the
+    // count low enough to stay within the free-plan limits and avoid 503s.
+    // Each part is retried with exponential backoff on transient errors (network, 429, 5xx)
+    // so a single dropped request doesn't cancel the whole upload.
+    const MAX_PART_RETRIES = 6;
+    const PART_CONCURRENCY = 4;
 
-    for (let partNumber = 1; partNumber <= numberOfParts; partNumber++) {
+    let completedParts = 0;
+
+    const uploadPart = async (partNumber: number): Promise<void> => {
       const start = (partNumber - 1) * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, uploadFile.size);
       const chunk = uploadFile.slice(start, end);
 
-      const pct = Math.round(((partNumber - 1) / numberOfParts) * 100);
-      setSubmitStep(`Subiendo ${label} — parte ${partNumber}/${numberOfParts} (${pct}%)`);
-      setUploadProgress({ fileName: originalName, percent: pct });
-
       let lastError: Error | null = null;
-      let uploaded = false;
 
       for (let attempt = 1; attempt <= MAX_PART_RETRIES; attempt++) {
         // Rebuild FormData per attempt — a consumed body can't be reused.
@@ -547,26 +549,49 @@ export default function App() {
             throw new Error(`Respuesta inesperada al subir parte ${partNumber} de "${originalName}".`);
           }
           if (!partRes.ok || (!partData.success && !partData.id)) {
-            throw new Error(partData.message || partData.error || `Error en parte ${partNumber} de "${originalName}"`);
+            throw new Error(partData.error || partData.message || `Error en parte ${partNumber} de "${originalName}"`);
           }
-          uploaded = true;
-          break;
+
+          // Success — update progress based on completed parts.
+          completedParts++;
+          const pct = Math.min(98, Math.round((completedParts / numberOfParts) * 100));
+          setSubmitStep(`Subiendo ${label} — ${completedParts}/${numberOfParts} partes (${pct}%)`);
+          setUploadProgress({ fileName: originalName, percent: pct });
+          return;
         } catch (err: any) {
           lastError = err instanceof Error ? err : new Error(String(err));
           if (attempt < MAX_PART_RETRIES) {
-            setSubmitStep(`Reintentando parte ${partNumber}/${numberOfParts} de ${label} (intento ${attempt + 1})...`);
-            // Exponential backoff: 1s, 2s, 4s
-            await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
+            // Exponential backoff with jitter: ~1s, 2s, 4s, 8s, 16s (capped), + random.
+            const backoff = Math.min(16000, 1000 * Math.pow(2, attempt - 1));
+            await new Promise((r) => setTimeout(r, backoff + Math.random() * 500));
           }
         }
       }
 
-      if (!uploaded) {
-        throw new Error(
-          `Error en parte ${partNumber} de "${originalName}" tras ${MAX_PART_RETRIES} intentos: ${lastError?.message || "Error de red"}`
-        );
+      throw new Error(
+        `Error en parte ${partNumber} de "${originalName}" tras ${MAX_PART_RETRIES} intentos: ${lastError?.message || "Error de red"}`
+      );
+    };
+
+    setSubmitStep(`Subiendo ${label} — 0/${numberOfParts} partes (0%)`);
+    setUploadProgress({ fileName: originalName, percent: 0 });
+
+    // Run a fixed-size worker pool that pulls part numbers off a shared counter.
+    let nextPart = 1;
+    const runWorker = async (): Promise<void> => {
+      while (true) {
+        const partNumber = nextPart++;
+        if (partNumber > numberOfParts) return;
+        await uploadPart(partNumber);
       }
-    }
+    };
+
+    const workers = Array.from(
+      { length: Math.min(PART_CONCURRENCY, numberOfParts) },
+      () => runWorker()
+    );
+    // If any worker throws (a part exhausted its retries), the whole upload fails.
+    await Promise.all(workers);
 
     // Step 3: Complete the multi-part upload
     if (mode === "multi_part") {
