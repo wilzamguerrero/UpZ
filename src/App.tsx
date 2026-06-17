@@ -666,8 +666,7 @@ export default function App() {
     }
 
     // Step 2: POST metadata + upload IDs to create the Notion toggle block
-    setSubmitStep("Registrando en Notion...");
-    setUploadProgress(null);
+    setUploadProgress({ fileName: fileRecords[0]?.name || "", percent: 100 });
     try {
       const submitMeta = projectMeta[selectedProjectId];
       const res = await fetch("/api/submit", {
@@ -973,14 +972,21 @@ export default function App() {
                       animate={{ scale: 1, opacity: 1 }}
                       className="text-center py-8 space-y-6"
                     >
-                      <div className="w-16 h-16 bg-emerald-950/40 text-emerald-400 rounded-full flex items-center justify-center mx-auto border border-emerald-900/50">
+                      <div
+                        className="w-16 h-16 rounded-full flex items-center justify-center mx-auto border"
+                        style={{
+                          backgroundColor: hasBgColor ? currentBgColor : 'rgba(0,0,0,0.4)',
+                          borderColor: hasBgColor ? (bgColorIsLight ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.15)') : 'rgba(255,255,255,0.1)',
+                          color: hasBgColor ? (bgColorIsLight ? '#111111' : '#f0f0f0') : '#34d399',
+                        }}
+                      >
                         <CheckCircle2 className="w-10 h-10" />
                       </div>
 
                       <div>
                         <h2 className="text-2xl font-bold text-white">¡Archivos Enviados!</h2>
                         <p className="text-xs text-white/40 mt-2">
-                          Se ha creado tu Toggle List en Notion correctamente.
+                          Dev by WilZamGuerrero
                         </p>
                       </div>
 
@@ -1378,7 +1384,7 @@ export default function App() {
                           <button
                             type="submit"
                             disabled={isSubmitting || selectedFiles.length === 0 || !selectedProjectId}
-                            className="w-full h-[52px] font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden"
+                            className="w-full h-[56px] font-mono tracking-widest text-sm uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden"
                             style={{
                               '--btn-color': hasBgColor ? currentBgColor : "var(--accent, #f5f011)"
                             } as React.CSSProperties}
@@ -1388,7 +1394,7 @@ export default function App() {
 
                             {/* Diagonal stripes */}
                             <div
-                              className="absolute inset-[1px] bg-[#000000] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px] stripes-overlay"
+                              className={`absolute inset-[1px] bg-[#000000] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px] stripes-overlay ${isSubmitting ? 'stripes-animated' : ''}`}
                               style={{
                                 backgroundImage: `repeating-linear-gradient(119deg, currentColor 0px, currentColor 1px, transparent 1px, transparent 10px)`
                               }}
@@ -1400,22 +1406,15 @@ export default function App() {
                             <span className="btn-motion-corner btn-motion-corner-bl" />
                             <span className="btn-motion-corner btn-motion-corner-br" />
 
-                            <div className="relative z-10 flex items-center justify-center gap-2 font-extrabold transition-colors duration-300">
+                            <div className="relative z-10 flex items-center justify-center transition-colors duration-300">
                               {isSubmitting && uploadProgress ? (
-                                <>
-                                  <Loader2 className="w-4 h-4 animate-spin text-white" />
-                                  <span className="truncate max-w-[70%] text-white font-semibold font-sans normal-case">{submitStep}</span>
-                                  <span className="font-mono text-[11px] bg-black/40 text-white px-2 py-0.5 rounded">{uploadProgress.percent}%</span>
-                                </>
+                                <span className="text-white font-bold font-mono text-2xl tabular-nums">{uploadProgress.percent}%</span>
                               ) : isSubmitting ? (
-                                <div className="flex items-center justify-center gap-2 text-white font-sans normal-case">
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                  <span>{submitStep}</span>
-                                </div>
+                                <span className="text-white font-semibold font-sans normal-case text-base">{submitStep}</span>
                               ) : (
-                                <div className="flex items-center justify-center gap-2 font-mono hover-text-adaptive">
-                                  <Send className="w-3.5 h-3.5 btn-text-content" />
-                                  <span className="btn-text-content">Transferir Archivos</span>
+                                <div className="flex items-center justify-center gap-2.5 font-mono hover-text-adaptive">
+                                  <Send className="w-4 h-4 btn-text-content" />
+                                  <span className="btn-text-content text-sm">Transferir Archivos</span>
                                 </div>
                               )}
                             </div>

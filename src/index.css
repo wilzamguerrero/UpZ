@@ -576,6 +576,21 @@ body {
   transition: color 0.3s ease;
 }
 
+/* ── Animated moving stripes for upload progress ────────────────────────── */
+@keyframes stripesMove {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 8.75px 0;
+  }
+}
+
+.stripes-animated {
+  animation: stripesMove 0.35s linear infinite;
+  will-change: background-position;
+}
+
 /* ── Floating particles / squares animation ─────────────────────────────── */
 .particles-container {
   position: fixed;
