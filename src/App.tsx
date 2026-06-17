@@ -502,14 +502,16 @@ export default function App() {
       throw new Error(initData.error || `Error al inicializar upload de "${originalName}"`);
     }
 
-    const { id: uploadId, uploadName, contentType, mode, uploadUrl } = initData;
+    const { id: uploadId, uploadName, contentType, mode } = initData;
 
-    // Detect local dev: Notion's send endpoint doesn't send CORS headers, so the browser
-    // blocks direct uploads from localhost. In production (Cloudflare) we bypass the 100 MB
-    // body limit by uploading chunks straight to Notion.
-    const isLocalDev = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    // Step 2: Send each chunk.
+    // Every chunk is routed through our own /api/upload-part endpoint, which attaches the
+    // Notion auth headers server-side. Each chunk is CHUNK_SIZE (10 MiB), well under
+    // Cloudflare's 100 MB request-body limit, so large files (1+ GB) upload reliably.
+    // Each part is retried on transient network/5xx failures so a single dropped request
+    // doesn't cancel the whole upload.
+    const MAX_PART_RETRIES = 4;
 
-    // Step 2: Send each chunk
     for (let partNumber = 1; partNumber <= numberOfParts; partNumber++) {
       const start = (partNumber - 1) * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, uploadFile.size);
@@ -519,28 +521,50 @@ export default function App() {
       setSubmitStep(`Subiendo ${label} — parte ${partNumber}/${numberOfParts} (${pct}%)`);
       setUploadProgress({ fileName: originalName, percent: pct });
 
-      const chunkBlob = new Blob([chunk], { type: contentType || "application/octet-stream" });
-      const chunkFd = new FormData();
-      chunkFd.append("file", chunkBlob, uploadName);
-      chunkFd.append("upload_id", uploadId);
-      chunkFd.append("content_type", contentType);
-      chunkFd.append("upload_name", uploadName);
-      if (mode === "multi_part") {
-        chunkFd.append("part_number", String(partNumber));
+      let lastError: Error | null = null;
+      let uploaded = false;
+
+      for (let attempt = 1; attempt <= MAX_PART_RETRIES; attempt++) {
+        // Rebuild FormData per attempt — a consumed body can't be reused.
+        const chunkBlob = new Blob([chunk], { type: contentType || "application/octet-stream" });
+        const chunkFd = new FormData();
+        chunkFd.append("file", chunkBlob, uploadName);
+        chunkFd.append("upload_id", uploadId);
+        chunkFd.append("content_type", contentType);
+        chunkFd.append("upload_name", uploadName);
+        if (mode === "multi_part") {
+          chunkFd.append("part_number", String(partNumber));
+        }
+
+        try {
+          const partRes = await fetch("/api/upload-part", {
+            method: "POST",
+            body: chunkFd,
+          });
+          const partText = await partRes.text();
+          let partData: any;
+          try { partData = JSON.parse(partText); } catch {
+            throw new Error(`Respuesta inesperada al subir parte ${partNumber} de "${originalName}".`);
+          }
+          if (!partRes.ok || (!partData.success && !partData.id)) {
+            throw new Error(partData.message || partData.error || `Error en parte ${partNumber} de "${originalName}"`);
+          }
+          uploaded = true;
+          break;
+        } catch (err: any) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          if (attempt < MAX_PART_RETRIES) {
+            setSubmitStep(`Reintentando parte ${partNumber}/${numberOfParts} de ${label} (intento ${attempt + 1})...`);
+            // Exponential backoff: 1s, 2s, 4s
+            await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
+          }
+        }
       }
 
-      // Local dev: proxy through Express (avoids CORS). Production: direct to Notion (avoids 100 MB limit).
-      const partRes = await fetch(isLocalDev ? "/api/upload-part" : uploadUrl, {
-        method: "POST",
-        body: chunkFd,
-      });
-      const partText = await partRes.text();
-      let partData: any;
-      try { partData = JSON.parse(partText); } catch {
-        throw new Error(`Respuesta inesperada al subir parte ${partNumber} de "${originalName}".`);
-      }
-      if (!partRes.ok || (!partData.success && !partData.id)) {
-        throw new Error(partData.message || partData.error || `Error en parte ${partNumber} de "${originalName}"`);
+      if (!uploaded) {
+        throw new Error(
+          `Error en parte ${partNumber} de "${originalName}" tras ${MAX_PART_RETRIES} intentos: ${lastError?.message || "Error de red"}`
+        );
       }
     }
 
