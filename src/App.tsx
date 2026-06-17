@@ -515,7 +515,7 @@ export default function App() {
     // Each part is retried with exponential backoff on transient errors (network, 429, 5xx)
     // so a single dropped request doesn't cancel the whole upload.
     const MAX_PART_RETRIES = 6;
-    const PART_CONCURRENCY = 4;
+    const PART_CONCURRENCY = 3;
 
     let completedParts = 0;
 
@@ -527,19 +527,18 @@ export default function App() {
       let lastError: Error | null = null;
 
       for (let attempt = 1; attempt <= MAX_PART_RETRIES; attempt++) {
-        // Rebuild FormData per attempt — a consumed body can't be reused.
+        // Build a FormData that Notion understands directly (only `file` + `part_number`).
+        // The server pipes this body straight to Notion without re-parsing it, which keeps
+        // the Cloudflare Function well under its 10ms CPU limit. upload_id goes in the URL.
         const chunkBlob = new Blob([chunk], { type: contentType || "application/octet-stream" });
         const chunkFd = new FormData();
-        chunkFd.append("file", chunkBlob, uploadName);
-        chunkFd.append("upload_id", uploadId);
-        chunkFd.append("content_type", contentType);
-        chunkFd.append("upload_name", uploadName);
         if (mode === "multi_part") {
           chunkFd.append("part_number", String(partNumber));
         }
+        chunkFd.append("file", chunkBlob, uploadName);
 
         try {
-          const partRes = await fetch("/api/upload-part", {
+          const partRes = await fetch(`/api/upload-part?upload_id=${encodeURIComponent(uploadId)}`, {
             method: "POST",
             body: chunkFd,
           });

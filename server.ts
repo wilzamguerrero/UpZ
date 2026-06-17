@@ -1370,7 +1370,10 @@ app.post("/api/upload-part", upload.single("file"), async (req, res) => {
     return res.status(400).json({ error: "No se proporcionó el chunk de archivo." });
   }
 
-  const { upload_id, content_type, upload_name, part_number } = req.body || {};
+  // upload_id comes from the query string (matches the production streaming contract);
+  // part_number is still a normal form field that multer parses for us.
+  const upload_id = (req.query.upload_id as string) || (req.body && req.body.upload_id);
+  const { part_number } = req.body || {};
   if (!upload_id) {
     return res.status(400).json({ error: "Se requiere upload_id." });
   }
@@ -1381,8 +1384,8 @@ app.post("/api/upload-part", upload.single("file"), async (req, res) => {
     if (part_number) notionForm.append("part_number", String(part_number));
     notionForm.append(
       "file",
-      new Blob([new Uint8Array(fs.readFileSync(req.file.path))], { type: content_type || "application/octet-stream" }),
-      upload_name || "file"
+      new Blob([new Uint8Array(fs.readFileSync(req.file.path))], { type: req.file.mimetype || "application/octet-stream" }),
+      req.file.originalname || "file"
     );
 
     const sendRes = await fetch(sendUrl, {
@@ -1409,6 +1412,7 @@ app.post("/api/upload-part", upload.single("file"), async (req, res) => {
       partNumber: part_number ? parseInt(part_number, 10) : 1,
     });
   } catch (err: any) {
+    try { if (req.file) fs.unlinkSync(req.file.path); } catch {}
     res.status(500).json({ error: `Error al enviar chunk: ${err.message || "Error desconocido"}` });
   }
 });
