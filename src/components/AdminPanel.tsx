@@ -269,6 +269,7 @@ export default function AdminPanel({
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [expandedSenders, setExpandedSenders] = useState<Record<string, boolean>>({});
 
   // Sync state on load
   useEffect(() => {
@@ -1574,6 +1575,126 @@ export default function AdminPanel({
             />
           </div>
         )}
+
+        {/* Senders Toggle List */}
+        <div className="bg-[#111111] rounded-2xl p-6 border border-white/10 shadow-none">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-2.5 bg-white/5 text-white rounded-xl">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold text-white">Remitentes</h2>
+              <p className="text-xs text-white/40">Personas que han enviado archivos</p>
+            </div>
+          </div>
+
+          {loadingSubmissions ? (
+            <div className="text-center py-10">
+              <p className="text-sm text-white/40">Cargando remitentes...</p>
+            </div>
+          ) : (
+            (() => {
+              // Group submissions by sender email
+              const grouped: Record<string, { name: string; email: string; submissions: Submission[] }> = {};
+              for (const sub of submissions) {
+                const email = sub.senderEmail.toLowerCase();
+                if (!grouped[email]) {
+                  grouped[email] = { name: sub.senderName, email: sub.senderEmail, submissions: [] };
+                }
+                grouped[email].submissions.push(sub);
+              }
+              const people = Object.values(grouped);
+
+              if (people.length === 0) {
+                return (
+                  <div className="text-center py-10 bg-[#0d0d0d]/35 rounded-2xl border border-dashed border-white/5">
+                    <p className="text-sm text-white/40">No hay remitentes registrados.</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+                  {people.map((person) => {
+                    const totalFiles = person.submissions.reduce((acc, s) => acc + s.files.length, 0);
+                    const isOpen = expandedSenders[person.email] || false;
+                    return (
+                      <div key={person.email} className="border border-white/5 rounded-xl overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedSenders(prev => ({ ...prev, [person.email]: !prev[person.email] }))}
+                          className="w-full flex items-center justify-between p-3 bg-[#0d0d0d] hover:bg-[#141414] transition-all cursor-pointer text-left"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`}>
+                              <ArrowRight className="w-3.5 h-3.5 text-white/30" />
+                            </div>
+                            <div className="min-w-0">
+                              <span className="text-sm font-semibold text-white truncate block">{person.name}</span>
+                              <span className="text-xs text-white/40 flex items-center gap-1 mt-0.5">
+                                <Mail className="w-3 h-3" /> {person.email}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 ml-3">
+                            <span className="text-[10px] text-white/50 font-mono bg-white/5 px-2 py-1 rounded-md border border-white/5 whitespace-nowrap">
+                              {person.submissions.length} env{person.submissions.length === 1 ? 'ío' : 'íos'}
+                            </span>
+                            <span className="text-[10px] text-white/50 font-mono bg-white/5 px-2 py-1 rounded-md border border-white/5 whitespace-nowrap">
+                              {totalFiles} arch{totalFiles === 1 ? 'ivo' : 'ivos'}
+                            </span>
+                          </div>
+                        </button>
+
+                        {isOpen && (
+                          <div className="border-t border-white/5 bg-[#090909]">
+                            {person.submissions.map((sub) => (
+                              <div key={sub.id} className="p-3 border-b border-white/5 last:border-b-0">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-[10px] text-white/30 font-mono">
+                                    <Calendar className="w-3 h-3 inline mr-1" />
+                                    {new Date(sub.timestamp).toLocaleString()}
+                                  </span>
+                                  <span className="text-[10px] text-white/40 font-semibold bg-white/5 px-2 py-0.5 rounded-full border border-white/5">
+                                    {sub.projectName}
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                  {sub.files.map((file, fIdx) => (
+                                    <div
+                                      key={fIdx}
+                                      className="flex items-center justify-between p-2 rounded-lg bg-[#111111] border border-white/5 text-xs text-white/80 min-w-0"
+                                    >
+                                      <span className="truncate flex-1 pr-2" title={file.name}>
+                                        📎 {file.name}
+                                      </span>
+                                      <span className="text-[10px] text-white/40 font-mono shrink-0 whitespace-nowrap pr-2">
+                                        {(file.size / (1024 * 1024)).toFixed(2)} MB
+                                      </span>
+                                      <a
+                                        href={file.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="bg-white/5 hover:bg-white/15 p-1 rounded-md border border-white/10 shrink-0 text-white/60 hover:text-white transition-colors"
+                                        title="Descargar Archivo"
+                                      >
+                                        <Download className="w-3.5 h-3.5" />
+                                      </a>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()
+          )}
+        </div>
 
         {/* Deliveries Submission Log */}
         <div className="bg-[#111111] rounded-2xl p-6 border border-white/10 shadow-none">
