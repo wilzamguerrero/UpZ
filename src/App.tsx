@@ -175,6 +175,7 @@ export default function App() {
     backgroundImage: string;
     bgBlur: number;
     textColor?: "auto" | "white" | "black";
+    icon?: string;
   } | null>(null);
 
   // Persist the active tab and admin auth for the session, so a reload keeps you
@@ -592,7 +593,10 @@ export default function App() {
   const displayCustomFields = activeMeta?.customFields || [];
   const infoFields = displayCustomFields.filter((f) => !f.askSubmitter);
   const askFields = displayCustomFields.filter((f) => f.askSubmitter);
-  const activeIconKey = isRootExperience ? appearance.homeIcon : (activeMeta?.icon || "UploadCloud");
+  const adminPreviewActive = activeTab === "admin" && !!adminPreview && adminPreview.projectId === activeProjectId;
+  const activeIconKey = adminPreviewActive
+    ? (adminPreview!.icon || "UploadCloud")
+    : (isRootExperience ? appearance.homeIcon : (activeMeta?.icon || "UploadCloud"));
 
   // Read current visual properties supporting real-time preview editing in the admin panel
   const currentBgColor = activeTab === "admin" && adminPreview && adminPreview.projectId === activeProjectId
@@ -673,8 +677,9 @@ export default function App() {
           />
         )}
 
-        {/* Floating particles layer — renders between background and card content */}
-        {activeTab === "upload" && (() => {
+        {/* Floating particles layer — renders on the upload view and mirrored in the
+            admin detail preview (when a project color is active) for consistency. */}
+        {(activeTab === "upload" || (adminPreviewActive && hasBgColor)) && (() => {
           const ParticleIcon = ICON_MAP[activeIconKey] ?? UploadCloud;
           const iconColor = bgColorIsLight ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.18)';
           return (

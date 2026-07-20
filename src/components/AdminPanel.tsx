@@ -383,6 +383,7 @@ interface AdminPanelProps {
     backgroundImage: string;
     bgBlur: number;
     textColor?: "auto" | "white" | "black";
+    icon?: string;
   }) => void;
 }
 
@@ -493,14 +494,13 @@ export default function AdminPanel({
   // the background — mirroring the published landing so you can tell which project
   // you're editing. White text stays readable on any project color.
   const useAdaptivePanel = adminView === "detail" && !!copyBgColor;
+  // When a project color is active, panels go flat & transparent so the config looks
+  // exactly like the clean published landing (the color and particles show through).
   const panelClass = useAdaptivePanel
-    ? "rounded-2xl p-6 shadow-none border backdrop-blur-xl transition-colors"
+    ? "adaptive-card rounded-2xl p-6 transition-colors"
     : "bg-[#111111] rounded-2xl p-6 border border-white/10 shadow-none transition-colors";
   const panelStyle: React.CSSProperties = useAdaptivePanel
-    ? {
-        backgroundColor: "rgba(12, 12, 12, 0.5)",
-        borderColor: isBgColorLight ? "rgba(0, 0, 0, 0.18)" : "rgba(255, 255, 255, 0.14)",
-      }
+    ? { backgroundColor: "transparent", border: "none", boxShadow: "none" }
     : {};
 
   const [isCreatingDb, setIsCreatingDb] = useState(false);
@@ -519,6 +519,7 @@ export default function AdminPanel({
   };
   const [isSavingMeta, setIsSavingMeta] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedShareQr, setCopiedShareQr] = useState(false);
   const [metaMessage, setMetaMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Project state
@@ -674,10 +675,11 @@ export default function AdminPanel({
         backgroundImage: "",
         bgBlur: 0,
         textColor: copyTextColor,
+        icon: copyIcon,
       });
     }, 120);
     return () => clearTimeout(timer);
-  }, [selectedMetaProjectId, copyBgColor, copyTextColor, onAdminPreviewChange, adminView]);
+  }, [selectedMetaProjectId, copyBgColor, copyTextColor, copyIcon, onAdminPreviewChange, adminView]);
 
   /** Snapshot the current editor state into a ProjectMeta payload. */
   const buildProjectMeta = (): ProjectMeta => ({
@@ -1087,7 +1089,14 @@ export default function AdminPanel({
           <button
             type="button"
             onClick={() => setAdminView("browse")}
-            className="p-2.5 rounded-xl border border-white/10 bg-white/5 text-white/70 hover:text-white hover:border-white/25 transition-all cursor-pointer shrink-0"
+            className="p-2.5 rounded-xl border transition-all cursor-pointer shrink-0"
+            style={
+              copyBgColor
+                ? (isBgColorLight
+                    ? { backgroundColor: "rgba(0,0,0,0.12)", borderColor: "rgba(0,0,0,0.35)", color: "#111111" }
+                    : { backgroundColor: "rgba(255,255,255,0.18)", borderColor: "rgba(255,255,255,0.45)", color: "#ffffff" })
+                : { backgroundColor: "rgba(255,255,255,0.14)", borderColor: "rgba(255,255,255,0.35)", color: "#ffffff" }
+            }
             title="Volver a todos los proyectos"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -1188,16 +1197,11 @@ export default function AdminPanel({
       {adminView === "detail" && (
       <div className="col-span-1 space-y-8">
 
-        {/* Compact appearance bar (color + icon), mirroring the homepage cover bar. */}
+        {/* Compact appearance bar — icon-only controls on a single line. */}
         {selectedMetaProjectId && projects.find((p) => p.id === selectedMetaProjectId) && (
           <div className={`${panelClass} relative ${projIconOpen ? "z-50" : "z-10"}`} style={panelStyle}>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="mr-auto min-w-0">
-                <h2 className="text-sm font-semibold text-white">Apariencia del proyecto</h2>
-                <p className="text-[11px] text-white/40">Color e icono de la página del proyecto</p>
-              </div>
-
-              {/* Color picker button */}
+            <div className="flex items-center gap-2">
+              {/* Color picker */}
               <label
                 className="relative w-10 h-10 rounded-lg border border-white/15 cursor-pointer shrink-0 flex items-center justify-center overflow-hidden"
                 style={{ background: copyBgColor || "#050505" }}
@@ -1216,49 +1220,26 @@ export default function AdminPanel({
                 <button
                   type="button"
                   onClick={() => setCopyBgColor("")}
-                  className="h-10 px-2.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-[11px] text-red-300 transition-all shrink-0"
+                  className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-red-300 transition-all shrink-0"
                   title="Quitar el color de fondo"
                 >
-                  Quitar color
+                  <X className="w-4 h-4" />
                 </button>
               )}
 
-              {/* Forced text contrast: auto / white / black */}
-              <div className="flex items-center rounded-lg border border-white/15 bg-white/5 overflow-hidden shrink-0 h-10" title="Forzar el color del texto">
-                {([
-                  { key: "auto", label: "Auto" },
-                  { key: "white", label: "Texto claro" },
-                  { key: "black", label: "Texto oscuro" },
-                ] as const).map((option) => (
-                  <button
-                    key={option.key}
-                    type="button"
-                    onClick={() => setCopyTextColor(option.key)}
-                    className={`h-full px-2.5 text-[11px] font-semibold transition-all ${
-                      copyTextColor === option.key
-                        ? "bg-white text-black"
-                        : "text-white/60 hover:text-white hover:bg-white/10"
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Icon dropdown toggle */}
+              {/* Icon dropdown (icon-only) */}
               <div className="relative shrink-0">
                 <button
                   type="button"
                   onClick={() => setProjIconOpen((v) => !v)}
-                  className="h-10 px-3 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white flex items-center gap-2 transition-all"
+                  className="h-10 px-2.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white flex items-center gap-1.5 transition-all"
                   title="Elegir icono del proyecto"
                 >
                   {(() => { const I = ICON_BY_KEY[copyIcon] || UploadCloud; return <I className="w-4 h-4" />; })()}
-                  <span className="text-xs">Icono</span>
                   <ChevronDown className={`w-3.5 h-3.5 transition-transform ${projIconOpen ? "rotate-180" : ""}`} />
                 </button>
                 {projIconOpen && (
-                  <div className="admin-dark-popover absolute right-0 mt-2 z-50 w-72 p-2 rounded-xl border border-white/10 shadow-2xl">
+                  <div className="admin-dark-popover absolute left-0 mt-2 z-50 w-72 p-2 rounded-xl border border-white/10 shadow-2xl">
                     <input
                       type="text"
                       placeholder="Buscar icono..."
@@ -1286,127 +1267,75 @@ export default function AdminPanel({
                 )}
               </div>
 
-              {/* Save button */}
-              <button
-                type="button"
-                onClick={() => void persistProjectMeta("Apariencia guardada.")}
-                disabled={isSavingMeta}
-                className="h-10 px-4 rounded-lg bg-white text-black text-xs font-bold uppercase tracking-wide hover:bg-white/90 transition-all disabled:opacity-50 shrink-0"
-              >
-                {isSavingMeta ? "Guardando..." : "Guardar"}
-              </button>
+              {/* Share: copy public link + copy QR image (like the project tree / home) */}
+              {(() => {
+                const proj = projects.find((p) => p.id === selectedMetaProjectId);
+                if (!proj) return null;
+                const shareUrl = `${window.location.origin}/${normalizeString(proj.name)}`;
+                const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(shareUrl)}`;
+
+                const copyShareLink = async () => {
+                  try {
+                    await navigator.clipboard.writeText(shareUrl);
+                    setCopiedLink(true);
+                    setTimeout(() => setCopiedLink(false), 1500);
+                  } catch {
+                    window.prompt("Copia el enlace:", shareUrl);
+                  }
+                };
+                const copyShareQr = async () => {
+                  try {
+                    const resp = await fetch(qrUrl);
+                    const blob = await resp.blob();
+                    const ClipItem = (window as any).ClipboardItem;
+                    if (navigator.clipboard && ClipItem) {
+                      await navigator.clipboard.write([new ClipItem({ [blob.type || "image/png"]: blob })]);
+                      setCopiedShareQr(true);
+                      setTimeout(() => setCopiedShareQr(false), 1500);
+                    } else {
+                      window.open(qrUrl, "_blank");
+                    }
+                  } catch {
+                    window.open(qrUrl, "_blank");
+                  }
+                };
+
+                return (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={copyShareLink}
+                      title="Copiar enlace para compartir"
+                      className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all"
+                    >
+                      {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Link className="w-4 h-4" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={copyShareQr}
+                      title="Copiar código QR"
+                      className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all"
+                    >
+                      {copiedShareQr ? <Check className="w-4 h-4 text-emerald-400" /> : <QrCode className="w-4 h-4" />}
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
 
         {/* Project Custom Copywriting */}
         <div className={panelClass} style={panelStyle}>
-          <div className="flex items-center gap-3 mb-6">
-            <div className="p-2.5 bg-white/5 text-white rounded-xl">
-              <FileSpreadsheet className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-semibold text-white">Personalizar Textos</h2>
-              <p className="text-xs text-white/40">Configura el copywriting de cada proyecto</p>
-            </div>
-          </div>
-
           {projects.length === 0 ? (
             <div className="text-center py-6 bg-[#0d0d0d]/50 rounded-xl border border-white/5">
               <p className="text-xs text-white/40 leading-relaxed">Crea al menos un proyecto/carpeta para poder personalizar sus textos de bienvenida.</p>
             </div>
           ) : (
             <form onSubmit={handleSaveMeta} className="space-y-4">
-              <div className="mb-2 p-2.5 bg-white/5 text-[11px] font-semibold text-white bg-[#0d0d0d] rounded-xl border border-white/5 flex items-center justify-between select-none">
-                <span className="text-white/40 uppercase tracking-widest text-[9px]">Editando textos de:</span>
-                <span className="text-white font-bold truncate max-w-[180px]" title={projects.find(p => p.id === selectedMetaProjectId)?.name || ""}>
-                  {projects.find(p => p.id === selectedMetaProjectId)?.name || "Ninguno"}
-                </span>
-              </div>
-
-              {(() => {
-                const selectedProject = projects.find(p => p.id === selectedMetaProjectId);
-                if (!selectedProject) return null;
-                const landingSlug = normalizeString(selectedProject.name);
-                const directUrl = `${window.location.origin}/${landingSlug}`;
-
-                const handleCopyLink = () => {
-                  navigator.clipboard.writeText(directUrl);
-                  setCopiedLink(true);
-                  setTimeout(() => setCopiedLink(false), 2000);
-                };
-
-                return (
-                  <div className="bg-[#0a0a0a] rounded-xl p-3.5 border border-white/5 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest flex items-center gap-1">
-                        <Link className="w-3 h-3 text-purple-400" /> Acceso Directo y QR
-                      </span>
-                      {copiedLink ? (
-                        <span className="text-[10px] text-emerald-400 font-semibold animate-pulse bg-emerald-950/30 px-2 py-0.5 rounded border border-emerald-900/30">
-                          ┬íCopiado!
-                        </span>
-                      ) : null}
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <div className="bg-[#111] border border-white/10 rounded-lg px-2.5 py-1.5 flex-1 select-all font-mono text-xs text-white truncate">
-                        {directUrl}
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={handleCopyLink}
-                        className="p-2 bg-white/5 border border-white/10 hover:bg-white/10 rounded-lg text-white transition-colors cursor-pointer flex items-center justify-center shrink-0"
-                        title="Copiar URL Completa"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                      </button>
-
-                      <a
-                        href={directUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-2 bg-white/5 border border-white/10 hover:bg-white/10 rounded-lg text-white transition-colors flex items-center justify-center cursor-pointer shrink-0"
-                        title="Abrir en nueva pesta├▒a"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    </div>
-
-                    <div className="flex items-start gap-3 bg-white/5 p-2.5 rounded-lg border border-white/5">
-                      <div className="bg-white p-1 rounded shrink-0 self-center">
-                        <img
-                          src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(directUrl)}`}
-                          alt="C├│digo QR"
-                          className="w-[72px] h-[72px]"
-                          referrerPolicy="no-referrer"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-[11px] font-bold text-white flex items-center gap-1">
-                          <QrCode className="w-3 h-3 text-emerald-400" /> QR del Proyecto
-                        </p>
-                        <p className="text-[9px] text-white/40 mt-0.5 leading-relaxed">
-                          Escanea o haz clic abajo para descargar una versi├│n imprimible del QR.
-                        </p>
-                        <a
-                          href={`https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(directUrl)}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-[9px] text-blue-400 hover:text-blue-300 hover:underline mt-1 font-semibold"
-                        >
-                          <Download className="w-2.5 h-2.5" /> Descargar QR Imprimible
-                        </a>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
               <div>
                 <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
-                  T├¡tulo de Bienvenida
+                  Título de Bienvenida
                 </label>
                 <input
                   type="text"
@@ -1420,7 +1349,7 @@ export default function AdminPanel({
 
               <div>
                 <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
-                  Descripci├│n / P├írrafo
+                  Descripción / Párrafo
                 </label>
                 <textarea
                   required
@@ -1455,7 +1384,7 @@ export default function AdminPanel({
                   </label>
                 </div>
                 <p className="text-[10px]" style={{ color: databaseMuted }}>
-                  Sin base de datos: cada env├¡o crea un toggle por persona (modo actual). Con base de datos: cada env├¡o se guarda como fila en una tabla de Notion y puedes calificar.
+                  Sin base de datos: cada envío crea un toggle por persona (modo actual). Con base de datos: cada envío se guarda como fila en una tabla de Notion y puedes calificar.
                 </p>
 
                 {copyUseDatabase && (
@@ -1485,7 +1414,7 @@ export default function AdminPanel({
 
                     {copyDbColumns.length === 0 ? (
                       <p className="text-[10px] text-center py-1" style={{ color: databaseMuted }}>
-                        Ej: Nota, Estado, Comentarios. Nombre, Correo, Fecha y Archivos se a├▒aden autom├íticamente.
+                        Ej: Nota, Estado, Comentarios. Nombre, Correo, Fecha y Archivos se añaden automáticamente.
                       </p>
                     ) : (
                       copyDbColumns.map((col, idx) => (
@@ -1521,8 +1450,8 @@ export default function AdminPanel({
                             }}
                           >
                             <option value="text">Texto</option>
-                            <option value="number">N├║mero</option>
-                            <option value="select">Selecci├│n</option>
+                            <option value="number">Número</option>
+                            <option value="select">Selección</option>
                             <option value="checkbox">Casilla</option>
                             <option value="date">Fecha</option>
                           </select>
@@ -1549,7 +1478,7 @@ export default function AdminPanel({
                           <Check className="w-3 h-3 shrink-0" /> BD: {copyDatabaseId.slice(0, 8)}...
                         </span>
                       ) : (
-                        <span className="text-[10px] text-amber-400/80">A├║n no se ha creado la base de datos.</span>
+                        <span className="text-[10px] text-amber-400/80">Aún no se ha creado la base de datos.</span>
                       )}
                       <button
                         type="button"
@@ -1619,7 +1548,7 @@ export default function AdminPanel({
                 <span className="btn-motion-corner btn-motion-corner-br" />
 
                 <span className="relative z-10 flex items-center justify-center gap-2 font-extrabold transition-colors duration-300 font-mono hover-text-adaptive btn-text-content">
-                  {isSavingMeta ? "Guardando..." : "Guardar Textos"}
+                  {isSavingMeta ? "Guardando..." : "Guardar"}
                 </span>
               </button>
             </form>
@@ -1642,7 +1571,7 @@ export default function AdminPanel({
               </div>
               <div>
                 <h2 className="text-base font-semibold text-white">Proyectos / Carpetas</h2>
-                <p className="text-xs text-white/40">P├íginas de sub-carpeta en tu Notion</p>
+                <p className="text-xs text-white/40">Páginas de sub-carpeta en tu Notion</p>
               </div>
             </div>
             <span className="bg-white/5 text-white/70 font-mono text-[11px] font-semibold px-2.5 py-1 rounded-full border border-white/10">
@@ -1711,7 +1640,7 @@ export default function AdminPanel({
             </div>
           ) : projects.length === 0 ? (
             <div className="text-center py-8 bg-[#0d0d0d]/20 rounded-2xl border border-dashed border-white/10">
-              <p className="text-sm text-white/40">Ning├║n proyecto creado a├║n en esta p├ígina matriz.</p>
+              <p className="text-sm text-white/40">Ningún proyecto creado aún en esta página matriz.</p>
               <p className="text-xs text-white/20 mt-1">Crea tu primer proyecto utilizando el formulario superior.</p>
             </div>
           ) : (
@@ -1927,12 +1856,12 @@ export default function AdminPanel({
 
           {loadingSubmissions ? (
             <div className="text-center py-10">
-              <p className="text-sm text-white/40">Cargando hist├│rico...</p>
+              <p className="text-sm text-white/40">Cargando histórico...</p>
             </div>
           ) : filteredSubmissions.length === 0 ? (
             <div className="text-center py-10 bg-[#0d0d0d]/35 rounded-2xl border border-dashed border-white/5">
               <p className="text-sm text-white/40">No se encontraron entregas en la plataforma.</p>
-              <p className="text-xs text-white/20 mt-1">Env├¡a tus primeros archivos usando la interfaz principal.</p>
+              <p className="text-xs text-white/20 mt-1">Envía tus primeros archivos usando la interfaz principal.</p>
             </div>
           ) : (
             <div className="space-y-4 max-h-[400px] overflow-y-auto pr-1">
