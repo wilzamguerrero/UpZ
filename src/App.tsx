@@ -19,21 +19,9 @@ import {
 } from "lucide-react";
 import { uploadFiles, type UploadRecord } from "./uploadService";
 
-const ICON_MAP: Record<string, LucideIcon> = {
-  UploadCloud, FileText, BookOpen, Code2, Palette, Microscope,
-  GraduationCap, Briefcase, Star, Zap, Globe, Music, Camera, Cpu, Layers, Award, Package, Rocket,
-  File, Folder, FolderOpen, Archive, Terminal, Server, Wifi, Monitor, Laptop, Smartphone,
-  HardDrive, Keyboard, Image, Film, Video, Headphones, Mic, Radio, Tv,
-  Sun, Moon, Cloud, Leaf, Mountain, Flower2, Snowflake, Flame,
-  Activity, Dumbbell, Trophy, Target, Heart, Bell, Phone, Users,
-  MessageCircle, Share2, ShoppingCart, Truck, Building2, Wallet, CreditCard,
-  Wrench, Hammer, Settings, Calculator, Ruler, PencilLine, Scissors,
-  Hexagon, Hash, Percent, FlaskConical, Atom, Compass,
-  Gamepad2, Newspaper, Map, Lightbulb, Wand2, Sparkles, Brain,
-  Lock, Shield, Fingerprint, Bug,
-  TrendingUp, BarChart3, Sigma, FunctionSquare,
-  Download, Mail, User,
-};
+import { ICON_BY_KEY } from "./icons";
+// Shared, extensive icon set (same collection the admin picker offers).
+const ICON_MAP: Record<string, LucideIcon> = ICON_BY_KEY;
 import { Project, ProjectMeta } from "./types";
 import Dropzone from "./components/Dropzone";
 import AdminPanel from "./components/AdminPanel";
@@ -1261,7 +1249,7 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
                 transition={{ duration: 0.25 }}
-                className={`w-full mx-auto flex flex-col ${!isAdminAuthenticated ? "max-w-md min-h-[calc(100vh-5rem)] justify-center py-8" : "max-w-[1800px] px-4 lg:px-8 py-4"}`}
+                className={`relative z-[1] w-full mx-auto flex flex-col ${!isAdminAuthenticated ? "max-w-md min-h-[calc(100vh-5rem)] justify-center py-8" : "max-w-[1800px] px-4 lg:px-8 py-4"}`}
               >
                 {!isAdminAuthenticated ? (
                   <div

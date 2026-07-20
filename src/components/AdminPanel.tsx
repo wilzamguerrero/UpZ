@@ -20,6 +20,7 @@ import {
   type LucideIcon
 } from "lucide-react";
 import { Project, Submission, NotionConfig, ProjectMeta, CustomField, DbColumn } from "../types";
+import { ICON_OPTIONS, ICON_BY_KEY, ICON_CATEGORIES } from "../icons";
 import DateTimePicker from "./DateTimePicker";
 import GradingTable from "./GradingTable";
 import { useTheme } from "../ThemeContext";
@@ -28,112 +29,7 @@ const genId = () => `cf_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
 const genColId = () => `col_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 const EMPTY_META_LOAD_SIGNATURE = "__missing__";
 
-const ICON_OPTIONS: { key: string; Icon: LucideIcon; label: string; cat: string }[] = [
-  // Archivos
-  { key: "UploadCloud", Icon: UploadCloud, label: "Subida", cat: "Archivos" },
-  { key: "FileText", Icon: FileText, label: "Documento", cat: "Archivos" },
-  { key: "File", Icon: File, label: "Archivo", cat: "Archivos" },
-  { key: "Folder", Icon: Folder, label: "Carpeta", cat: "Archivos" },
-  { key: "FolderOpen", Icon: FolderOpen, label: "Abierto", cat: "Archivos" },
-  { key: "Archive", Icon: Archive, label: "Archivo ZIP", cat: "Archivos" },
-  { key: "Download", Icon: Download, label: "Descargar", cat: "Archivos" },
-  { key: "Image", Icon: Image, label: "Imagen", cat: "Archivos" },
-  // Tecnología
-  { key: "Code2", Icon: Code2, label: "Código", cat: "Tecnología" },
-  { key: "Terminal", Icon: Terminal, label: "Terminal", cat: "Tecnología" },
-  { key: "Cpu", Icon: Cpu, label: "CPU", cat: "Tecnología" },
-  { key: "Server", Icon: Server, label: "Servidor", cat: "Tecnología" },
-  { key: "Database", Icon: Database, label: "Base datos", cat: "Tecnología" },
-  { key: "Wifi", Icon: Wifi, label: "WiFi", cat: "Tecnología" },
-  { key: "Monitor", Icon: Monitor, label: "Monitor", cat: "Tecnología" },
-  { key: "Laptop", Icon: Laptop, label: "Laptop", cat: "Tecnología" },
-  { key: "Smartphone", Icon: Smartphone, label: "Móvil", cat: "Tecnología" },
-  { key: "HardDrive", Icon: HardDrive, label: "Disco", cat: "Tecnología" },
-  { key: "Keyboard", Icon: Keyboard, label: "Teclado", cat: "Tecnología" },
-  // Educación
-  { key: "GraduationCap", Icon: GraduationCap, label: "Graduación", cat: "Educación" },
-  { key: "BookOpen", Icon: BookOpen, label: "Libro", cat: "Educación" },
-  { key: "Microscope", Icon: Microscope, label: "Microscopio", cat: "Educación" },
-  { key: "FlaskConical", Icon: FlaskConical, label: "Química", cat: "Educación" },
-  { key: "Atom", Icon: Atom, label: "Física", cat: "Educación" },
-  { key: "Calculator", Icon: Calculator, label: "Calculadora", cat: "Educación" },
-  { key: "Ruler", Icon: Ruler, label: "Regla", cat: "Educación" },
-  { key: "PencilLine", Icon: PencilLine, label: "Lápiz", cat: "Educación" },
-  { key: "Brain", Icon: Brain, label: "Mente", cat: "Educación" },
-  { key: "Sigma", Icon: Sigma, label: "Sigma", cat: "Educación" },
-  { key: "FunctionSquare", Icon: FunctionSquare, label: "Función", cat: "Educación" },
-  // Arte & Diseño
-  { key: "Palette", Icon: Palette, label: "Paleta", cat: "Arte" },
-  { key: "Layers", Icon: Layers, label: "Capas", cat: "Arte" },
-  { key: "Scissors", Icon: Scissors, label: "Tijeras", cat: "Arte" },
-  { key: "Wand2", Icon: Wand2, label: "Varita", cat: "Arte" },
-  { key: "Sparkles", Icon: Sparkles, label: "Brillos", cat: "Arte" },
-  { key: "Lightbulb", Icon: Lightbulb, label: "Idea", cat: "Arte" },
-  // Medios
-  { key: "Camera", Icon: Camera, label: "Cámara", cat: "Medios" },
-  { key: "Film", Icon: Film, label: "Película", cat: "Medios" },
-  { key: "Video", Icon: Video, label: "Video", cat: "Medios" },
-  { key: "Music", Icon: Music, label: "Música", cat: "Medios" },
-  { key: "Headphones", Icon: Headphones, label: "Audífonos", cat: "Medios" },
-  { key: "Mic", Icon: Mic, label: "Micrófono", cat: "Medios" },
-  { key: "Radio", Icon: Radio, label: "Radio", cat: "Medios" },
-  { key: "Tv", Icon: Tv, label: "TV", cat: "Medios" },
-  { key: "Newspaper", Icon: Newspaper, label: "Prensa", cat: "Medios" },
-  // Naturaleza
-  { key: "Sun", Icon: Sun, label: "Sol", cat: "Naturaleza" },
-  { key: "Moon", Icon: Moon, label: "Luna", cat: "Naturaleza" },
-  { key: "Cloud", Icon: Cloud, label: "Nube", cat: "Naturaleza" },
-  { key: "Snowflake", Icon: Snowflake, label: "Nieve", cat: "Naturaleza" },
-  { key: "Flame", Icon: Flame, label: "Fuego", cat: "Naturaleza" },
-  { key: "Leaf", Icon: Leaf, label: "Hoja", cat: "Naturaleza" },
-  { key: "Mountain", Icon: Mountain, label: "Montaña", cat: "Naturaleza" },
-  { key: "Flower2", Icon: Flower2, label: "Flor", cat: "Naturaleza" },
-  { key: "Globe", Icon: Globe, label: "Mundo", cat: "Naturaleza" },
-  // Logros
-  { key: "Award", Icon: Award, label: "Premio", cat: "Logros" },
-  { key: "Trophy", Icon: Trophy, label: "Trofeo", cat: "Logros" },
-  { key: "Star", Icon: Star, label: "Estrella", cat: "Logros" },
-  { key: "Zap", Icon: Zap, label: "Rayo", cat: "Logros" },
-  { key: "Rocket", Icon: Rocket, label: "Cohete", cat: "Logros" },
-  { key: "Target", Icon: Target, label: "Meta", cat: "Logros" },
-  { key: "Activity", Icon: Activity, label: "Actividad", cat: "Logros" },
-  { key: "Dumbbell", Icon: Dumbbell, label: "Gym", cat: "Logros" },
-  // Negocios
-  { key: "Briefcase", Icon: Briefcase, label: "Trabajo", cat: "Negocios" },
-  { key: "Building2", Icon: Building2, label: "Empresa", cat: "Negocios" },
-  { key: "Package", Icon: Package, label: "Paquete", cat: "Negocios" },
-  { key: "ShoppingCart", Icon: ShoppingCart, label: "Tienda", cat: "Negocios" },
-  { key: "Truck", Icon: Truck, label: "Envío", cat: "Negocios" },
-  { key: "Wallet", Icon: Wallet, label: "Cartera", cat: "Negocios" },
-  { key: "CreditCard", Icon: CreditCard, label: "Pago", cat: "Negocios" },
-  { key: "TrendingUp", Icon: TrendingUp, label: "Tendencia", cat: "Negocios" },
-  { key: "BarChart3", Icon: BarChart3, label: "Gráfica", cat: "Negocios" },
-  // Comunicación
-  { key: "Mail", Icon: Mail, label: "Correo", cat: "Comunicación" },
-  { key: "Phone", Icon: Phone, label: "Teléfono", cat: "Comunicación" },
-  { key: "MessageCircle", Icon: MessageCircle, label: "Chat", cat: "Comunicación" },
-  { key: "Bell", Icon: Bell, label: "Notif.", cat: "Comunicación" },
-  { key: "Share2", Icon: Share2, label: "Compartir", cat: "Comunicación" },
-  { key: "Users", Icon: Users, label: "Equipo", cat: "Comunicación" },
-  { key: "User", Icon: User, label: "Usuario", cat: "Comunicación" },
-  { key: "Heart", Icon: Heart, label: "Me gusta", cat: "Comunicación" },
-  // Herramientas
-  { key: "Settings", Icon: Settings, label: "Ajustes", cat: "Herramientas" },
-  { key: "Wrench", Icon: Wrench, label: "Llave", cat: "Herramientas" },
-  { key: "Hammer", Icon: Hammer, label: "Martillo", cat: "Herramientas" },
-  { key: "Compass", Icon: Compass, label: "Brújula", cat: "Herramientas" },
-  { key: "Map", Icon: Map, label: "Mapa", cat: "Herramientas" },
-  { key: "Shield", Icon: Shield, label: "Seguridad", cat: "Herramientas" },
-  { key: "Lock", Icon: Lock, label: "Candado", cat: "Herramientas" },
-  { key: "Fingerprint", Icon: Fingerprint, label: "Huella", cat: "Herramientas" },
-  { key: "Bug", Icon: Bug, label: "Debug", cat: "Herramientas" },
-  { key: "Gamepad2", Icon: Gamepad2, label: "Juego", cat: "Herramientas" },
-];
-
-// Lookup: icon key (as stored in project meta) -> Lucide icon component.
-const ICON_BY_KEY: Record<string, LucideIcon> = Object.fromEntries(
-  ICON_OPTIONS.map((o) => [o.key, o.Icon])
-);
+// ICON_OPTIONS, ICON_BY_KEY and ICON_CATEGORIES now live in ../icons (shared with the landing).
 
 const normalizeString = (s: string) => {
   return s
@@ -451,6 +347,7 @@ export default function AdminPanel({
   const [copyTextColor, setCopyTextColor] = useState<"auto" | "white" | "black">("auto");
   const [iconSearch, setIconSearch] = useState("");
   const [projIconOpen, setProjIconOpen] = useState(false);
+  const projIconRef = useRef<HTMLDivElement>(null);
   const [copyUseDatabase, setCopyUseDatabase] = useState(false);
   const [copyDatabaseId, setCopyDatabaseId] = useState("");
   const [copyDbColumns, setCopyDbColumns] = useState<DbColumn[]>([]);
@@ -517,6 +414,18 @@ export default function AdminPanel({
       colorRafRef.current = null;
     });
   };
+
+  // Close the icon picker when clicking anywhere outside of it.
+  useEffect(() => {
+    if (!projIconOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (projIconRef.current && !projIconRef.current.contains(event.target as Node)) {
+        setProjIconOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [projIconOpen]);
   const [isSavingMeta, setIsSavingMeta] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedShareQr, setCopiedShareQr] = useState(false);
@@ -1201,10 +1110,10 @@ export default function AdminPanel({
         {selectedMetaProjectId && projects.find((p) => p.id === selectedMetaProjectId) && (
           <div className={`${panelClass} relative ${projIconOpen ? "z-50" : "z-10"}`} style={panelStyle}>
             <div className="flex items-center gap-2">
-              {/* Color picker */}
+              {/* Color picker — same look as the other icon buttons (the chosen color
+                  already shows across the whole environment). */}
               <label
-                className="relative w-10 h-10 rounded-lg border border-white/15 cursor-pointer shrink-0 flex items-center justify-center overflow-hidden"
-                style={{ background: copyBgColor || "#050505" }}
+                className="relative w-10 h-10 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 cursor-pointer shrink-0 flex items-center justify-center transition-all"
                 title={`Color de fondo: ${copyBgColor || "sin color"}`}
               >
                 <input
@@ -1213,7 +1122,7 @@ export default function AdminPanel({
                   onChange={(e) => setCopyBgColorSmooth(e.target.value)}
                   className="absolute inset-0 opacity-0 cursor-pointer"
                 />
-                <Palette className="w-4 h-4 text-white pointer-events-none mix-blend-difference" />
+                <Palette className="w-4 h-4 text-white pointer-events-none" />
               </label>
 
               {copyBgColor && (
@@ -1227,42 +1136,68 @@ export default function AdminPanel({
                 </button>
               )}
 
-              {/* Icon dropdown (icon-only) */}
-              <div className="relative shrink-0">
+              {/* Icon picker — icon-only button + large categorized popover */}
+              <div className="relative shrink-0" ref={projIconRef}>
                 <button
                   type="button"
                   onClick={() => setProjIconOpen((v) => !v)}
-                  className="h-10 px-2.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white flex items-center gap-1.5 transition-all"
+                  className={`w-10 h-10 flex items-center justify-center rounded-lg border transition-all ${projIconOpen ? "border-white/50 bg-white/15 text-white" : "border-white/15 bg-white/5 hover:bg-white/10 text-white"}`}
                   title="Elegir icono del proyecto"
                 >
                   {(() => { const I = ICON_BY_KEY[copyIcon] || UploadCloud; return <I className="w-4 h-4" />; })()}
-                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${projIconOpen ? "rotate-180" : ""}`} />
                 </button>
                 {projIconOpen && (
-                  <div className="admin-dark-popover absolute left-0 mt-2 z-50 w-72 p-2 rounded-xl border border-white/10 shadow-2xl">
+                  <div className="admin-dark-popover absolute left-0 mt-2 z-50 w-[24rem] max-w-[calc(100vw-3rem)] p-3 rounded-xl border border-white/10 shadow-2xl">
                     <input
                       type="text"
-                      placeholder="Buscar icono..."
+                      autoFocus
+                      placeholder="Buscar icono por nombre o categoría..."
                       value={iconSearch}
                       onChange={(e) => setIconSearch(e.target.value)}
-                      className="w-full mb-2 px-2.5 py-2 bg-[#111111] border border-white/10 rounded-lg text-xs text-white placeholder-white/20 focus:border-white/30 focus:outline-none"
+                      className="w-full mb-3 px-2.5 py-2 bg-[#111111] border border-white/10 rounded-lg text-xs text-white placeholder-white/20 focus:border-white/30 focus:outline-none"
                     />
-                    <div className="grid grid-cols-6 gap-1.5 max-h-52 overflow-y-auto pr-1">
-                      {ICON_OPTIONS.filter(({ key, label, cat }) => {
-                        const q = iconSearch.toLowerCase();
-                        return !q || label.toLowerCase().includes(q) || key.toLowerCase().includes(q) || cat.toLowerCase().includes(q);
-                      }).map(({ key, Icon }) => (
+                    {(() => {
+                      const q = iconSearch.trim().toLowerCase();
+                      const matches = (o: typeof ICON_OPTIONS[number]) =>
+                        !q || o.label.toLowerCase().includes(q) || o.key.toLowerCase().includes(q) || o.cat.toLowerCase().includes(q);
+
+                      const renderButton = (opt: typeof ICON_OPTIONS[number]) => (
                         <button
-                          key={key}
+                          key={opt.key}
                           type="button"
-                          onClick={() => { setCopyIcon(key); setProjIconOpen(false); }}
-                          className={`h-9 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${copyIcon === key ? "border-white bg-white/10 text-white" : "border-white/10 bg-[#111111] text-white/55 hover:text-white hover:border-white/25"}`}
-                          title={key}
+                          onClick={() => { setCopyIcon(opt.key); setProjIconOpen(false); setIconSearch(""); }}
+                          className={`h-10 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${copyIcon === opt.key ? "border-white bg-white/15 text-white" : "border-white/10 bg-[#111111] text-white/60 hover:text-white hover:border-white/30"}`}
+                          title={`${opt.label} · ${opt.cat}`}
                         >
-                          <Icon className="w-4 h-4" />
+                          <opt.Icon className="w-4 h-4" />
                         </button>
-                      ))}
-                    </div>
+                      );
+
+                      const filtered = ICON_OPTIONS.filter(matches);
+
+                      return (
+                        <div className="max-h-[22rem] overflow-y-auto pr-1 space-y-3">
+                          {q ? (
+                            filtered.length > 0 ? (
+                              <div className="grid grid-cols-7 gap-1.5">{filtered.map(renderButton)}</div>
+                            ) : (
+                              <p className="text-[11px] text-white/40 text-center py-6">Sin resultados para "{iconSearch}"</p>
+                            )
+                          ) : (
+                            ICON_CATEGORIES.map((cat) => {
+                              const items = ICON_OPTIONS.filter((o) => o.cat === cat);
+                              if (items.length === 0) return null;
+                              return (
+                                <div key={cat}>
+                                  <div className="text-[10px] font-bold uppercase tracking-wider text-white/40 mb-1.5 px-0.5">{cat}</div>
+                                  <div className="grid grid-cols-7 gap-1.5">{items.map(renderButton)}</div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
