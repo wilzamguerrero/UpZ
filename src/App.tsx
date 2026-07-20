@@ -107,6 +107,9 @@ export default function App() {
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [isProjectLocked, setIsProjectLocked] = useState(false);
   const [lockedProjectName, setLockedProjectName] = useState("");
+  // When a FOLDER link is visited, its child projects become selectable from one link.
+  const [folderScopeId, setFolderScopeId] = useState("");
+  const [folderScopeName, setFolderScopeName] = useState("");
 
   // App Config Info
   const [config, setConfig] = useState<{
@@ -336,18 +339,38 @@ export default function App() {
           });
 
           if (match) {
+            // If the matched project is a FOLDER (has active child projects), don't
+            // lock: expose its children so one link lets visitors pick any of them.
+            const activeChildren = data.projects.filter(
+              (p: Project) => p.parentId === match.id && p.isActive !== false
+            );
+            if (activeChildren.length > 0) {
+              setFolderScopeId(match.id);
+              setFolderScopeName(match.name);
+              setIsProjectLocked(false);
+              setLockedProjectName("");
+              setSelectedProjectId(activeChildren[0].id);
+              return;
+            }
+
+            setFolderScopeId("");
+            setFolderScopeName("");
             setSelectedProjectId(match.id);
             setLockedProjectName(match.name);
             setIsProjectLocked(true);
             return;
           }
 
+          setFolderScopeId("");
+          setFolderScopeName("");
           setSelectedProjectId("");
           setLockedProjectName("");
           setIsProjectLocked(false);
           return;
         }
 
+        setFolderScopeId("");
+        setFolderScopeName("");
         setSelectedProjectId("");
         setLockedProjectName("");
         setIsProjectLocked(false);
@@ -1031,6 +1054,12 @@ export default function App() {
                             </div>
                           </div>
                         ) : (
+                          <>
+                          {folderScopeId && (
+                            <p className="text-[11px] text-white/50 mb-1.5">
+                              Elige el proyecto dentro de <span className="text-white font-semibold">{folderScopeName}</span> al que quieres enviar:
+                            </p>
+                          )}
                           <select
                             id="select-project"
                             value={selectedProjectId}
@@ -1040,7 +1069,7 @@ export default function App() {
                           >
                             {(() => {
                               const available = projects
-                                .filter((p) => p.isActive !== false)
+                                .filter((p) => p.isActive !== false && (!folderScopeId || p.parentId === folderScopeId))
                                 .map((p) => ({
                                   ...p,
                                   order: projectMeta[p.id]?.order ?? 0,
@@ -1081,6 +1110,7 @@ export default function App() {
                               );
                             })()}
                           </select>
+                          </>
                         )}
                       </div>
 
@@ -1202,7 +1232,7 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
                 transition={{ duration: 0.25 }}
-                className={`w-full mx-auto flex flex-col ${!isAdminAuthenticated ? "max-w-md min-h-[calc(100vh-5rem)] justify-center py-8" : "max-w-5xl py-4"}`}
+                className={`w-full mx-auto flex flex-col ${!isAdminAuthenticated ? "max-w-md min-h-[calc(100vh-5rem)] justify-center py-8" : "max-w-[1800px] px-4 lg:px-8 py-4"}`}
               >
                 {!isAdminAuthenticated ? (
                   <div

@@ -565,6 +565,29 @@ function saveSubmission(submission: any) {
   fs.writeFileSync(SUBMISSIONS_FILE, JSON.stringify(list, null, 2), "utf-8");
 }
 
+// Helper: overwrite the whole submissions list
+function saveAllSubmissions(list: any[]) {
+  fs.writeFileSync(SUBMISSIONS_FILE, JSON.stringify(list, null, 2), "utf-8");
+}
+
+// Helper: list ALL child block ids of a Notion block/page (paginated)
+async function listAllChildBlockIds(notion: Client, blockId: string): Promise<Set<string>> {
+  const ids = new Set<string>();
+  let cursor: string | undefined;
+  do {
+    const resp: any = await notion.blocks.children.list({
+      block_id: blockId,
+      start_cursor: cursor,
+      page_size: 100,
+    });
+    for (const block of resp.results || []) {
+      if (block?.id) ids.add(block.id);
+    }
+    cursor = resp.has_more ? resp.next_cursor : undefined;
+  } while (cursor);
+  return ids;
+}
+
 async function listProjectsFromNotion(): Promise<Array<PreviewProject & { type: string; url: string; isActive: boolean }>> {
   const config = loadConfig();
   if (!config.notionSecret || !config.parentPageId) {
@@ -1033,7 +1056,79 @@ app.post("/api/project-meta", async (req, res) => {
   res.json({ success: true, message: "Textos del proyecto configurados localmente debido a límites de conexión con Notion." });
 });
 
-// 4. Get active projects from Notion Parent Page
+// A submission toggle's header always starts with 👤 (see /api/submit).
+const isSubmissionTitle = (name: string): boolean => name.trim().startsWith("👤");
+
+// List ALL children of a block (paginated).
+async function listAllChildBlocks(notion: Client, blockId: string): Promise<any[]> {
+  const out: any[] = [];
+  let cursor: string | undefined;
+  do {
+    const resp: any = await notion.blocks.children.list({
+      block_id: blockId,
+      start_cursor: cursor,
+      page_size: 100,
+    });
+    out.push(...(resp.results || []));
+    cursor = resp.has_more ? resp.next_cursor : undefined;
+  } while (cursor);
+  return out;
+}
+
+// Recursively collect the project tree (toggles/child_pages), skipping submission
+// toggles (👤 ...) and content blocks. Nested nodes carry their container's id.
+async function collectProjectTree(
+  notion: Client,
+  blockId: string,
+  parentKey: string,
+  rootPageId: string,
+  depth: number,
+  acc: any[]
+): Promise<void> {
+  if (depth > 4) return;
+  let children: any[];
+  try {
+    children = await listAllChildBlocks(notion, blockId);
+  } catch {
+    return;
+  }
+  const metaList = loadProjectMeta();
+  for (const block of children) {
+    if (block.type === "toggle") {
+      const name = (block.toggle?.rich_text || []).map((rt: any) => rt.plain_text).join("").trim();
+      if (isSubmissionTitle(name)) continue;
+      const meta = metaList[block.id] || {};
+      acc.push({
+        id: block.id,
+        name: name || "Proyecto sin título",
+        type: "toggle",
+        parentId: parentKey,
+        hasChildren: !!block.has_children,
+        url: `https://notion.so/${rootPageId.replace(/-/g, "")}#${block.id.replace(/-/g, "")}`,
+        isActive: meta.isActive !== undefined ? meta.isActive : true,
+      });
+      if (block.has_children) {
+        await collectProjectTree(notion, block.id, block.id, rootPageId, depth + 1, acc);
+      }
+    } else if (block.type === "child_page") {
+      const meta = metaList[block.id] || {};
+      acc.push({
+        id: block.id,
+        name: block.child_page?.title || "Proyecto sin título",
+        type: "page",
+        parentId: parentKey,
+        hasChildren: !!block.has_children,
+        url: `https://notion.so/${block.id.replace(/-/g, "")}`,
+        isActive: meta.isActive !== undefined ? meta.isActive : true,
+      });
+      if (block.has_children) {
+        await collectProjectTree(notion, block.id, block.id, rootPageId, depth + 1, acc);
+      }
+    }
+  }
+}
+
+// 4. Get project tree from Notion Parent Page (recursive, flat list with parentId)
 app.get("/api/projects", async (req, res) => {
   const config = loadConfig();
   if (!config.notionSecret || !config.parentPageId) {
@@ -1041,8 +1136,9 @@ app.get("/api/projects", async (req, res) => {
   }
 
   try {
-    const projects = await listProjectsFromNotion();
-
+    const notion = new Client({ auth: config.notionSecret });
+    const projects: any[] = [];
+    await collectProjectTree(notion, config.parentPageId, "", config.parentPageId, 0, projects);
     res.json({ success: true, projects });
   } catch (err: any) {
     console.error("Error fetching projects from Notion:", err);
@@ -1052,9 +1148,10 @@ app.get("/api/projects", async (req, res) => {
   }
 });
 
-// 5. Create a new Project in Notion (creates toggle list child block)
+// 5. Create a new Project in Notion. Body: { name, parentId? }
+// parentId → create inside that folder/project; otherwise at the root page.
 app.post("/api/projects", async (req, res) => {
-  const { name } = req.body;
+  const { name, parentId } = req.body;
   if (!name || name.trim() === "") {
     return res.status(400).json({ error: "El nombre del proyecto es obligatorio" });
   }
@@ -1064,12 +1161,14 @@ app.post("/api/projects", async (req, res) => {
     return res.status(400).json({ error: "Notion no está configurado." });
   }
 
+  const targetParent = cleanNotionId(parentId || "") || config.parentPageId;
+
   try {
     const notion = new Client({ auth: config.notionSecret });
 
-    // Create project as an expandable toggle block
+    // Create project as an expandable toggle block inside the target parent
     const result = await notion.blocks.children.append({
-      block_id: config.parentPageId,
+      block_id: targetParent,
       children: [
         {
           object: "block",
@@ -1096,6 +1195,7 @@ app.post("/api/projects", async (req, res) => {
       project: {
         id: newBlock.id,
         name: name.trim(),
+        parentId: targetParent === config.parentPageId ? "" : targetParent,
         url: `https://notion.so/${config.parentPageId.replace(/-/g, "")}#${blockIdClean}`,
       },
     });
@@ -1103,6 +1203,44 @@ app.post("/api/projects", async (req, res) => {
     console.error("Error creating project toggle in Notion:", err);
     res.status(500).json({
       error: `Error al crear proyecto en Notion: ${err.message || "Error desconocido"}.`,
+    });
+  }
+});
+
+// 5.0. Rename a project/folder. Body: { name, type? }
+app.patch("/api/projects/:projectId", async (req, res) => {
+  const { projectId } = req.params;
+  const { name, type } = req.body || {};
+  if (!projectId) {
+    return res.status(400).json({ error: "El ID del proyecto es obligatorio." });
+  }
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: "El nombre es obligatorio." });
+  }
+
+  const config = loadConfig();
+  if (!config.notionSecret) {
+    return res.status(400).json({ error: "Notion no está configurado." });
+  }
+
+  try {
+    const notion = new Client({ auth: config.notionSecret });
+    if (type === "page") {
+      await notion.pages.update({
+        page_id: projectId,
+        properties: { title: { title: [{ type: "text", text: { content: name.trim() } }] } },
+      } as any);
+    } else {
+      await notion.blocks.update({
+        block_id: projectId,
+        toggle: { rich_text: [{ type: "text", text: { content: name.trim() } }] },
+      } as any);
+    }
+    res.json({ success: true, message: "Proyecto renombrado exitosamente." });
+  } catch (err: any) {
+    console.error("Error renaming project in Notion:", err);
+    res.status(500).json({
+      error: `Error al renombrar proyecto en Notion: ${err.message || "Error desconocido"}.`,
     });
   }
 });
@@ -1188,9 +1326,77 @@ app.post("/api/projects/upload-bg", upload.single("bgImage"), async (req, res) =
   res.json({ success: true, url: fileUrl });
 });
 
-// 6. Get Submissions Logs
-app.get("/api/submissions", (req, res) => {
-  res.json({ success: true, submissions: loadSubmissions() });
+// 6. Get Submissions Logs — reconciled against Notion (source of truth).
+app.get("/api/submissions", async (req, res) => {
+  const submissions = loadSubmissions();
+  const config = loadConfig();
+
+  if (!config.notionSecret || submissions.length === 0) {
+    return res.json({ success: true, submissions });
+  }
+
+  try {
+    const notion = new Client({ auth: config.notionSecret });
+
+    // Group verifiable submissions (with a notionBlockId) by project.
+    const byProject: Record<string, boolean> = {};
+    for (const sub of submissions) {
+      if (sub?.notionBlockId && sub?.projectId) byProject[sub.projectId] = true;
+    }
+
+    const existingByProject: Record<string, Set<string> | null> = {};
+    await Promise.all(
+      Object.keys(byProject).map(async (projectId) => {
+        try {
+          existingByProject[projectId] = await listAllChildBlockIds(notion, projectId);
+        } catch {
+          existingByProject[projectId] = null; // couldn't verify → keep
+        }
+      })
+    );
+
+    let pruned = false;
+    const kept = submissions.filter((sub: any) => {
+      if (!sub?.notionBlockId || !sub?.projectId) return true;
+      const existing = existingByProject[sub.projectId];
+      if (!existing) return true;
+      if (existing.has(sub.notionBlockId)) return true;
+      pruned = true;
+      return false;
+    });
+
+    if (pruned) saveAllSubmissions(kept);
+    return res.json({ success: true, submissions: kept });
+  } catch (e) {
+    // On any failure, fall back to the raw list.
+    return res.json({ success: true, submissions });
+  }
+});
+
+// 6.1. Delete a submission — removes it from Notion (toggle + db row) and locally.
+app.delete("/api/submissions/:id", async (req, res) => {
+  const { id } = req.params;
+  if (!id) {
+    return res.status(400).json({ error: "El ID del envío es obligatorio." });
+  }
+
+  const submissions = loadSubmissions();
+  const record = submissions.find((s: any) => s.id === id);
+  const config = loadConfig();
+
+  if (record && config.notionSecret) {
+    const notion = new Client({ auth: config.notionSecret });
+    if (record.notionBlockId) {
+      try { await notion.blocks.delete({ block_id: record.notionBlockId }); } catch { /* already gone */ }
+    }
+    if (record.dbPageId) {
+      try { await notion.blocks.delete({ block_id: record.dbPageId }); } catch { /* non-critical */ }
+    }
+  }
+
+  const kept = submissions.filter((s: any) => s.id !== id);
+  saveAllSubmissions(kept);
+  res.json({ success: true, message: "Envío eliminado de Notion y del panel." });
 });
 
 // Endpoint to receive files forwarded/uploaded from functions edge for larger files or error fallbacks
@@ -1525,8 +1731,9 @@ app.post("/api/submit", async (req, res) => {
       }
     });
 
-    // Append standard toggle block with the children blocks inside
-    await notion.blocks.children.append({
+    // Append standard toggle block with the children blocks inside.
+    // Capture the created toggle id so submissions mirror Notion and can be deleted.
+    const appendRes: any = await notion.blocks.children.append({
       block_id: projectId,
       children: [
         {
@@ -1546,6 +1753,7 @@ app.post("/api/submit", async (req, res) => {
         },
       ],
     });
+    const notionBlockId = appendRes?.results?.[0]?.id || "";
 
     // Save in local submissions index file for Admin view
     const submissionId = "sub_" + Date.now();
@@ -1556,6 +1764,8 @@ app.post("/api/submit", async (req, res) => {
       senderName: senderName.trim(),
       senderEmail: senderEmail.trim(),
       timestamp: new Date().toISOString(),
+      notionBlockId,
+      dbPageId: "",
       files: fileRecords.map((f: any) => ({
         name: f.name,
         size: f.size,

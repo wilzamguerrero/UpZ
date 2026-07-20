@@ -155,8 +155,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   ];
 
   // Always create the per-person toggle (works for both modes).
+  // Capture the created toggle's block id so submissions can be reconciled with
+  // (and deleted from) Notion later — Notion is the source of truth.
+  let notionBlockId = "";
   try {
-    await appendChildren(
+    const appendResult = await appendChildren(
       projectId,
       [
         {
@@ -170,6 +173,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       ],
       notionSecret
     );
+    notionBlockId = appendResult?.results?.[0]?.id || "";
   } catch (err: any) {
     return json(
       { error: `Error al guardar envio en Notion: ${err.message || "Error desconocido"}.` },
@@ -179,6 +183,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   // Database mode: also insert a row into the project's Notion database.
   const cleanDbId = cleanNotionId(databaseId || "");
+  let dbPageId = "";
   if (useDatabase && cleanDbId) {
     const fileNames = fileRecords.map((f) => f.name).join(", ");
     const dbProperties: Record<string, any> = {
@@ -195,10 +200,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       }
     }
     try {
-      await notionFetch("POST", "/pages", notionSecret, {
+      const rowRes = await notionFetch("POST", "/pages", notionSecret, {
         parent: { type: "database_id", database_id: cleanDbId },
         properties: dbProperties,
       });
+      dbPageId = rowRes?.id || "";
     } catch {
       // Non-critical: toggle already created; ignore database insert failure.
     }
@@ -212,6 +218,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     senderName,
     senderEmail,
     timestamp: new Date().toISOString(),
+    // Notion references used to mirror deletions and delete from the admin panel.
+    notionBlockId,
+    dbPageId,
     files: fileRecords.map((f: FileRecord) => ({
       name: f.name,
       size: f.size,

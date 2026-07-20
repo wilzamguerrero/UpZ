@@ -40,6 +40,12 @@ export interface Project {
   order?: number;
   /** Whether this block is a group container rather than a deliverable project. */
   isGroup?: boolean;
+  /** Real Notion nesting: id of the containing folder/project ("" = root). */
+  parentId?: string;
+  /** Whether the Notion block has children (may contain sub-projects). */
+  hasChildren?: boolean;
+  /** Notion block kind. */
+  type?: "toggle" | "page";
 }
 
 export interface ProjectMeta {

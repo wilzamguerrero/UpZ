@@ -1,4 +1,4 @@
-import { json, listChildren, appendChildren, cleanNotionId, type Env } from "../../_shared/notion";
+import { json, notionFetch, appendChildren, cleanNotionId, type Env } from "../../_shared/notion";
 
 /** Reads the effective Notion credentials (KV override > env vars) */
 async function getConfig(env: Env): Promise<{ notionSecret: string; parentPageId: string }> {
@@ -20,7 +20,91 @@ async function getConfig(env: Env): Promise<{ notionSecret: string; parentPageId
   return { notionSecret, parentPageId: cleanNotionId(parentPageId) };
 }
 
-/** GET /api/projects – list active toggle/child_page blocks from Notion */
+// Max nesting depth to walk (folders → projects → sub-projects...).
+const MAX_TREE_DEPTH = 4;
+
+/** A submission toggle's header always starts with the 👤 emoji (see submit.ts). */
+const isSubmissionTitle = (name: string): boolean => name.trim().startsWith("👤");
+
+/** List ALL children of a block, following pagination. */
+async function listAllChildren(blockId: string, token: string): Promise<any[]> {
+  const out: any[] = [];
+  let cursor: string | undefined;
+  do {
+    const q = cursor
+      ? `?start_cursor=${encodeURIComponent(cursor)}&page_size=100`
+      : `?page_size=100`;
+    const data = await notionFetch("GET", `/blocks/${blockId}/children${q}`, token);
+    for (const b of data.results || []) out.push(b);
+    cursor = data.has_more ? data.next_cursor : undefined;
+  } while (cursor);
+  return out;
+}
+
+/**
+ * Recursively collect the project tree from Notion.
+ * A "project" (or folder — same thing here) is a toggle or child_page. Submission
+ * toggles (👤 ...) and content blocks (code/quote/callout/image/file...) are ignored.
+ * Nested projects/folders get their container's id as `parentId`; top-level ones "".
+ */
+async function collectProjects(
+  blockId: string,
+  parentKey: string,
+  parentPageId: string,
+  token: string,
+  depth: number,
+  acc: any[]
+): Promise<void> {
+  if (depth > MAX_TREE_DEPTH) return;
+
+  let children: any[];
+  try {
+    children = await listAllChildren(blockId, token);
+  } catch {
+    return; // stop descending on error
+  }
+
+  for (const block of children) {
+    if (block.type === "toggle") {
+      const name = (block.toggle?.rich_text || [])
+        .map((rt: any) => rt.plain_text)
+        .join("")
+        .trim();
+      if (isSubmissionTitle(name)) continue; // it's a submission, not a project
+
+      acc.push({
+        id: block.id,
+        name: name || "Proyecto sin título",
+        type: "toggle",
+        parentId: parentKey,
+        hasChildren: !!block.has_children,
+        url: `https://notion.so/${parentPageId.replace(/-/g, "")}#${block.id.replace(/-/g, "")}`,
+        isActive: true,
+      });
+
+      if (block.has_children) {
+        await collectProjects(block.id, block.id, parentPageId, token, depth + 1, acc);
+      }
+    } else if (block.type === "child_page") {
+      acc.push({
+        id: block.id,
+        name: block.child_page?.title || "Proyecto sin título",
+        type: "page",
+        parentId: parentKey,
+        hasChildren: !!block.has_children,
+        url: `https://notion.so/${block.id.replace(/-/g, "")}`,
+        isActive: true,
+      });
+
+      if (block.has_children) {
+        await collectProjects(block.id, block.id, parentPageId, token, depth + 1, acc);
+      }
+    }
+    // Any other block type (code/quote/callout/image/file/heading...) is ignored.
+  }
+}
+
+/** GET /api/projects – full project tree (flat list with parentId) from Notion */
 export const onRequestGet: PagesFunction<Env> = async (context) => {
   const { notionSecret, parentPageId } = await getConfig(context.env);
 
@@ -32,31 +116,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   }
 
   try {
-    const data = await listChildren(parentPageId, notionSecret);
-
-    const projects = (data.results || [])
-      .filter((block: any) => block.type === "toggle" || block.type === "child_page")
-      .map((block: any) => {
-        if (block.type === "toggle") {
-          const name = block.toggle.rich_text.map((rt: any) => rt.plain_text).join("").trim();
-          return {
-            id: block.id,
-            name: name || "Proyecto sin título",
-            type: "toggle",
-            url: `https://notion.so/${parentPageId.replace(/-/g, "")}#${block.id.replace(/-/g, "")}`,
-            isActive: true,
-          };
-        } else {
-          return {
-            id: block.id,
-            name: block.child_page.title || "Proyecto sin título",
-            type: "page",
-            url: `https://notion.so/${block.id.replace(/-/g, "")}`,
-            isActive: true,
-          };
-        }
-      });
-
+    const projects: any[] = [];
+    await collectProjects(parentPageId, "", parentPageId, notionSecret, 0, projects);
     return json({ success: true, projects });
   } catch (err: any) {
     return json(
@@ -68,11 +129,16 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
   }
 };
 
-/** POST /api/projects – create a new toggle block in Notion */
+/**
+ * POST /api/projects – create a new toggle block.
+ * Body: { name: string, parentId?: string }
+ * If parentId is provided the project is created INSIDE that folder/project;
+ * otherwise it is created at the root parent page.
+ */
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { notionSecret, parentPageId } = await getConfig(context.env);
 
-  let body: { name?: string };
+  let body: { name?: string; parentId?: string };
   try {
     body = await context.request.json();
   } catch {
@@ -88,9 +154,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return json({ error: "Notion no está configurado." }, 400);
   }
 
+  // Target parent: a folder/project id if provided, else the root page.
+  const targetParent = cleanNotionId(body.parentId || "") || parentPageId;
+
   try {
     const result = await appendChildren(
-      parentPageId,
+      targetParent,
       [
         {
           object: "block",
@@ -111,6 +180,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       project: {
         id: newBlock?.id,
         name: name.trim(),
+        parentId: targetParent === parentPageId ? "" : targetParent,
         url: `https://notion.so/${parentPageId.replace(/-/g, "")}#${blockIdClean}`,
       },
     });

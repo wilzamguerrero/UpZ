@@ -1,7 +1,8 @@
 ﻿import React, { useState, useEffect } from "react";
 import {
   Key, FolderPlus, FileSpreadsheet, Eye, EyeOff, Check,
-  AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, Download, ArrowRight, Trash2,
+  AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, Download, ArrowRight, ArrowLeft, Trash2,
+  ChevronDown, ChevronRight, X,
   Link, QrCode, Copy, GripVertical, Database, Table,
   // Icon picker icons
   UploadCloud, FileText, BookOpen, Code2, Palette, Microscope,
@@ -129,6 +130,11 @@ const ICON_OPTIONS: { key: string; Icon: LucideIcon; label: string; cat: string 
   { key: "Gamepad2", Icon: Gamepad2, label: "Juego", cat: "Herramientas" },
 ];
 
+// Lookup: icon key (as stored in project meta) -> Lucide icon component.
+const ICON_BY_KEY: Record<string, LucideIcon> = Object.fromEntries(
+  ICON_OPTIONS.map((o) => [o.key, o.Icon])
+);
+
 const normalizeString = (s: string) => {
   return s
     .toLowerCase()
@@ -137,6 +143,156 @@ const normalizeString = (s: string) => {
     .replace(/[^a-z0-9]/g, "-") // replace non-alphanumeric with dashes
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
+};
+
+interface ProjectTreeItemProps {
+  node: Project;
+  allProjects: Project[];
+  depth: number;
+  selectedId: string;
+  metaMap: Record<string, ProjectMeta>;
+  submissionsCount: (id: string) => number;
+  isDeletingId: string | null;
+  onOpen: (id: string) => void;
+  onCreateChild: (parentId: string, name: string) => Promise<void>;
+  onRename: (proj: Project, name: string) => Promise<void>;
+  onDelete: (id: string, name: string) => Promise<void>;
+  onToggleActive: (id: string, current: boolean) => void;
+}
+
+/** Recursive tree row: folder/project with expand, create-inside, rename, delete. */
+const ProjectTreeItem: React.FC<ProjectTreeItemProps> = ({
+  node, allProjects, depth, selectedId, metaMap, submissionsCount, isDeletingId,
+  onOpen, onCreateChild, onRename, onDelete, onToggleActive,
+}) => {
+  const children = allProjects.filter((p) => p.parentId === node.id);
+  const hasChildren = children.length > 0;
+  const isSelected = selectedId === node.id;
+  const isActive = node.isActive !== false;
+  const meta = metaMap[node.id];
+  const count = submissionsCount(node.id);
+
+  const [expanded, setExpanded] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [childName, setChildName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameName, setRenameName] = useState(node.name);
+  const [savingRename, setSavingRename] = useState(false);
+
+  const submitChild = async () => {
+    const t = childName.trim();
+    if (!t || creating) return;
+    setCreating(true);
+    try { await onCreateChild(node.id, t); setChildName(""); setAdding(false); setExpanded(true); }
+    finally { setCreating(false); }
+  };
+  const submitRename = async () => {
+    const t = renameName.trim();
+    if (!t || savingRename) return;
+    setSavingRename(true);
+    try { await onRename(node, t); setRenaming(false); }
+    finally { setSavingRename(false); }
+  };
+
+  const Icon = hasChildren ? (expanded ? FolderOpen : Folder) : (node.type === "page" ? FileText : Folder);
+  const MetaIcon = meta?.icon ? ICON_BY_KEY[meta.icon] : undefined;
+  const colorSwatch = meta?.bgColor || "";
+
+  return (
+    <div className="select-none">
+      <div
+        className={`group flex items-center gap-2 p-2.5 my-0.5 rounded-lg transition-all cursor-pointer ${
+          isSelected ? "bg-white/10 border border-white/20" : "border border-transparent hover:bg-white/5"
+        } ${!isActive ? "opacity-60" : ""}`}
+        style={{ marginLeft: `${depth * 16}px` }}
+        onClick={() => (hasChildren ? setExpanded((v) => !v) : onOpen(node.id))}
+        title={hasChildren ? "Clic para desplegar/plegar" : "Clic para administrar este proyecto"}
+      >
+        {hasChildren ? (
+          <button
+            onClick={(e) => { e.stopPropagation(); setExpanded((v) => !v); }}
+            className="w-7 h-7 flex items-center justify-center rounded-md text-white/60 hover:text-white bg-white/5 hover:bg-white/10 shrink-0"
+            title={expanded ? "Plegar" : "Desplegar"}
+          >
+            {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          </button>
+        ) : (
+          <span className="w-7 h-7 shrink-0" />
+        )}
+        <Icon className="w-4 h-4 text-white/60 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <span className="text-sm font-medium text-white truncate block">{node.name}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-white/40 font-mono">{count} entregas</span>
+            {hasChildren && (
+              <span className="text-[10px] text-white/40 font-mono">
+                · {children.length} {children.length === 1 ? "proyecto" : "proyectos"}
+              </span>
+            )}
+            {meta?.useDatabase && <Database className="w-3 h-3 text-emerald-400" />}
+            {!isActive && <span className="text-[9px] text-red-400">Inactivo</span>}
+          </div>
+        </div>
+
+        {/* Color + icon assigned to this project/folder */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {colorSwatch && (
+            <span
+              className="w-5 h-5 rounded-md border border-white/20 shrink-0"
+              style={{ background: colorSwatch }}
+              title={`Color: ${colorSwatch}`}
+            />
+          )}
+          {MetaIcon && (
+            <span
+              className="w-6 h-6 rounded-md border border-white/10 flex items-center justify-center shrink-0"
+              style={{ background: colorSwatch || "rgba(255,255,255,0.05)" }}
+              title="Icono del proyecto"
+            >
+              <MetaIcon className="w-3.5 h-3.5 text-white" />
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+          <button onClick={() => onOpen(node.id)} title="Administrar / editar" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10"><ArrowRight className="w-3.5 h-3.5" /></button>
+          <button onClick={() => setAdding((v) => !v)} title="Crear dentro" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10"><Plus className="w-3.5 h-3.5" /></button>
+          <button onClick={() => { setRenameName(node.name); setRenaming((v) => !v); }} title="Renombrar" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10"><PencilLine className="w-3.5 h-3.5" /></button>
+          <button onClick={() => onToggleActive(node.id, isActive)} title={isActive ? "Desactivar" : "Activar"} className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10">{isActive ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}</button>
+          {node.url && <a href={node.url} target="_blank" rel="noopener noreferrer" title="Abrir en Notion" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10"><ExternalLink className="w-3.5 h-3.5" /></a>}
+          <button onClick={() => onDelete(node.id, node.name)} disabled={isDeletingId === node.id} title="Eliminar" className="w-6 h-6 flex items-center justify-center rounded text-red-400/60 hover:text-red-400 hover:bg-red-950/20 disabled:opacity-40"><Trash2 className="w-3.5 h-3.5" /></button>
+        </div>
+      </div>
+
+      {adding && (
+        <div className="flex items-center gap-1.5 my-1" style={{ marginLeft: `${(depth + 1) * 16}px` }} onClick={(e) => e.stopPropagation()}>
+          <input autoFocus value={childName} onChange={(e) => setChildName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") submitChild(); if (e.key === "Escape") { setAdding(false); setChildName(""); } }}
+            placeholder="Nombre del nuevo proyecto/carpeta..."
+            className="flex-1 min-w-0 bg-[#0d0d0d] border border-white/10 focus:border-white/30 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-white/20 outline-none" />
+          <button onClick={submitChild} disabled={!childName.trim() || creating} className="w-7 h-7 flex items-center justify-center rounded-lg bg-white/10 text-white hover:bg-white/20 disabled:opacity-30"><Check className="w-3.5 h-3.5" /></button>
+          <button onClick={() => { setAdding(false); setChildName(""); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-white/40 hover:text-white hover:bg-white/10"><X className="w-3.5 h-3.5" /></button>
+        </div>
+      )}
+
+      {renaming && (
+        <div className="flex items-center gap-1.5 my-1" style={{ marginLeft: `${depth * 16}px` }} onClick={(e) => e.stopPropagation()}>
+          <input autoFocus value={renameName} onChange={(e) => setRenameName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") submitRename(); if (e.key === "Escape") { setRenaming(false); setRenameName(node.name); } }}
+            className="flex-1 min-w-0 bg-[#0d0d0d] border border-white/10 focus:border-white/30 rounded-lg px-2.5 py-1.5 text-xs text-white outline-none" />
+          <button onClick={submitRename} disabled={!renameName.trim() || savingRename} className="w-7 h-7 flex items-center justify-center rounded-lg bg-white/10 text-white hover:bg-white/20 disabled:opacity-30"><Check className="w-3.5 h-3.5" /></button>
+          <button onClick={() => { setRenaming(false); setRenameName(node.name); }} className="w-7 h-7 flex items-center justify-center rounded-lg text-white/40 hover:text-white hover:bg-white/10"><X className="w-3.5 h-3.5" /></button>
+        </div>
+      )}
+
+      {expanded && children.map((child) => (
+        <ProjectTreeItem key={child.id} node={child} allProjects={allProjects} depth={depth + 1}
+          selectedId={selectedId} metaMap={metaMap} submissionsCount={submissionsCount} isDeletingId={isDeletingId}
+          onOpen={onOpen} onCreateChild={onCreateChild} onRename={onRename} onDelete={onDelete} onToggleActive={onToggleActive} />
+      ))}
+    </div>
+  );
 };
 
 interface AdminPanelProps {
@@ -249,6 +405,26 @@ export default function AdminPanel({
     ? (isBgColorLight ? "rgba(17, 17, 17, 0.58)" : "rgba(255, 255, 255, 0.44)")
     : "rgba(255, 255, 255, 0.30)";
   const databaseAccent = copyBgColor || "var(--accent, #f5f011)";
+
+  // Two-view navigation: "browse" = visor of all projects/groups + create;
+  // "detail" = the selected project's editor + its submissions.
+  const [adminView, setAdminView] = useState<"browse" | "detail">("browse");
+
+  // Adaptive panel surface: when a project with a bgColor is selected, the admin
+  // cards become a translucent dark surface so the project's color bleeds through
+  // the background — mirroring the published landing so you can tell which project
+  // you're editing. White text stays readable on any project color.
+  const useAdaptivePanel = adminView === "detail" && !!copyBgColor;
+  const panelClass = useAdaptivePanel
+    ? "rounded-2xl p-6 shadow-none border backdrop-blur-xl transition-colors"
+    : "bg-[#111111] rounded-2xl p-6 border border-white/10 shadow-none transition-colors";
+  const panelStyle: React.CSSProperties = useAdaptivePanel
+    ? {
+        backgroundColor: "rgba(12, 12, 12, 0.5)",
+        borderColor: isBgColorLight ? "rgba(0, 0, 0, 0.18)" : "rgba(255, 255, 255, 0.14)",
+      }
+    : {};
+
   const [isCreatingDb, setIsCreatingDb] = useState(false);
   const [copyGroupId, setCopyGroupId] = useState("");
 
@@ -270,6 +446,18 @@ export default function AdminPanel({
   const [loadingSubmissions, setLoadingSubmissions] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedSenders, setExpandedSenders] = useState<Record<string, boolean>>({});
+  const [isDeletingSubmissionId, setIsDeletingSubmissionId] = useState<string | null>(null);
+
+  /** Open a project in the detail view. */
+  const openProject = (projId: string) => {
+    setSelectedMetaProjectId(projId);
+    setAdminView("detail");
+    try {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch {
+      // no-op
+    }
+  };
 
   // Sync state on load
   useEffect(() => {
@@ -379,15 +567,16 @@ export default function AdminPanel({
 
   // Sync current editing visual customisations to parent App under adminPreview
   useEffect(() => {
-    if (onAdminPreviewChange && selectedMetaProjectId) {
-      onAdminPreviewChange({
-        projectId: selectedMetaProjectId,
-        bgColor: copyBgColor,
-        backgroundImage: "",
-        bgBlur: 0,
-      });
-    }
-  }, [selectedMetaProjectId, copyBgColor, onAdminPreviewChange]);
+    if (!onAdminPreviewChange || !selectedMetaProjectId) return;
+    // Only tint the environment with the project's color in the detail view.
+    // In the browse view (all projects) keep it neutral.
+    onAdminPreviewChange({
+      projectId: selectedMetaProjectId,
+      bgColor: adminView === "detail" ? copyBgColor : "",
+      backgroundImage: "",
+      bgBlur: 0,
+    });
+  }, [selectedMetaProjectId, copyBgColor, onAdminPreviewChange, adminView]);
 
   const handleSaveMeta = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -599,6 +788,25 @@ export default function AdminPanel({
     }
   };
 
+  /** Delete a submission everywhere: Notion (toggle + db row) and the local log. */
+  const handleDeleteSubmission = async (submissionId: string, senderName: string) => {
+    if (!window.confirm(`¿Eliminar el envío de "${senderName}"? Se borrará también de Notion y no se puede deshacer.`)) return;
+    setIsDeletingSubmissionId(submissionId);
+    try {
+      const res = await fetch(`/api/submissions/${submissionId}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.success) {
+        setSubmissions((prev) => prev.filter((s) => s.id !== submissionId));
+      } else {
+        alert(data.error || "No se pudo eliminar el envío.");
+      }
+    } catch {
+      alert("Error de red al eliminar el envío.");
+    } finally {
+      setIsDeletingSubmissionId(null);
+    }
+  };
+
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!notionSecret && config?.hasSecret) {
@@ -660,6 +868,36 @@ export default function AdminPanel({
     }
   };
 
+  /** Create a project/folder INSIDE another one (tree). */
+  const handleCreateChild = async (parentId: string, name: string) => {
+    const res = await fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name.trim(), parentId }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      alert(data.error || "No se pudo crear el proyecto dentro de la carpeta.");
+      return;
+    }
+    await refreshProjects();
+  };
+
+  /** Rename a project/folder toggle (or page). */
+  const handleRenameProject = async (proj: Project, name: string) => {
+    const res = await fetch(`/api/projects/${proj.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name.trim(), type: proj.type || "toggle" }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      alert(data.error || "No se pudo renombrar el proyecto.");
+      return;
+    }
+    await refreshProjects();
+  };
+
   const handleDeleteProject = async (projId: string, projName: string) => {
     if (!window.confirm(`┬┐Est├ís seguro de que quieres eliminar la carpeta del proyecto "${projName}"? Se borrar├í tanto de Notion como localmente.`)) return;
 
@@ -702,8 +940,16 @@ export default function AdminPanel({
     }
   };
 
-  // Filter submissions by search input
-  const filteredSubmissions = submissions.filter(sub => {
+  // When a project is selected, scope submissions to that project only.
+  const scopedSubmissions = selectedMetaProjectId
+    ? submissions.filter((sub) => sub.projectId === selectedMetaProjectId)
+    : submissions;
+
+  const selectedProjectName =
+    projects.find((p) => p.id === selectedMetaProjectId)?.name || "";
+
+  // Filter (scoped) submissions by search input
+  const filteredSubmissions = scopedSubmissions.filter(sub => {
     const term = searchQuery.toLowerCase();
     return (
       sub.senderName.toLowerCase().includes(term) ||
@@ -755,6 +1001,11 @@ export default function AdminPanel({
     }
   }
 
+  // Real Notion nesting tree: root nodes = those with no parent (or whose parent
+  // isn't one of our projects). Children are resolved by parentId in the tree item.
+  const projectIdSet = new Set(projects.map((p) => p.id));
+  const rootProjects = projects.filter((p) => !p.parentId || !projectIdSet.has(p.parentId));
+
   const filteredHomeIcons = ICON_OPTIONS.filter((option) => {
     if (!homeIconSearch.trim()) return true;
     const haystack = normalizeString(`${option.key} ${option.label} ${option.cat}`);
@@ -762,12 +1013,42 @@ export default function AdminPanel({
   });
 
   return (
+    <div className="space-y-6">
+
+      {/* View header: browse (all projects) vs detail (one project) */}
+      {adminView === "detail" ? (
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setAdminView("browse")}
+            className="p-2.5 rounded-xl border border-white/10 bg-white/5 text-white/70 hover:text-white hover:border-white/25 transition-all cursor-pointer shrink-0"
+            title="Volver a todos los proyectos"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-white truncate">
+              {selectedProjectName || "Proyecto"}
+            </h2>
+            <p className="text-xs text-white/40">Editando proyecto · pulsa la flecha para volver</p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-white">Panel de administración</h2>
+            <p className="text-xs text-white/40">Selecciona un proyecto para editarlo o crea uno nuevo</p>
+          </div>
+        </div>
+      )}
+
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
       {/* Settings column */}
       <div className="col-span-1 space-y-8">
 
-        <div className="bg-[#111111] rounded-2xl p-6 border border-white/10 shadow-none">
+        {adminView === "browse" && (
+        <div className={panelClass} style={panelStyle}>
           <div className="mb-6">
             <h2 className="text-base font-semibold text-white">Portada de Inicio</h2>
           </div>
@@ -856,9 +1137,11 @@ export default function AdminPanel({
             </button>
           </form>
         </div>
+        )}
 
         {/* Project Custom Copywriting */}
-        <div className="bg-[#111111] rounded-2xl p-6 border border-white/10 shadow-none">
+        {adminView === "detail" && (
+        <div className={panelClass} style={panelStyle}>
           <div className="flex items-center gap-3 mb-6">
             <div className="p-2.5 bg-white/5 text-white rounded-xl">
               <FileSpreadsheet className="w-5 h-5" />
@@ -1351,6 +1634,7 @@ export default function AdminPanel({
             </form>
           )}
         </div>
+        )}
 
       </div>
 
@@ -1358,7 +1642,8 @@ export default function AdminPanel({
       <div className="col-span-1 lg:col-span-2 space-y-8">
 
         {/* Project creator Section */}
-        <div className="bg-[#111111] rounded-2xl p-6 border border-white/10 shadow-none">
+        {adminView === "browse" && (
+        <div className={panelClass} style={panelStyle}>
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <div className="p-2.5 bg-white/5 text-white rounded-xl">
@@ -1439,123 +1724,35 @@ export default function AdminPanel({
               <p className="text-xs text-white/20 mt-1">Crea tu primer proyecto utilizando el formulario superior.</p>
             </div>
           ) : (
-            <div className="flex flex-col gap-2 max-h-[28rem] overflow-y-auto pr-1">
-              {orderedProjects.map((proj, position) => (
-                <div
-                  key={proj.id}
-                  draggable
-                  onDragStart={() => setDragId(proj.id)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => handleDropReorder(proj.id)}
-                  onClick={() => setSelectedMetaProjectId(proj.id)}
-                  className={`p-3 border rounded-xl flex items-center justify-between transition-all cursor-pointer group animate-fade-in ${dragId === proj.id ? "opacity-40 border-dashed" : ""
-                    } ${proj.id === selectedMetaProjectId
-                      ? "border-white/30 bg-white/5"
-                      : proj.isActive !== false
-                        ? "border-white/5 bg-[#0d0d0d] hover:border-white/12"
-                        : "border-dashed border-red-900/40 bg-red-950/5 hover:border-red-900/60"
-                    }`}
-                  title="Arrastra para reordenar ΓÇó Clic para personalizar"
-                >
-                  <div className="flex items-center gap-1 shrink-0 text-white/20 group-hover:text-white/40" title="Arrastrar para reordenar">
-                    <GripVertical className="w-4 h-4" />
-                    <span className="text-[10px] font-mono font-bold text-white/40 w-5 text-center">{position + 1}</span>
-                  </div>
-                  <div className="min-w-0 flex-1 px-2">
-                    <p className="text-sm font-semibold text-white/95 truncate flex items-center gap-1.5">
-                      {proj.groupId && (
-                        <span className="text-[9px] text-purple-300 bg-purple-950/30 border border-purple-900/30 px-1 py-[1px] rounded" title="Pertenece a un grupo">
-                          {groupsMap[proj.groupId]?.name || "Grupo"}
-                        </span>
-                      )}
-                      {projectMeta[proj.id]?.useDatabase && (
-                        <Database className="w-3 h-3 text-emerald-400 shrink-0" />
-                      )}
-                      {proj.name}
-                    </p>
-                    <div className="flex flex-wrap items-center gap-2 mt-1">
-                      <span className="text-[10px] text-white/40 font-mono">
-                        {getSubmissionsCountForProject(proj.id)} entregas
-                      </span>
-
-                      {formatExpiration(projectMeta[proj.id]?.expirationDate) && (
-                        <span
-                          className="text-[9px] text-amber-300 font-medium px-1.5 py-[1px] bg-amber-950/30 border border-amber-900/30 rounded-sm flex items-center gap-1"
-                          title="Fecha de vencimiento"
-                        >
-                          <Calendar className="w-2.5 h-2.5 shrink-0" />
-                          {formatExpiration(projectMeta[proj.id]?.expirationDate)}
-                        </span>
-                      )}
-
-                      <span className="text-[10px] text-purple-400 hover:text-purple-300 font-mono truncate select-all flex items-center gap-0.5" title="Enlace directo p├║blico para entregas">
-                        <Link className="w-2.5 h-2.5 shrink-0" />
-                        /{normalizeString(proj.name)}
-                      </span>
-
-                      {proj.isActive === false ? (
-                        <span className="text-[9px] text-red-400 font-sans font-medium px-1.5 py-[1px] bg-red-950/40 border border-red-900/40 rounded-sm">
-                          Inactivo
-                        </span>
-                      ) : (
-                        <span className="text-[9px] text-emerald-400 font-sans font-medium px-1.5 py-[1px] bg-emerald-950/40 border border-emerald-950/40 rounded-sm">
-                          Activo
-                        </span>
-                      )}
-
-                      {proj.id === selectedMetaProjectId && (
-                        <span className="text-[9px] text-[#22c55e] font-sans font-medium px-1.5 py-[1px] bg-emerald-950/30 border border-emerald-900/40 rounded-sm">
-                          Editando
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Action buttons */}
-                  <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                    {/* Direct activation toggle switch */}
-                    <button
-                      type="button"
-                      onClick={() => handleToggleProjectActive(proj.id, proj.isActive !== false)}
-                      className={`p-1.5 border rounded-lg transition-all cursor-pointer flex items-center justify-center ${proj.isActive !== false
-                          ? "text-emerald-400 hover:text-emerald-350 bg-emerald-950/20 border-emerald-900/20 hover:border-emerald-700/40"
-                          : "text-white/20 hover:text-white bg-white/5 border-white/5 hover:bg-white/10"
-                        }`}
-                      title={proj.isActive !== false ? "Proyecto Activo (Pulsa para desactivar)" : "Proyecto Desactivado (Pulsa para activar)"}
-                    >
-                      {proj.isActive !== false ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                    </button>
-
-                    {proj.url && (
-                      <a
-                        href={proj.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-1.5 text-white/40 hover:text-white bg-white/5 border border-white/10 rounded-lg transition-colors"
-                        title="Abrir en Notion"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteProject(proj.id, proj.name)}
-                      disabled={isDeletingProjectId === proj.id}
-                      className="p-1.5 text-red-400/60 hover:text-red-400 hover:bg-red-950/20 border border-white/5 hover:border-red-900/20 rounded-lg transition-all disabled:opacity-50 cursor-pointer"
-                      title="Eliminar Proyecto"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
+            <div className="flex flex-col gap-0.5 max-h-[32rem] overflow-y-auto pr-1">
+              {rootProjects.map((node) => (
+                <ProjectTreeItem
+                  key={node.id}
+                  node={node}
+                  allProjects={projects}
+                  depth={0}
+                  selectedId={selectedMetaProjectId}
+                  metaMap={projectMeta}
+                  submissionsCount={getSubmissionsCountForProject}
+                  isDeletingId={isDeletingProjectId}
+                  onOpen={openProject}
+                  onCreateChild={handleCreateChild}
+                  onRename={handleRenameProject}
+                  onDelete={handleDeleteProject}
+                  onToggleActive={handleToggleProjectActive}
+                />
               ))}
             </div>
           )}
         </div>
+        )}
+
+        {adminView === "detail" && (
+        <>
 
         {/* Grading table per project (point 9) */}
         {selectedMetaProjectId && projects.find((p) => p.id === selectedMetaProjectId) && (
-          <div className="bg-[#111111] rounded-2xl p-6 border border-white/10 shadow-none">
+          <div className={panelClass} style={panelStyle}>
             <div className="flex items-center gap-3 mb-6">
               <div className="p-2.5 bg-white/5 text-white rounded-xl">
                 <Table className="w-5 h-5" />
@@ -1577,14 +1774,18 @@ export default function AdminPanel({
         )}
 
         {/* Senders Toggle List */}
-        <div className="bg-[#111111] rounded-2xl p-6 border border-white/10 shadow-none">
+        <div className={panelClass} style={panelStyle}>
           <div className="flex items-center gap-3 mb-6">
             <div className="p-2.5 bg-white/5 text-white rounded-xl">
               <Users className="w-5 h-5" />
             </div>
             <div>
               <h2 className="text-base font-semibold text-white">Remitentes</h2>
-              <p className="text-xs text-white/40">Personas que han enviado archivos</p>
+              <p className="text-xs text-white/40">
+                {selectedMetaProjectId
+                  ? `Envíos de "${selectedProjectName}"`
+                  : "Selecciona un proyecto para ver solo sus remitentes"}
+              </p>
             </div>
           </div>
 
@@ -1594,9 +1795,9 @@ export default function AdminPanel({
             </div>
           ) : (
             (() => {
-              // Group submissions by sender email
+              // Group submissions by sender email (scoped to selected project)
               const grouped: Record<string, { name: string; email: string; submissions: Submission[] }> = {};
-              for (const sub of submissions) {
+              for (const sub of scopedSubmissions) {
                 const email = sub.senderEmail.toLowerCase();
                 if (!grouped[email]) {
                   grouped[email] = { name: sub.senderName, email: sub.senderEmail, submissions: [] };
@@ -1655,9 +1856,20 @@ export default function AdminPanel({
                                     <Calendar className="w-3 h-3 inline mr-1" />
                                     {new Date(sub.timestamp).toLocaleString()}
                                   </span>
-                                  <span className="text-[10px] text-white/40 font-semibold bg-white/5 px-2 py-0.5 rounded-full border border-white/5">
-                                    {sub.projectName}
-                                  </span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[10px] text-white/40 font-semibold bg-white/5 px-2 py-0.5 rounded-full border border-white/5">
+                                      {sub.projectName}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteSubmission(sub.id, sub.senderName)}
+                                      disabled={isDeletingSubmissionId === sub.id}
+                                      className="p-1 text-red-400/60 hover:text-red-400 hover:bg-red-950/20 border border-white/5 hover:border-red-900/20 rounded-md transition-all disabled:opacity-50 cursor-pointer shrink-0"
+                                      title="Eliminar envío (también en Notion)"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                                   {sub.files.map((file, fIdx) => (
@@ -1697,7 +1909,7 @@ export default function AdminPanel({
         </div>
 
         {/* Deliveries Submission Log */}
-        <div className="bg-[#111111] rounded-2xl p-6 border border-white/10 shadow-none">
+        <div className={panelClass} style={panelStyle}>
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div className="flex items-center gap-3">
               <div className="p-2.5 bg-white/5 text-white rounded-xl">
@@ -1705,7 +1917,11 @@ export default function AdminPanel({
               </div>
               <div>
                 <h2 className="text-base font-semibold text-white">Historial de Entregas</h2>
-                <p className="text-xs text-white/40">Hist├│rico de transferencias registradas</p>
+                <p className="text-xs text-white/40">
+                  {selectedMetaProjectId
+                    ? `Entregas de "${selectedProjectName}"`
+                    : "Histórico de todas las transferencias registradas"}
+                </p>
               </div>
             </div>
 
@@ -1744,13 +1960,24 @@ export default function AdminPanel({
                         <Mail className="w-3.5 h-3.5 shrink-0" /> {sub.senderEmail}
                       </p>
                     </div>
-                    <div className="text-right">
-                      <span className="inline-block bg-white/5 text-white/70 text-[10px] font-semibold px-2.5 py-1 rounded-full border border-white/5 select-none">
-                        Proyecto: {sub.projectName}
-                      </span>
-                      <p className="text-[10px] text-white/35 mt-1 flex items-center justify-end gap-1 font-mono">
-                        <Calendar className="w-3 h-3" /> {new Date(sub.timestamp).toLocaleString()}
-                      </p>
+                    <div className="flex items-start gap-2">
+                      <div className="text-right">
+                        <span className="inline-block bg-white/5 text-white/70 text-[10px] font-semibold px-2.5 py-1 rounded-full border border-white/5 select-none">
+                          Proyecto: {sub.projectName}
+                        </span>
+                        <p className="text-[10px] text-white/35 mt-1 flex items-center justify-end gap-1 font-mono">
+                          <Calendar className="w-3 h-3" /> {new Date(sub.timestamp).toLocaleString()}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSubmission(sub.id, sub.senderName)}
+                        disabled={isDeletingSubmissionId === sub.id}
+                        className="p-1.5 text-red-400/60 hover:text-red-400 hover:bg-red-950/20 border border-white/5 hover:border-red-900/20 rounded-lg transition-all disabled:opacity-50 cursor-pointer shrink-0"
+                        title="Eliminar envío (también en Notion)"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
 
@@ -1788,8 +2015,12 @@ export default function AdminPanel({
             </div>
           )}
         </div>
+        </>
+        )}
 
       </div>
+
+    </div>
 
     </div>
   );

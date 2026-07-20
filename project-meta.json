@@ -71,5 +71,43 @@
     "dbColumns": [],
     "groupId": "",
     "order": 0
+  },
+  "3a32640c-88f4-818c-a2ce-d8498b49b145": {
+    "title": "ENVI",
+    "description": "ENVI agiliza la entrega de archivos por proyecto. Comparte este enlace para recibir archivos de forma rápida y ordenada.",
+    "step1": "",
+    "step2": "",
+    "step3": "",
+    "expirationDate": "",
+    "backgroundImage": "",
+    "bgBlur": 0,
+    "bgColor": "#007aff",
+    "icon": "UploadCloud",
+    "isActive": true,
+    "customFields": [],
+    "useDatabase": false,
+    "databaseId": "",
+    "dbColumns": [],
+    "groupId": "",
+    "order": 0
+  },
+  "3a32640c-88f4-810f-ba43-f30bee1a65b3": {
+    "title": "ENVI",
+    "description": "ENVI agiliza la entrega de archivos por proyecto. Comparte este enlace para recibir archivos de forma rápida y ordenada.",
+    "step1": "",
+    "step2": "",
+    "step3": "",
+    "expirationDate": "",
+    "backgroundImage": "",
+    "bgBlur": 0,
+    "bgColor": "#34c759",
+    "icon": "Cpu",
+    "isActive": true,
+    "customFields": [],
+    "useDatabase": false,
+    "databaseId": "",
+    "dbColumns": [],
+    "groupId": "",
+    "order": 0
   }
 }
