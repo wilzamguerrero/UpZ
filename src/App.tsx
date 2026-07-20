@@ -17,6 +17,7 @@ import {
   Download,
   type LucideIcon
 } from "lucide-react";
+import { uploadFiles, type UploadRecord } from "./uploadService";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   UploadCloud, FileText, BookOpen, Code2, Palette, Microscope,
@@ -384,247 +385,9 @@ export default function App() {
   };
 
   // ─── Upload progress state ───
+  // El motor de subida vive en ./uploadService (semáforo adaptativo AIMD,
+  // subida de archivos en paralelo, manejo de throttling y reintentos).
   const [uploadProgress, setUploadProgress] = useState<{ fileName: string; percent: number } | null>(null);
-
-  const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MiB — matches server-side chunk size
-  const SMALL_FILE_THRESHOLD = 20 * 1024 * 1024; // 20 MiB
-  const MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024; // 5 GB (Notion limit)
-
-  // Extensions accepted by Notion's File Upload API (mirrors server-side NOTION_MIME_TYPES)
-  const NOTION_SUPPORTED_EXTENSIONS = new Set([
-    // Archives
-    "zip", "gz", "gzip", "tar", "7z", "bz2", "rar",
-    // Images
-    "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "tiff", "tif", "ico", "heic", "avif", "apng",
-    // Audio
-    "aac", "adts", "mid", "midi", "mp3", "mpga", "m4a", "m4b", "oga", "ogg", "opus", "wav", "wma", "weba", "flac",
-    // Video
-    "amv", "asf", "wmv", "avi", "f4v", "flv", "gifv", "m4v", "mp4", "mkv", "webm", "mov", "qt", "mpeg", "ogv", "3gp", "3g2",
-    // Documents
-    "pdf", "txt", "csv", "json", "doc", "dot", "docx", "dotx", "xls", "xlt", "xla", "xlsx", "xltx",
-    "ppt", "pot", "pps", "ppa", "pptx", "potx", "rtf", "md", "markdown", "html", "htm", "epub", "xml", "css",
-    "odt", "ods", "odp", "ics", "yaml", "yml", "tsv",
-  ]);
-
-  /** Check if a file needs to be compressed to ZIP for Notion compatibility */
-  const needsZipCompression = (filename: string): boolean => {
-    const dotIndex = filename.lastIndexOf(".");
-    if (dotIndex === -1) return true; // no extension
-    const ext = filename.slice(dotIndex + 1).toLowerCase();
-    return !NOTION_SUPPORTED_EXTENSIONS.has(ext);
-  };
-
-  /** Compress a file into a real ZIP using JSZip */
-  const compressFileToZip = async (file: File): Promise<File> => {
-    const JSZip = (await import("jszip")).default;
-    const zip = new JSZip();
-    zip.file(file.name, file);
-    const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
-    return new File([blob], file.name + ".zip", { type: "application/zip" });
-  };
-
-  /**
-   * Upload a single file to Notion.
-   * - Unsupported extensions → compressed to real ZIP first
-   * - Files ≤ 20MB: single request to /api/upload-file
-   * - Files > 20MB: chunked flow (init → parts → complete)
-   */
-  const uploadOneFile = async (
-    file: File,
-    fileIndex: number,
-    totalFiles: number
-  ): Promise<{
-    name: string; finalName: string; size: number;
-    uploadId: string; extModified: boolean; mimeType: string;
-  }> => {
-    const originalName = file.name;
-    const label = `${originalName} (${fileIndex + 1}/${totalFiles})`;
-
-    // ── Validate file size ──
-    if (file.size > MAX_FILE_SIZE) {
-      throw new Error(`"${originalName}" excede el límite de 5 GB.`);
-    }
-
-    // ── Compress unsupported file types to real ZIP ──
-    let uploadFile = file;
-    let wasCompressed = false;
-    if (needsZipCompression(file.name)) {
-      setSubmitStep(`Comprimiendo ${label} a ZIP...`);
-      setUploadProgress({ fileName: originalName, percent: 0 });
-      uploadFile = await compressFileToZip(file);
-      wasCompressed = true;
-    }
-
-    // ── Small file: existing single-request flow ──
-    if (uploadFile.size <= SMALL_FILE_THRESHOLD) {
-      setSubmitStep(`Subiendo ${label}...`);
-      setUploadProgress({ fileName: originalName, percent: 0 });
-
-      const fd = new FormData();
-      fd.append("file", uploadFile, uploadFile.name);
-      const res = await fetch("/api/upload-file", { method: "POST", body: fd });
-
-      // Guard against Cloudflare returning HTML (e.g. body too large)
-      const text = await res.text();
-      let data: any;
-      try { data = JSON.parse(text); } catch {
-        throw new Error(`Respuesta inesperada del servidor al subir "${originalName}". Puede que el archivo sea demasiado grande.`);
-      }
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || `Error al subir "${originalName}"`);
-      }
-
-      setUploadProgress({ fileName: originalName, percent: 100 });
-
-      return {
-        name: originalName,
-        finalName: data.finalName as string,
-        size: file.size, // original size for display
-        uploadId: data.id as string,
-        extModified: wasCompressed || (data.extModified as boolean),
-        mimeType: file.type || "application/octet-stream",
-      };
-    }
-
-    // ── Large file: chunked flow ──
-    const numberOfParts = Math.ceil(uploadFile.size / CHUNK_SIZE);
-
-    // Step 1: Initialize the upload on Notion
-    setSubmitStep(`Inicializando ${label} (${numberOfParts} partes)...`);
-    setUploadProgress({ fileName: originalName, percent: 0 });
-
-    const initRes = await fetch("/api/upload-init", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        filename: uploadFile.name,
-        mimeType: uploadFile.type,
-        fileSize: uploadFile.size,
-      }),
-    });
-    const initData = await initRes.json();
-    if (!initRes.ok || !initData.success) {
-      throw new Error(initData.error || `Error al inicializar upload de "${originalName}"`);
-    }
-
-    const { id: uploadId, uploadName, contentType, mode } = initData;
-
-    // Step 2: Send the chunks.
-    // Every chunk is routed through our own /api/upload-part endpoint, which attaches the
-    // Notion auth headers server-side. Each chunk is CHUNK_SIZE (10 MiB), well under
-    // Cloudflare's 100 MB request-body limit, so large files (1+ GB) upload reliably.
-    //
-    // Notion allows parts to be sent concurrently and out of order, so we upload several
-    // at a time (PART_CONCURRENCY) to make large uploads much faster, while keeping the
-    // count low enough to stay within the free-plan limits and avoid 503s.
-    // Each part is retried with exponential backoff on transient errors (network, 429, 5xx)
-    // so a single dropped request doesn't cancel the whole upload.
-    const MAX_PART_RETRIES = 6;
-    const PART_CONCURRENCY = 3;
-
-    let completedParts = 0;
-
-    const uploadPart = async (partNumber: number): Promise<void> => {
-      const start = (partNumber - 1) * CHUNK_SIZE;
-      const end = Math.min(start + CHUNK_SIZE, uploadFile.size);
-      const chunk = uploadFile.slice(start, end);
-
-      let lastError: Error | null = null;
-
-      for (let attempt = 1; attempt <= MAX_PART_RETRIES; attempt++) {
-        // Build a FormData that Notion understands directly (only `file` + `part_number`).
-        // The server pipes this body straight to Notion without re-parsing it, which keeps
-        // the Cloudflare Function well under its 10ms CPU limit. upload_id goes in the URL.
-        const chunkBlob = new Blob([chunk], { type: contentType || "application/octet-stream" });
-        const chunkFd = new FormData();
-        if (mode === "multi_part") {
-          chunkFd.append("part_number", String(partNumber));
-        }
-        chunkFd.append("file", chunkBlob, uploadName);
-
-        try {
-          const partRes = await fetch(`/api/upload-part?upload_id=${encodeURIComponent(uploadId)}`, {
-            method: "POST",
-            body: chunkFd,
-          });
-          const partText = await partRes.text();
-          let partData: any;
-          try { partData = JSON.parse(partText); } catch {
-            throw new Error(`Respuesta inesperada al subir parte ${partNumber} de "${originalName}".`);
-          }
-          if (!partRes.ok || (!partData.success && !partData.id)) {
-            throw new Error(partData.error || partData.message || `Error en parte ${partNumber} de "${originalName}"`);
-          }
-
-          // Success — update progress based on completed parts.
-          completedParts++;
-          const pct = Math.min(98, Math.round((completedParts / numberOfParts) * 100));
-          setSubmitStep(`Subiendo ${label} — ${completedParts}/${numberOfParts} partes (${pct}%)`);
-          setUploadProgress({ fileName: originalName, percent: pct });
-          return;
-        } catch (err: any) {
-          lastError = err instanceof Error ? err : new Error(String(err));
-          if (attempt < MAX_PART_RETRIES) {
-            // Exponential backoff with jitter: ~1s, 2s, 4s, 8s, 16s (capped), + random.
-            const backoff = Math.min(16000, 1000 * Math.pow(2, attempt - 1));
-            await new Promise((r) => setTimeout(r, backoff + Math.random() * 500));
-          }
-        }
-      }
-
-      throw new Error(
-        `Error en parte ${partNumber} de "${originalName}" tras ${MAX_PART_RETRIES} intentos: ${lastError?.message || "Error de red"}`
-      );
-    };
-
-    setSubmitStep(`Subiendo ${label} — 0/${numberOfParts} partes (0%)`);
-    setUploadProgress({ fileName: originalName, percent: 0 });
-
-    // Run a fixed-size worker pool that pulls part numbers off a shared counter.
-    let nextPart = 1;
-    const runWorker = async (): Promise<void> => {
-      while (true) {
-        const partNumber = nextPart++;
-        if (partNumber > numberOfParts) return;
-        await uploadPart(partNumber);
-      }
-    };
-
-    const workers = Array.from(
-      { length: Math.min(PART_CONCURRENCY, numberOfParts) },
-      () => runWorker()
-    );
-    // If any worker throws (a part exhausted its retries), the whole upload fails.
-    await Promise.all(workers);
-
-    // Step 3: Complete the multi-part upload
-    if (mode === "multi_part") {
-      setSubmitStep(`Finalizando ${label}...`);
-      setUploadProgress({ fileName: originalName, percent: 99 });
-
-      const completeRes = await fetch("/api/upload-complete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uploadId }),
-      });
-      const completeData = await completeRes.json();
-      if (!completeRes.ok || !completeData.success) {
-        throw new Error(completeData.error || `Error al completar upload de "${originalName}"`);
-      }
-    }
-
-    setUploadProgress({ fileName: originalName, percent: 100 });
-
-    return {
-      name: originalName,
-      finalName: uploadName,
-      size: file.size, // original size for display
-      uploadId,
-      extModified: wasCompressed || (initData.extModified || false),
-      mimeType: file.type || "application/octet-stream",
-    };
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -652,17 +415,15 @@ export default function App() {
     const chosenProj = projects.find(p => p.id === selectedProjectId);
     const projectName = chosenProj ? chosenProj.name : "";
 
-    // Step 1: Upload each file (sequentially to avoid rate limits)
-    const fileRecords: {
-      name: string; finalName: string; size: number;
-      uploadId: string; extModified: boolean; mimeType: string;
-    }[] = [];
+    // Step 1: Upload files in parallel (adaptive semaphore + throttling handling)
+    let fileRecords: UploadRecord[] = [];
 
     try {
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const record = await uploadOneFile(selectedFiles[i], i, selectedFiles.length);
-        fileRecords.push(record);
-      }
+      fileRecords = await uploadFiles(selectedFiles, {
+        onStep: (step) => setSubmitStep(step),
+        onProgress: (percent) =>
+          setUploadProgress({ fileName: `${selectedFiles.length} archivo(s)`, percent }),
+      });
     } catch (err: any) {
       setSubmitError(err.message || "Error al subir archivos.");
       setIsSubmitting(false);
