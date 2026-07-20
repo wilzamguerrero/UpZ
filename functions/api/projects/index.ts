@@ -174,6 +174,44 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     const newBlock = result.results?.[0] as any;
     const blockIdClean = newBlock?.id?.replace(/-/g, "") || "";
+    const createdAt = new Date().toISOString();
+
+    if (newBlock?.id) {
+      // Persist the initial metadata (title + creation date) as a JSON code block
+      // INSIDE the new toggle, so the date survives cache/cookie clears (durable in Notion).
+      try {
+        await appendChildren(
+          newBlock.id,
+          [{
+            object: "block",
+            type: "code",
+            code: {
+              rich_text: [{ type: "text", text: { content: JSON.stringify({ title: name.trim(), createdAt }, null, 2) } }],
+              language: "json",
+            },
+          }],
+          notionSecret
+        );
+      } catch {
+        // Non-critical: metadata can still be created later on save.
+      }
+
+      // Mirror into the KV cache so the tree shows the date immediately.
+      if (context.env.SUBMISSIONS_KV) {
+        try {
+          const cached = await context.env.SUBMISSIONS_KV.get("project-meta");
+          const allMeta = cached ? JSON.parse(cached) : {};
+          allMeta[newBlock.id] = {
+            ...(allMeta[newBlock.id] || {}),
+            title: name.trim(),
+            createdAt: allMeta[newBlock.id]?.createdAt || createdAt,
+          };
+          await context.env.SUBMISSIONS_KV.put("project-meta", JSON.stringify(allMeta));
+        } catch {
+          // Non-critical
+        }
+      }
+    }
 
     return json({
       success: true,

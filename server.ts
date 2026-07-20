@@ -859,6 +859,7 @@ app.get("/api/project-meta", async (req, res) => {
               groupId: data.groupId || "",
               order: typeof data.order === "number" ? data.order : 0,
               textColor: data.textColor === "white" || data.textColor === "black" ? data.textColor : "auto",
+              createdAt: typeof data.createdAt === "string" ? data.createdAt : undefined,
             }
           });
         } catch (e) {
@@ -906,11 +907,15 @@ app.post("/api/project-meta", async (req, res) => {
     dbColumns,
     groupId,
     order,
-    textColor
+    textColor,
+    createdAt
   } = req.body;
   if (!projectId) {
     return res.status(400).json({ error: "El ID del proyecto es obligatorio." });
   }
+
+  const existingCreatedAt = loadProjectMeta()[projectId]?.createdAt;
+  const resolvedCreatedAt = typeof createdAt === "string" && createdAt ? createdAt : existingCreatedAt;
 
   const config = loadConfig();
   if (config.notionSecret) {
@@ -940,6 +945,7 @@ app.post("/api/project-meta", async (req, res) => {
         groupId: (groupId || "").trim(),
         order: typeof order === "number" ? order : 0,
         textColor: textColor === "white" || textColor === "black" ? textColor : "auto",
+        ...(resolvedCreatedAt ? { createdAt: resolvedCreatedAt } : {}),
       };
 
       const jsonString = JSON.stringify(metaPayload, null, 2);
@@ -1054,6 +1060,7 @@ app.post("/api/project-meta", async (req, res) => {
     groupId: (groupId || "").trim(),
     order: typeof order === "number" ? order : 0,
     textColor: textColor === "white" || textColor === "black" ? textColor : "auto",
+    ...(resolvedCreatedAt ? { createdAt: resolvedCreatedAt } : {}),
   };
 
   saveProjectMeta(metaList);
@@ -1193,6 +1200,40 @@ app.post("/api/projects", async (req, res) => {
 
     const newBlock = result.results[0] as any;
     const blockIdClean = newBlock.id.replace(/-/g, "");
+    const createdAt = new Date().toISOString();
+
+    // Persist the initial metadata (title + creation date) as a JSON code block
+    // INSIDE the new toggle, so the date is durable in Notion (survives cache clears).
+    try {
+      await notion.blocks.children.append({
+        block_id: newBlock.id,
+        children: [
+          {
+            object: "block",
+            type: "code",
+            code: {
+              rich_text: [{ type: "text", text: { content: JSON.stringify({ title: name.trim(), createdAt }, null, 2) } }],
+              language: "json",
+            },
+          },
+        ],
+      });
+    } catch (e) {
+      console.error("Could not write initial meta code block in Notion", e);
+    }
+
+    // Mirror into the local project-meta store.
+    try {
+      const metaList = loadProjectMeta();
+      metaList[newBlock.id] = {
+        ...(metaList[newBlock.id] || {}),
+        title: name.trim(),
+        createdAt: metaList[newBlock.id]?.createdAt || createdAt,
+      };
+      saveProjectMeta(metaList);
+    } catch (e) {
+      console.error("Could not stamp createdAt for new project", e);
+    }
 
     res.json({
       success: true,

@@ -667,7 +667,7 @@ export default function App() {
 
         {/* Floating particles layer — renders on the upload view and mirrored in the
             admin detail preview (when a project color is active) for consistency. */}
-        {(activeTab === "upload" || (adminPreviewActive && hasBgColor)) && (() => {
+        {(activeTab === "upload" || adminPreviewActive) && (() => {
           const ParticleIcon = ICON_MAP[activeIconKey] ?? UploadCloud;
           const iconColor = bgColorIsLight ? 'rgba(0,0,0,0.18)' : 'rgba(255,255,255,0.18)';
           return (

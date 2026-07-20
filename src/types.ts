@@ -82,6 +82,8 @@ export interface ProjectMeta {
    * luminance. "auto" = decide by luminance, "white" = light text, "black" = dark text.
    */
   textColor?: "auto" | "white" | "black";
+  /** ISO date string set when the project is first created. */
+  createdAt?: string;
 }
 
 export interface FileAttachment {

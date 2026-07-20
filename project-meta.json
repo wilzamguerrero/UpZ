@@ -138,7 +138,7 @@
     "expirationDate": "",
     "backgroundImage": "",
     "bgBlur": 0,
-    "bgColor": "#d02525",
+    "bgColor": "#00ccaa",
     "icon": "Paperclip",
     "isActive": true,
     "customFields": [],
@@ -148,5 +148,34 @@
     "groupId": "",
     "order": 0,
     "textColor": "auto"
+  },
+  "3a32640c-88f4-814d-a9d9-cd3039291fd1": {
+    "title": "2026",
+    "createdAt": "2026-07-20T23:26:12.184Z"
+  },
+  "3a32640c-88f4-81b2-8b05-dd24f97ef5e2": {
+    "title": "2026",
+    "createdAt": "2026-07-20T23:29:40.194Z"
+  },
+  "3a32640c-88f4-814f-b02c-e5369d9edd85": {
+    "title": "ggggggg",
+    "description": "cxcxvxvc",
+    "step1": "",
+    "step2": "",
+    "step3": "",
+    "expirationDate": "",
+    "backgroundImage": "",
+    "bgBlur": 0,
+    "bgColor": "",
+    "icon": "Folder",
+    "isActive": true,
+    "customFields": [],
+    "useDatabase": false,
+    "databaseId": "",
+    "dbColumns": [],
+    "groupId": "",
+    "order": 0,
+    "textColor": "auto",
+    "createdAt": "2026-07-20T23:35:14.579Z"
   }
 }

@@ -2,7 +2,7 @@
 import {
   Key, FolderPlus, FileSpreadsheet, Eye, EyeOff, Check,
   AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, Download, ArrowRight, ArrowLeft, Trash2,
-  ChevronDown, ChevronRight, X,
+  ChevronDown, ChevronRight, X, RefreshCw,
   Link, QrCode, Copy, GripVertical, Database, Table,
   // Icon picker icons
   UploadCloud, FileText, BookOpen, Code2, Palette, Microscope,
@@ -30,6 +30,92 @@ const genColId = () => `col_${Date.now()}_${Math.random().toString(36).slice(2, 
 const EMPTY_META_LOAD_SIGNATURE = "__missing__";
 
 // ICON_OPTIONS, ICON_BY_KEY and ICON_CATEGORIES now live in ../icons (shared with the landing).
+
+/** Square icon button that opens a large, categorized, searchable icon picker.
+ *  Closes on outside click. Shared by the project and homepage appearance bars. */
+const CategorizedIconPicker: React.FC<{
+  value: string;
+  onChange: (key: string) => void;
+  title?: string;
+  align?: "left" | "right";
+}> = ({ value, onChange, title, align = "left" }) => {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const Current = ICON_BY_KEY[value] || UploadCloud;
+  const q = search.trim().toLowerCase();
+  const matches = (o: typeof ICON_OPTIONS[number]) =>
+    !q || o.label.toLowerCase().includes(q) || o.key.toLowerCase().includes(q) || o.cat.toLowerCase().includes(q);
+
+  const renderButton = (opt: typeof ICON_OPTIONS[number]) => (
+    <button
+      key={opt.key}
+      type="button"
+      onClick={() => { onChange(opt.key); setOpen(false); setSearch(""); }}
+      className={`h-10 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${value === opt.key ? "border-white bg-white/15 text-white" : "border-white/10 bg-[#111111] text-white/60 hover:text-white hover:border-white/30"}`}
+      title={`${opt.label} · ${opt.cat}`}
+    >
+      <opt.Icon className="w-4 h-4" />
+    </button>
+  );
+
+  const filtered = ICON_OPTIONS.filter(matches);
+
+  return (
+    <div className="relative shrink-0" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`w-10 h-10 flex items-center justify-center rounded-lg border transition-all ${open ? "border-white/50 bg-white/15 text-white" : "border-white/15 bg-white/5 hover:bg-white/10 text-white"}`}
+        title={title || "Elegir icono"}
+      >
+        <Current className="w-4 h-4" />
+      </button>
+      {open && (
+        <div className={`admin-dark-popover absolute ${align === "right" ? "right-0" : "left-0"} mt-2 z-50 w-[24rem] max-w-[calc(100vw-3rem)] p-3 rounded-xl border border-white/10 shadow-2xl`}>
+          <input
+            type="text"
+            autoFocus
+            placeholder="Buscar icono por nombre o categoría..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full mb-3 px-2.5 py-2 bg-[#111111] border border-white/10 rounded-lg text-xs text-white placeholder-white/20 focus:border-white/30 focus:outline-none"
+          />
+          <div className="max-h-[22rem] overflow-y-auto pr-1 space-y-3">
+            {q ? (
+              filtered.length > 0 ? (
+                <div className="grid grid-cols-7 gap-1.5">{filtered.map(renderButton)}</div>
+              ) : (
+                <p className="text-[11px] text-white/40 text-center py-6">Sin resultados para "{search}"</p>
+              )
+            ) : (
+              ICON_CATEGORIES.map((cat) => {
+                const items = ICON_OPTIONS.filter((o) => o.cat === cat);
+                if (items.length === 0) return null;
+                return (
+                  <div key={cat}>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-white/40 mb-1.5 px-0.5">{cat}</div>
+                    <div className="grid grid-cols-7 gap-1.5">{items.map(renderButton)}</div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const normalizeString = (s: string) => {
   return s
@@ -127,8 +213,19 @@ const ProjectTreeItem: React.FC<ProjectTreeItemProps> = ({
   };
 
   const Icon = hasChildren ? (expanded ? FolderOpen : Folder) : (node.type === "page" ? FileText : Folder);
-  const MetaIcon = meta?.icon ? ICON_BY_KEY[meta.icon] : undefined;
-  const colorSwatch = meta?.bgColor || "";
+  // Always show an icon and a color square, falling back to sensible defaults.
+  const MetaIcon = ICON_BY_KEY[meta?.icon || ""] || UploadCloud;
+  const colorSwatch = meta?.bgColor || "#050505";
+  const createdLabel = (() => {
+    const iso = meta?.createdAt;
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yy = String(d.getFullYear()).slice(-2);
+    return `${dd}/${mm}/${yy}`;
+  })();
 
   return (
     <div className="select-none">
@@ -166,24 +263,25 @@ const ProjectTreeItem: React.FC<ProjectTreeItemProps> = ({
           </div>
         </div>
 
-        {/* Color + icon assigned to this project/folder */}
+        {/* Creation date + color + icon — flat, borderless squares.
+            The icon box stays neutral so it never gets confused with the color. */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {colorSwatch && (
-            <span
-              className="w-5 h-5 rounded-md border border-white/20 shrink-0"
-              style={{ background: colorSwatch }}
-              title={`Color: ${colorSwatch}`}
-            />
-          )}
-          {MetaIcon && (
-            <span
-              className="w-6 h-6 rounded-md border border-white/10 flex items-center justify-center shrink-0"
-              style={{ background: colorSwatch || "rgba(255,255,255,0.05)" }}
-              title="Icono del proyecto"
-            >
-              <MetaIcon className="w-3.5 h-3.5 text-white" />
+          {createdLabel && (
+            <span className="text-[10px] font-mono text-white/40 mr-1 shrink-0" title="Fecha de creación">
+              {createdLabel}
             </span>
           )}
+          <span
+            className="w-6 h-6 shrink-0"
+            style={{ background: colorSwatch }}
+            title={`Color: ${meta?.bgColor || "sin color"}`}
+          />
+          <span
+            className="w-6 h-6 flex items-center justify-center shrink-0 bg-white/10"
+            title="Icono del proyecto"
+          >
+            <MetaIcon className="w-3.5 h-3.5 text-white" />
+          </span>
         </div>
 
         <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
@@ -346,8 +444,7 @@ export default function AdminPanel({
   const [copyIcon, setCopyIcon] = useState("UploadCloud");
   const [copyTextColor, setCopyTextColor] = useState<"auto" | "white" | "black">("auto");
   const [iconSearch, setIconSearch] = useState("");
-  const [projIconOpen, setProjIconOpen] = useState(false);
-  const projIconRef = useRef<HTMLDivElement>(null);
+
   const [copyUseDatabase, setCopyUseDatabase] = useState(false);
   const [copyDatabaseId, setCopyDatabaseId] = useState("");
   const [copyDbColumns, setCopyDbColumns] = useState<DbColumn[]>([]);
@@ -390,7 +487,9 @@ export default function AdminPanel({
   // cards become a translucent dark surface so the project's color bleeds through
   // the background — mirroring the published landing so you can tell which project
   // you're editing. White text stays readable on any project color.
-  const useAdaptivePanel = adminView === "detail" && !!copyBgColor;
+  // In detail we preview the project color; in browse we preview the homepage cover
+  // color, so panels go flat/transparent in both cases when a color is active.
+  const useAdaptivePanel = adminView === "detail" ? !!copyBgColor : !!homeBgColor;
   // When a project color is active, panels go flat & transparent so the config looks
   // exactly like the clean published landing (the color and particles show through).
   const panelClass = useAdaptivePanel
@@ -414,18 +513,15 @@ export default function AdminPanel({
       colorRafRef.current = null;
     });
   };
+  const setHomeBgColorSmooth = (value: string) => {
+    if (colorRafRef.current !== null) cancelAnimationFrame(colorRafRef.current);
+    colorRafRef.current = requestAnimationFrame(() => {
+      setHomeBgColor(value);
+      colorRafRef.current = null;
+    });
+  };
 
-  // Close the icon picker when clicking anywhere outside of it.
-  useEffect(() => {
-    if (!projIconOpen) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (projIconRef.current && !projIconRef.current.contains(event.target as Node)) {
-        setProjIconOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
-  }, [projIconOpen]);
+
   const [isSavingMeta, setIsSavingMeta] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedShareQr, setCopiedShareQr] = useState(false);
@@ -436,6 +532,20 @@ export default function AdminPanel({
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isDeletingProjectId, setIsDeletingProjectId] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  /** Re-pull projects + metadata from Notion without reloading the page. */
+  const handleRefreshData = async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await refreshProjects();
+      await refreshProjectMeta();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // Submissions state
   const [submissions, setSubmissions] = useState<Submission[]>([]);
@@ -576,19 +686,32 @@ export default function AdminPanel({
   // Debounced so dragging the color picker doesn't re-render the whole app (with its
   // animated background) on every pixel — it only updates once movement settles.
   useEffect(() => {
-    if (!onAdminPreviewChange || !selectedMetaProjectId) return;
+    if (!onAdminPreviewChange) return;
     const timer = setTimeout(() => {
-      onAdminPreviewChange({
-        projectId: selectedMetaProjectId,
-        bgColor: adminView === "detail" ? copyBgColor : "",
-        backgroundImage: "",
-        bgBlur: 0,
-        textColor: copyTextColor,
-        icon: copyIcon,
-      });
+      if (adminView === "detail" && selectedMetaProjectId) {
+        onAdminPreviewChange({
+          projectId: selectedMetaProjectId,
+          bgColor: copyBgColor,
+          backgroundImage: "",
+          bgBlur: 0,
+          textColor: copyTextColor,
+          icon: copyIcon,
+        });
+      } else {
+        // Browse view: preview the homepage cover color + icon particles live.
+        // "__home__" is a sentinel so App tints the environment with the cover color.
+        onAdminPreviewChange({
+          projectId: "__home__",
+          bgColor: homeBgColor || "",
+          backgroundImage: "",
+          bgBlur: 0,
+          textColor: "auto",
+          icon: homeIcon,
+        });
+      }
     }, 120);
     return () => clearTimeout(timer);
-  }, [selectedMetaProjectId, copyBgColor, copyTextColor, copyIcon, onAdminPreviewChange, adminView]);
+  }, [adminView, selectedMetaProjectId, copyBgColor, copyTextColor, copyIcon, homeBgColor, homeIcon, onAdminPreviewChange]);
 
   /** Snapshot the current editor state into a ProjectMeta payload. */
   const buildProjectMeta = (): ProjectMeta => ({
@@ -607,6 +730,7 @@ export default function AdminPanel({
     dbColumns: copyDbColumns,
     groupId: copyGroupId,
     order: projectMeta[selectedMetaProjectId]?.order ?? 0,
+    createdAt: projectMeta[selectedMetaProjectId]?.createdAt,
   });
 
   /**
@@ -840,6 +964,7 @@ export default function AdminPanel({
       if (data.success) {
         setNewProjectName("");
         await refreshProjects();
+        await refreshProjectMeta();
         fetchSubmissions();
       } else {
         setProjectError(data.error || "Error al crear el proyecto.");
@@ -864,6 +989,7 @@ export default function AdminPanel({
       return;
     }
     await refreshProjects();
+    await refreshProjectMeta();
   };
 
   /** Rename a project/folder toggle (or page). */
@@ -881,9 +1007,16 @@ export default function AdminPanel({
     await refreshProjects();
   };
 
+  /** Opens the in-UI confirmation modal (no native browser dialog). */
   const handleDeleteProject = async (projId: string, projName: string) => {
-    if (!window.confirm(`┬┐Est├ís seguro de que quieres eliminar la carpeta del proyecto "${projName}"? Se borrar├í tanto de Notion como localmente.`)) return;
+    setDeleteTarget({ id: projId, name: projName });
+  };
 
+  /** Actually deletes the project after the user confirms in the styled modal. */
+  const performDeleteProject = async () => {
+    if (!deleteTarget) return;
+    const projId = deleteTarget.id;
+    setDeleteTarget(null);
     setIsDeletingProjectId(projId);
     try {
       const res = await fetch(`/api/projects/${projId}`, {
@@ -897,10 +1030,10 @@ export default function AdminPanel({
         await refreshProjects();
         await refreshProjectMeta();
       } else {
-        alert(data.error || "No se pudo eliminar el proyecto.");
+        setProjectError(data.error || "No se pudo eliminar el proyecto.");
       }
     } catch (err) {
-      alert("Error de red al intentar eliminar el proyecto.");
+      setProjectError("Error de red al intentar eliminar el proyecto.");
     } finally {
       setIsDeletingProjectId(null);
     }
@@ -992,6 +1125,45 @@ export default function AdminPanel({
 
   return (
     <div className="space-y-6">
+      {/* Delete confirmation — styled modal matching the interface (no native dialog). */}
+      {deleteTarget && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={() => setDeleteTarget(null)}
+        >
+          <div
+            className="w-full max-w-sm bg-[#111111] border border-white/10 rounded-2xl p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-red-500/15 text-red-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <h3 className="text-base font-semibold text-white">Eliminar proyecto</h3>
+            </div>
+            <p className="text-sm text-white/60 leading-relaxed mb-6">
+              ¿Seguro que quieres eliminar <span className="text-white font-semibold">"{deleteTarget.name}"</span>? Se borrará tanto de Notion como localmente. Esta acción no se puede deshacer.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="h-10 px-4 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white text-sm font-medium transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void performDeleteProject()}
+                className="h-10 px-4 rounded-lg bg-red-500/90 hover:bg-red-500 text-white text-sm font-bold transition-all"
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Detail view keeps a back arrow; browse view has no header. */}
       {adminView === "detail" && (
         <div className="flex items-center gap-3">
@@ -1030,71 +1202,63 @@ export default function AdminPanel({
               <p className="text-[11px] text-white/40">Color e icono de la página principal</p>
             </div>
 
-            {/* Color picker button */}
+            {/* Color picker — same square button as in projects. */}
             <label
-              className="relative w-10 h-10 rounded-lg border border-white/15 cursor-pointer shrink-0 flex items-center justify-center overflow-hidden"
-              style={{ background: homeBgColor || "#050505" }}
-              title={`Color de fondo: ${homeBgColor || "#050505"}`}
+              className="relative w-10 h-10 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 cursor-pointer shrink-0 flex items-center justify-center transition-all"
+              title={`Color de la portada: ${homeBgColor || "#050505"}`}
             >
               <input
                 type="color"
                 value={homeBgColor || "#050505"}
-                onChange={(e) => setHomeBgColor(e.target.value)}
+                onChange={(e) => setHomeBgColorSmooth(e.target.value)}
                 className="absolute inset-0 opacity-0 cursor-pointer"
               />
-              <Palette className="w-4 h-4 text-white pointer-events-none mix-blend-difference" />
+              <Palette className="w-4 h-4 text-white pointer-events-none" />
             </label>
 
-            {/* Icon dropdown toggle */}
-            <div className="relative shrink-0">
+            {homeBgColor && (
               <button
                 type="button"
-                onClick={() => setHomeIconOpen((v) => !v)}
-                className="h-10 px-3 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white flex items-center gap-2 transition-all"
-                title="Elegir icono de la portada"
+                onClick={() => setHomeBgColor("")}
+                className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-red-300 transition-all shrink-0"
+                title="Quitar el color de la portada"
               >
-                {(() => { const I = ICON_BY_KEY[homeIcon] || UploadCloud; return <I className="w-4 h-4" />; })()}
-                <span className="text-xs">Icono</span>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${homeIconOpen ? "rotate-180" : ""}`} />
+                <X className="w-4 h-4" />
               </button>
-              {homeIconOpen && (
-                <div className="absolute right-0 mt-2 z-20 w-72 p-2 rounded-xl border border-white/10 bg-[#0d0d0d] shadow-2xl">
-                  <input
-                    type="text"
-                    placeholder="Buscar icono..."
-                    value={homeIconSearch}
-                    onChange={(e) => setHomeIconSearch(e.target.value)}
-                    className="w-full mb-2 px-2.5 py-2 bg-[#111111] border border-white/10 rounded-lg text-xs text-white placeholder-white/20 focus:border-white/30 focus:outline-none"
-                  />
-                  <div className="grid grid-cols-6 gap-1.5 max-h-52 overflow-y-auto pr-1">
-                    {filteredHomeIcons.map(({ key, Icon }) => (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => { setHomeIcon(key); setHomeIconOpen(false); }}
-                        className={`h-9 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${homeIcon === key ? "border-white bg-white/10 text-white" : "border-white/10 bg-[#111111] text-white/55 hover:text-white hover:border-white/25"}`}
-                        title={key}
-                      >
-                        <Icon className="w-4 h-4" />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+            )}
 
-            {/* Save button */}
+            {/* Icon picker — same categorized system as in projects. */}
+            <CategorizedIconPicker
+              value={homeIcon}
+              onChange={setHomeIcon}
+              align="right"
+              title="Elegir icono de la portada"
+            />
+
+            {/* Save button — striped style, matching "Crear carpeta" / project save. */}
             <button
               type="button"
               onClick={() => handleSaveHomeAppearance()}
               disabled={isSavingHomeAppearance}
-              className="h-10 px-4 rounded-lg bg-white text-black text-xs font-bold uppercase tracking-wide hover:bg-white/90 transition-all disabled:opacity-50 shrink-0"
+              className="h-11 px-5 font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden shrink-0 disabled:opacity-50"
+              style={{ '--btn-color': safeRetroColor(homeBgColor || "#ffffff") } as React.CSSProperties}
             >
-              {isSavingHomeAppearance ? "Guardando..." : "Guardar"}
+              <div className="absolute inset-0 bg-[#000000] border border-black group-hover:bg-transparent group-hover:border-transparent transition-all duration-300 rounded-[4px] pointer-events-none" />
+              <div
+                className="absolute inset-[1px] bg-[#000000] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px] stripes-overlay"
+                style={{ backgroundImage: `repeating-linear-gradient(119deg, currentColor 0px, currentColor 1px, transparent 1px, transparent 10px)` }}
+              />
+              <span className="btn-motion-corner btn-motion-corner-tl" />
+              <span className="btn-motion-corner btn-motion-corner-tr" />
+              <span className="btn-motion-corner btn-motion-corner-bl" />
+              <span className="btn-motion-corner btn-motion-corner-br" />
+              <span className="relative z-10 flex items-center justify-center gap-2 font-extrabold transition-colors duration-300 font-mono hover-text-adaptive btn-text-content">
+                {isSavingHomeAppearance ? "Guardando..." : "Guardar"}
+              </span>
             </button>
 
-            {homeAppearanceMessage && (
-              <span className={`text-xs shrink-0 ${homeAppearanceMessage.type === "success" ? "text-emerald-400" : "text-red-400"}`}>
+            {homeAppearanceMessage?.type === "error" && (
+              <span className="text-xs shrink-0 text-red-400">
                 {homeAppearanceMessage.text}
               </span>
             )}
@@ -1108,7 +1272,7 @@ export default function AdminPanel({
 
         {/* Compact appearance bar — icon-only controls on a single line. */}
         {selectedMetaProjectId && projects.find((p) => p.id === selectedMetaProjectId) && (
-          <div className={`${panelClass} relative ${projIconOpen ? "z-50" : "z-10"}`} style={panelStyle}>
+          <div className={`${panelClass} relative z-10`} style={panelStyle}>
             <div className="flex items-center gap-2">
               {/* Color picker — same look as the other icon buttons (the chosen color
                   already shows across the whole environment). */}
@@ -1136,71 +1300,12 @@ export default function AdminPanel({
                 </button>
               )}
 
-              {/* Icon picker — icon-only button + large categorized popover */}
-              <div className="relative shrink-0" ref={projIconRef}>
-                <button
-                  type="button"
-                  onClick={() => setProjIconOpen((v) => !v)}
-                  className={`w-10 h-10 flex items-center justify-center rounded-lg border transition-all ${projIconOpen ? "border-white/50 bg-white/15 text-white" : "border-white/15 bg-white/5 hover:bg-white/10 text-white"}`}
-                  title="Elegir icono del proyecto"
-                >
-                  {(() => { const I = ICON_BY_KEY[copyIcon] || UploadCloud; return <I className="w-4 h-4" />; })()}
-                </button>
-                {projIconOpen && (
-                  <div className="admin-dark-popover absolute left-0 mt-2 z-50 w-[24rem] max-w-[calc(100vw-3rem)] p-3 rounded-xl border border-white/10 shadow-2xl">
-                    <input
-                      type="text"
-                      autoFocus
-                      placeholder="Buscar icono por nombre o categoría..."
-                      value={iconSearch}
-                      onChange={(e) => setIconSearch(e.target.value)}
-                      className="w-full mb-3 px-2.5 py-2 bg-[#111111] border border-white/10 rounded-lg text-xs text-white placeholder-white/20 focus:border-white/30 focus:outline-none"
-                    />
-                    {(() => {
-                      const q = iconSearch.trim().toLowerCase();
-                      const matches = (o: typeof ICON_OPTIONS[number]) =>
-                        !q || o.label.toLowerCase().includes(q) || o.key.toLowerCase().includes(q) || o.cat.toLowerCase().includes(q);
-
-                      const renderButton = (opt: typeof ICON_OPTIONS[number]) => (
-                        <button
-                          key={opt.key}
-                          type="button"
-                          onClick={() => { setCopyIcon(opt.key); setProjIconOpen(false); setIconSearch(""); }}
-                          className={`h-10 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${copyIcon === opt.key ? "border-white bg-white/15 text-white" : "border-white/10 bg-[#111111] text-white/60 hover:text-white hover:border-white/30"}`}
-                          title={`${opt.label} · ${opt.cat}`}
-                        >
-                          <opt.Icon className="w-4 h-4" />
-                        </button>
-                      );
-
-                      const filtered = ICON_OPTIONS.filter(matches);
-
-                      return (
-                        <div className="max-h-[22rem] overflow-y-auto pr-1 space-y-3">
-                          {q ? (
-                            filtered.length > 0 ? (
-                              <div className="grid grid-cols-7 gap-1.5">{filtered.map(renderButton)}</div>
-                            ) : (
-                              <p className="text-[11px] text-white/40 text-center py-6">Sin resultados para "{iconSearch}"</p>
-                            )
-                          ) : (
-                            ICON_CATEGORIES.map((cat) => {
-                              const items = ICON_OPTIONS.filter((o) => o.cat === cat);
-                              if (items.length === 0) return null;
-                              return (
-                                <div key={cat}>
-                                  <div className="text-[10px] font-bold uppercase tracking-wider text-white/40 mb-1.5 px-0.5">{cat}</div>
-                                  <div className="grid grid-cols-7 gap-1.5">{items.map(renderButton)}</div>
-                                </div>
-                              );
-                            })
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-              </div>
+              {/* Icon picker — shared categorized component */}
+              <CategorizedIconPicker
+                value={copyIcon}
+                onChange={setCopyIcon}
+                title="Elegir icono del proyecto"
+              />
 
               {/* Share: copy public link + copy QR image (like the project tree / home) */}
               {(() => {
@@ -1509,9 +1614,20 @@ export default function AdminPanel({
                 <p className="text-xs text-white/40">Páginas de sub-carpeta en tu Notion</p>
               </div>
             </div>
-            <span className="bg-white/5 text-white/70 font-mono text-[11px] font-semibold px-2.5 py-1 rounded-full border border-white/10">
-              Total: {projects.length}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="bg-white/5 text-white/70 font-mono text-[11px] font-semibold px-2.5 py-1 rounded-full border border-white/10">
+                Total: {projects.length}
+              </span>
+              <button
+                type="button"
+                onClick={handleRefreshData}
+                disabled={isRefreshing}
+                title="Refrescar datos desde Notion (sin recargar la página)"
+                className="w-8 h-8 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-all disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`} />
+              </button>
+            </div>
           </div>
 
           <form onSubmit={handleCreateProject} className="flex gap-2 mb-6">
@@ -1530,7 +1646,7 @@ export default function AdminPanel({
               disabled={isCreatingProject || !newProjectName.trim() || !config?.isConfigured}
               className="px-5 h-[44px] font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden shrink-0"
               style={{
-                '--btn-color': safeRetroColor(copyBgColor)
+                '--btn-color': safeRetroColor(homeBgColor || "#ffffff")
               }}
             >
               {/* Base black background filled container */}

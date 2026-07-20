@@ -29,6 +29,7 @@ import {
   Circle, Square, Triangle, Hexagon, Diamond, Hash, Percent, Infinity, Asterisk,
   type LucideIcon,
 } from "lucide-react";
+import * as LucideAll from "lucide-react";
 
 export interface IconOption {
   key: string;
@@ -50,10 +51,11 @@ export const ICON_CATEGORIES: string[] = [
   "Comunicación",
   "Herramientas",
   "Símbolos",
+  "Más iconos",
 ];
 
-/** Extensive, categorized icon collection shared by the admin picker and the landing. */
-export const ICON_OPTIONS: IconOption[] = [
+/** Hand-picked, well-labeled icons grouped by theme (shown first). */
+const CURATED_ICONS: IconOption[] = [
   // Archivos
   { key: "UploadCloud", Icon: UploadCloud, label: "Subida", cat: "Archivos" },
   { key: "Upload", Icon: Upload, label: "Subir", cat: "Archivos" },
@@ -257,6 +259,38 @@ export const ICON_OPTIONS: IconOption[] = [
   { key: "Infinity", Icon: Infinity, label: "Infinito", cat: "Símbolos" },
   { key: "Asterisk", Icon: Asterisk, label: "Asterisco", cat: "Símbolos" },
 ];
+
+/** Total icons offered by the picker (curated + auto-filled from lucide-react). */
+const TARGET_TOTAL = 500;
+
+/** True if a lucide-react export is a real, renderable icon component (not an alias/type). */
+function isIconComponent(name: string, value: unknown): boolean {
+  if (!/^[A-Z][A-Za-z0-9]*$/.test(name)) return false;
+  // lucide exports each icon under 3 names (Foo, FooIcon, LucideFoo). Keep only the plain one.
+  if (name.startsWith("Lucide") || name.endsWith("Icon")) return false;
+  if (name === "Icon") return false;
+  return typeof value === "function" || (typeof value === "object" && value !== null);
+}
+
+/** Turn a PascalCase icon name into a readable label ("ArrowRight" -> "Arrow Right"). */
+function humanizeIconName(name: string): string {
+  return name.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z])([A-Z][a-z])/g, "$1 $2");
+}
+
+const curatedKeys = new Set(CURATED_ICONS.map((o) => o.key));
+
+const EXTRA_ICONS: IconOption[] = Object.keys(LucideAll)
+  .filter((name) => !curatedKeys.has(name) && isIconComponent(name, (LucideAll as any)[name]))
+  .sort((a, b) => a.localeCompare(b))
+  .map((name) => ({
+    key: name,
+    Icon: (LucideAll as any)[name] as LucideIcon,
+    label: humanizeIconName(name),
+    cat: "Más iconos",
+  }));
+
+/** Extensive, categorized icon collection shared by the admin picker and the landing. */
+export const ICON_OPTIONS: IconOption[] = [...CURATED_ICONS, ...EXTRA_ICONS].slice(0, TARGET_TOTAL);
 
 /** Lookup: icon key (stored in project meta) -> Lucide icon component. */
 export const ICON_BY_KEY: Record<string, LucideIcon> = Object.fromEntries(

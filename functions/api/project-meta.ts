@@ -72,6 +72,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
               databaseId: data.databaseId || "",
               dbColumns: Array.isArray(data.dbColumns) ? data.dbColumns : [],
               textColor: data.textColor === "white" || data.textColor === "black" ? data.textColor : "auto",
+              createdAt: typeof data.createdAt === "string" ? data.createdAt : undefined,
             },
           });
         } catch {
@@ -125,11 +126,22 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const {
     projectId, title, description, step1, step2, step3,
     customFields, expirationDate, backgroundImage, isActive,
-    groupId, order, useDatabase, databaseId, dbColumns, bgBlur, bgColor, icon, textColor,
+    groupId, order, useDatabase, databaseId, dbColumns, bgBlur, bgColor, icon, textColor, createdAt,
   } = body;
 
   if (!projectId) {
     return json({ error: "El ID del proyecto es obligatorio." }, 400);
+  }
+
+  // Preserve the existing creation date if the client didn't send one.
+  let existingCreatedAt: string | undefined;
+  if (SUBMISSIONS_KV) {
+    try {
+      const cached = await SUBMISSIONS_KV.get("project-meta");
+      if (cached) existingCreatedAt = JSON.parse(cached)[projectId]?.createdAt;
+    } catch {
+      // Ignore
+    }
   }
 
   const cleanCustomFields = Array.isArray(customFields)
@@ -172,6 +184,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     bgColor: (bgColor || "").trim(),
     icon: (icon || "").trim(),
     textColor: textColor === "white" || textColor === "black" ? textColor : "auto",
+    ...(typeof createdAt === "string" && createdAt
+      ? { createdAt }
+      : existingCreatedAt
+      ? { createdAt: existingCreatedAt }
+      : {}),
   };
 
   if (notionSecret) {
