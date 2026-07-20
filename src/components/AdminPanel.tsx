@@ -27,6 +27,12 @@ import { useTheme } from "../ThemeContext";
 
 const genId = () => `cf_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 const genColId = () => `col_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+/** Pick a random, recognizable icon (from the curated set) for every new project. */
+const RANDOM_ICON_POOL = ICON_OPTIONS.filter((o) => o.cat !== "Más iconos");
+const randomIconKey = () => {
+  const pool = RANDOM_ICON_POOL.length > 0 ? RANDOM_ICON_POOL : ICON_OPTIONS;
+  return pool[Math.floor(Math.random() * pool.length)]?.key || "UploadCloud";
+};
 const EMPTY_META_LOAD_SIGNATURE = "__missing__";
 
 // ICON_OPTIONS, ICON_BY_KEY and ICON_CATEGORIES now live in ../icons (shared with the landing).
@@ -958,7 +964,7 @@ export default function AdminPanel({
       const res = await fetch("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newProjectName.trim() }),
+        body: JSON.stringify({ name: newProjectName.trim(), icon: randomIconKey() }),
       });
       const data = await res.json();
       if (data.success) {
@@ -976,12 +982,13 @@ export default function AdminPanel({
     }
   };
 
-  /** Create a project/folder INSIDE another one (tree). */
+  /** Create a project/folder INSIDE another one (tree). Inherits the parent's color. */
   const handleCreateChild = async (parentId: string, name: string) => {
+    const parentColor = projectMeta[parentId]?.bgColor || "";
     const res = await fetch("/api/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), parentId }),
+      body: JSON.stringify({ name: name.trim(), parentId, icon: randomIconKey(), bgColor: parentColor }),
     });
     const data = await res.json();
     if (!data.success) {
@@ -1148,16 +1155,28 @@ export default function AdminPanel({
               <button
                 type="button"
                 onClick={() => setDeleteTarget(null)}
-                className="h-10 px-4 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white text-sm font-medium transition-all"
+                className="h-11 px-4 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white text-sm font-medium transition-all"
               >
                 Cancelar
               </button>
               <button
                 type="button"
                 onClick={() => void performDeleteProject()}
-                className="h-10 px-4 rounded-lg bg-red-500/90 hover:bg-red-500 text-white text-sm font-bold transition-all"
+                className="h-11 px-6 font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden"
+                style={{ '--btn-color': '#ff3b30' } as React.CSSProperties}
               >
-                Eliminar
+                <div className="absolute inset-0 bg-[#000000] border border-black group-hover:bg-transparent group-hover:border-transparent transition-all duration-300 rounded-[4px] pointer-events-none" />
+                <div
+                  className="absolute inset-[1px] bg-[#000000] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px] stripes-overlay"
+                  style={{ backgroundImage: `repeating-linear-gradient(119deg, currentColor 0px, currentColor 1px, transparent 1px, transparent 10px)` }}
+                />
+                <span className="btn-motion-corner btn-motion-corner-tl" />
+                <span className="btn-motion-corner btn-motion-corner-tr" />
+                <span className="btn-motion-corner btn-motion-corner-bl" />
+                <span className="btn-motion-corner btn-motion-corner-br" />
+                <span className="relative z-10 flex items-center justify-center gap-2 font-extrabold transition-colors duration-300 font-mono hover-text-adaptive btn-text-content">
+                  Eliminar
+                </span>
               </button>
             </div>
           </div>

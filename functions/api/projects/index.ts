@@ -26,6 +26,17 @@ const MAX_TREE_DEPTH = 4;
 /** A submission toggle's header always starts with the 👤 emoji (see submit.ts). */
 const isSubmissionTitle = (name: string): boolean => name.trim().startsWith("👤");
 
+/** Recognizable icon keys used to auto-assign a random icon to new projects. */
+const RANDOM_ICON_KEYS = [
+  "FileText", "Folder", "BookOpen", "GraduationCap", "Rocket", "Star", "Award", "Package",
+  "Camera", "Music", "Palette", "Code2", "Cpu", "Database", "Globe", "Heart", "Lightbulb",
+  "Trophy", "Target", "Zap", "Brain", "FlaskConical", "Calculator", "Briefcase", "Building2",
+  "Mail", "Bell", "Users", "Settings", "Compass", "Map", "Shield", "Sparkles", "Wand2",
+  "Leaf", "Sun", "Moon", "Flame", "Mountain", "Image", "Video", "Layers", "Bookmark", "Gem",
+  "Crown", "Flag", "Medal", "Microscope", "Atom", "Newspaper",
+];
+const pickRandomIconKey = (): string => RANDOM_ICON_KEYS[Math.floor(Math.random() * RANDOM_ICON_KEYS.length)];
+
 /** List ALL children of a block, following pagination. */
 async function listAllChildren(blockId: string, token: string): Promise<any[]> {
   const out: any[] = [];
@@ -138,7 +149,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { notionSecret, parentPageId } = await getConfig(context.env);
 
-  let body: { name?: string; parentId?: string };
+  let body: { name?: string; parentId?: string; icon?: string; bgColor?: string };
   try {
     body = await context.request.json();
   } catch {
@@ -176,9 +187,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const blockIdClean = newBlock?.id?.replace(/-/g, "") || "";
     const createdAt = new Date().toISOString();
 
+    // Initial metadata: creation date, an icon (provided or random) and (for children)
+    // the inherited color. The icon is always set so new projects are never left blank.
+    const initialMeta: Record<string, any> = {
+      title: name.trim(),
+      createdAt,
+      icon: typeof body.icon === "string" && body.icon ? body.icon : pickRandomIconKey(),
+    };
+    if (typeof body.bgColor === "string" && body.bgColor) initialMeta.bgColor = body.bgColor;
+
     if (newBlock?.id) {
-      // Persist the initial metadata (title + creation date) as a JSON code block
-      // INSIDE the new toggle, so the date survives cache/cookie clears (durable in Notion).
+      // Persist the initial metadata as a JSON code block INSIDE the new toggle, so it
+      // survives cache/cookie clears (durable in Notion).
       try {
         await appendChildren(
           newBlock.id,
@@ -186,7 +206,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             object: "block",
             type: "code",
             code: {
-              rich_text: [{ type: "text", text: { content: JSON.stringify({ title: name.trim(), createdAt }, null, 2) } }],
+              rich_text: [{ type: "text", text: { content: JSON.stringify(initialMeta, null, 2) } }],
               language: "json",
             },
           }],
@@ -196,16 +216,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         // Non-critical: metadata can still be created later on save.
       }
 
-      // Mirror into the KV cache so the tree shows the date immediately.
+      // Mirror into the KV cache so the tree shows it immediately.
       if (context.env.SUBMISSIONS_KV) {
         try {
           const cached = await context.env.SUBMISSIONS_KV.get("project-meta");
           const allMeta = cached ? JSON.parse(cached) : {};
-          allMeta[newBlock.id] = {
-            ...(allMeta[newBlock.id] || {}),
-            title: name.trim(),
-            createdAt: allMeta[newBlock.id]?.createdAt || createdAt,
-          };
+          allMeta[newBlock.id] = { ...(allMeta[newBlock.id] || {}), ...initialMeta };
           await context.env.SUBMISSIONS_KV.put("project-meta", JSON.stringify(allMeta));
         } catch {
           // Non-critical

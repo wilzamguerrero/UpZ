@@ -1070,6 +1070,17 @@ app.post("/api/project-meta", async (req, res) => {
 // A submission toggle's header always starts with 👤 (see /api/submit).
 const isSubmissionTitle = (name: string): boolean => name.trim().startsWith("👤");
 
+/** Recognizable icon keys used to auto-assign a random icon to new projects. */
+const RANDOM_ICON_KEYS = [
+  "FileText", "Folder", "BookOpen", "GraduationCap", "Rocket", "Star", "Award", "Package",
+  "Camera", "Music", "Palette", "Code2", "Cpu", "Database", "Globe", "Heart", "Lightbulb",
+  "Trophy", "Target", "Zap", "Brain", "FlaskConical", "Calculator", "Briefcase", "Building2",
+  "Mail", "Bell", "Users", "Settings", "Compass", "Map", "Shield", "Sparkles", "Wand2",
+  "Leaf", "Sun", "Moon", "Flame", "Mountain", "Image", "Video", "Layers", "Bookmark", "Gem",
+  "Crown", "Flag", "Medal", "Microscope", "Atom", "Newspaper",
+];
+const pickRandomIconKey = (): string => RANDOM_ICON_KEYS[Math.floor(Math.random() * RANDOM_ICON_KEYS.length)];
+
 // List ALL children of a block (paginated).
 async function listAllChildBlocks(notion: Client, blockId: string): Promise<any[]> {
   const out: any[] = [];
@@ -1162,7 +1173,7 @@ app.get("/api/projects", async (req, res) => {
 // 5. Create a new Project in Notion. Body: { name, parentId? }
 // parentId → create inside that folder/project; otherwise at the root page.
 app.post("/api/projects", async (req, res) => {
-  const { name, parentId } = req.body;
+  const { name, parentId, icon, bgColor } = req.body;
   if (!name || name.trim() === "") {
     return res.status(400).json({ error: "El nombre del proyecto es obligatorio" });
   }
@@ -1202,8 +1213,17 @@ app.post("/api/projects", async (req, res) => {
     const blockIdClean = newBlock.id.replace(/-/g, "");
     const createdAt = new Date().toISOString();
 
-    // Persist the initial metadata (title + creation date) as a JSON code block
-    // INSIDE the new toggle, so the date is durable in Notion (survives cache clears).
+    // Initial metadata: creation date, an icon (provided or random) and (for children)
+    // the inherited color. The icon is always set so new projects are never left blank.
+    const initialMeta: Record<string, any> = {
+      title: name.trim(),
+      createdAt,
+      icon: typeof icon === "string" && icon ? icon : pickRandomIconKey(),
+    };
+    if (typeof bgColor === "string" && bgColor) initialMeta.bgColor = bgColor;
+
+    // Persist the initial metadata as a JSON code block INSIDE the new toggle, so it
+    // is durable in Notion (survives cache clears).
     try {
       await notion.blocks.children.append({
         block_id: newBlock.id,
@@ -1212,7 +1232,7 @@ app.post("/api/projects", async (req, res) => {
             object: "block",
             type: "code",
             code: {
-              rich_text: [{ type: "text", text: { content: JSON.stringify({ title: name.trim(), createdAt }, null, 2) } }],
+              rich_text: [{ type: "text", text: { content: JSON.stringify(initialMeta, null, 2) } }],
               language: "json",
             },
           },
@@ -1225,14 +1245,10 @@ app.post("/api/projects", async (req, res) => {
     // Mirror into the local project-meta store.
     try {
       const metaList = loadProjectMeta();
-      metaList[newBlock.id] = {
-        ...(metaList[newBlock.id] || {}),
-        title: name.trim(),
-        createdAt: metaList[newBlock.id]?.createdAt || createdAt,
-      };
+      metaList[newBlock.id] = { ...(metaList[newBlock.id] || {}), ...initialMeta };
       saveProjectMeta(metaList);
     } catch (e) {
-      console.error("Could not stamp createdAt for new project", e);
+      console.error("Could not stamp initial meta for new project", e);
     }
 
     res.json({
