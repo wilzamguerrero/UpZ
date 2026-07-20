@@ -858,6 +858,7 @@ app.get("/api/project-meta", async (req, res) => {
               dbColumns: Array.isArray(data.dbColumns) ? data.dbColumns : [],
               groupId: data.groupId || "",
               order: typeof data.order === "number" ? data.order : 0,
+              textColor: data.textColor === "white" || data.textColor === "black" ? data.textColor : "auto",
             }
           });
         } catch (e) {
@@ -904,7 +905,8 @@ app.post("/api/project-meta", async (req, res) => {
     databaseId,
     dbColumns,
     groupId,
-    order
+    order,
+    textColor
   } = req.body;
   if (!projectId) {
     return res.status(400).json({ error: "El ID del proyecto es obligatorio." });
@@ -937,6 +939,7 @@ app.post("/api/project-meta", async (req, res) => {
         dbColumns: Array.isArray(dbColumns) ? dbColumns : [],
         groupId: (groupId || "").trim(),
         order: typeof order === "number" ? order : 0,
+        textColor: textColor === "white" || textColor === "black" ? textColor : "auto",
       };
 
       const jsonString = JSON.stringify(metaPayload, null, 2);
@@ -1050,6 +1053,7 @@ app.post("/api/project-meta", async (req, res) => {
     dbColumns: Array.isArray(dbColumns) ? dbColumns : [],
     groupId: (groupId || "").trim(),
     order: typeof order === "number" ? order : 0,
+    textColor: textColor === "white" || textColor === "black" ? textColor : "auto",
   };
 
   saveProjectMeta(metaList);

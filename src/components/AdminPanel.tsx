@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from "react";
+﻿import React, { useState, useEffect, useRef } from "react";
 import {
   Key, FolderPlus, FileSpreadsheet, Eye, EyeOff, Check,
   AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, Download, ArrowRight, ArrowLeft, Trash2,
@@ -145,6 +145,8 @@ const normalizeString = (s: string) => {
     .replace(/^-|-$/g, "");
 };
 
+
+
 interface ProjectTreeItemProps {
   node: Project;
   allProjects: Project[];
@@ -165,7 +167,7 @@ const ProjectTreeItem: React.FC<ProjectTreeItemProps> = ({
   node, allProjects, depth, selectedId, metaMap, submissionsCount, isDeletingId,
   onOpen, onCreateChild, onRename, onDelete, onToggleActive,
 }) => {
-  const children = allProjects.filter((p) => p.parentId === node.id);
+  const children = allProjects.filter((project) => (project.parentId || "") === node.id);
   const hasChildren = children.length > 0;
   const isSelected = selectedId === node.id;
   const isActive = node.isActive !== false;
@@ -179,6 +181,39 @@ const ProjectTreeItem: React.FC<ProjectTreeItemProps> = ({
   const [renaming, setRenaming] = useState(false);
   const [renameName, setRenameName] = useState(node.name);
   const [savingRename, setSavingRename] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedQr, setCopiedQr] = useState(false);
+
+  // Public share link for this project (what you send to other people).
+  const shareUrl = `${window.location.origin}/${normalizeString(node.name)}`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(shareUrl)}`;
+
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 1500);
+    } catch {
+      window.prompt("Copia el enlace:", shareUrl);
+    }
+  };
+
+  const copyQr = async () => {
+    try {
+      const resp = await fetch(qrUrl);
+      const blob = await resp.blob();
+      const ClipItem = (window as any).ClipboardItem;
+      if (navigator.clipboard && ClipItem) {
+        await navigator.clipboard.write([new ClipItem({ [blob.type || "image/png"]: blob })]);
+        setCopiedQr(true);
+        setTimeout(() => setCopiedQr(false), 1500);
+      } else {
+        window.open(qrUrl, "_blank");
+      }
+    } catch {
+      window.open(qrUrl, "_blank");
+    }
+  };
 
   const submitChild = async () => {
     const t = childName.trim();
@@ -260,7 +295,8 @@ const ProjectTreeItem: React.FC<ProjectTreeItemProps> = ({
           <button onClick={() => setAdding((v) => !v)} title="Crear dentro" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10"><Plus className="w-3.5 h-3.5" /></button>
           <button onClick={() => { setRenameName(node.name); setRenaming((v) => !v); }} title="Renombrar" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10"><PencilLine className="w-3.5 h-3.5" /></button>
           <button onClick={() => onToggleActive(node.id, isActive)} title={isActive ? "Desactivar" : "Activar"} className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10">{isActive ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}</button>
-          {node.url && <a href={node.url} target="_blank" rel="noopener noreferrer" title="Abrir en Notion" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10"><ExternalLink className="w-3.5 h-3.5" /></a>}
+          <button onClick={copyLink} title="Copiar enlace para compartir" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10">{copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Link className="w-3.5 h-3.5" />}</button>
+          <button onClick={copyQr} title="Copiar código QR" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10">{copiedQr ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <QrCode className="w-3.5 h-3.5" />}</button>
           <button onClick={() => onDelete(node.id, node.name)} disabled={isDeletingId === node.id} title="Eliminar" className="w-6 h-6 flex items-center justify-center rounded text-red-400/60 hover:text-red-400 hover:bg-red-950/20 disabled:opacity-40"><Trash2 className="w-3.5 h-3.5" /></button>
         </div>
       </div>
@@ -286,10 +322,41 @@ const ProjectTreeItem: React.FC<ProjectTreeItemProps> = ({
         </div>
       )}
 
-      {expanded && children.map((child) => (
-        <ProjectTreeItem key={child.id} node={child} allProjects={allProjects} depth={depth + 1}
-          selectedId={selectedId} metaMap={metaMap} submissionsCount={submissionsCount} isDeletingId={isDeletingId}
-          onOpen={onOpen} onCreateChild={onCreateChild} onRename={onRename} onDelete={onDelete} onToggleActive={onToggleActive} />
+      {expanded && (
+        <ProjectTreeList
+          allProjects={allProjects}
+          parentId={node.id}
+          depth={depth + 1}
+          selectedId={selectedId}
+          metaMap={metaMap}
+          submissionsCount={submissionsCount}
+          isDeletingId={isDeletingId}
+          onOpen={onOpen}
+          onCreateChild={onCreateChild}
+          onRename={onRename}
+          onDelete={onDelete}
+          onToggleActive={onToggleActive}
+        />
+      )}
+    </div>
+  );
+};
+
+interface ProjectTreeListProps extends Omit<ProjectTreeItemProps, "node"> {
+  parentId: string;
+}
+
+/** Renders the direct children of a folder/project, mirroring Notion's real nesting. */
+const ProjectTreeList: React.FC<ProjectTreeListProps> = ({ parentId, ...props }) => {
+  const { allProjects } = props;
+  const siblings = allProjects
+    .filter((project) => (project.parentId || "") === parentId)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return (
+    <div>
+      {siblings.map((node) => (
+        <ProjectTreeItem key={node.id} node={node} {...props} />
       ))}
     </div>
   );
@@ -309,11 +376,13 @@ interface AdminPanelProps {
   projectMeta: Record<string, ProjectMeta>;
   refreshProjectMeta: (projectId?: string) => Promise<void>;
   applyProjectMetaUpdate: (projectId: string, meta: ProjectMeta) => void;
+  applyProjectMetaUpdates: (updates: Record<string, Partial<ProjectMeta>>) => void;
   onAdminPreviewChange?: (preview: {
     projectId: string;
     bgColor: string;
     backgroundImage: string;
     bgBlur: number;
+    textColor?: "auto" | "white" | "black";
   }) => void;
 }
 
@@ -345,6 +414,7 @@ export default function AdminPanel({
   projectMeta,
   refreshProjectMeta,
   applyProjectMetaUpdate,
+  applyProjectMetaUpdates,
   onAdminPreviewChange
 }: AdminPanelProps) {
   const { appearance, saveAppearance } = useTheme();
@@ -360,11 +430,14 @@ export default function AdminPanel({
   const [homeIcon, setHomeIcon] = useState(appearance.homeIcon);
   const [homeBgColor, setHomeBgColor] = useState(appearance.homeBgColor);
   const [homeIconSearch, setHomeIconSearch] = useState("");
+  const [homeIconOpen, setHomeIconOpen] = useState(false);
   const [isSavingHomeAppearance, setIsSavingHomeAppearance] = useState(false);
   const [homeAppearanceMessage, setHomeAppearanceMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   // Copywriting editor states
-  const [selectedMetaProjectId, setSelectedMetaProjectId] = useState("");
+  const [selectedMetaProjectId, setSelectedMetaProjectId] = useState<string>(() => {
+    try { return sessionStorage.getItem("envi_admin_project") || ""; } catch { return ""; }
+  });
   const [copyTitle, setCopyTitle] = useState("");
   const [copyDesc, setCopyDesc] = useState("");
   const [copyCustomFields, setCopyCustomFields] = useState<CustomField[]>([]);
@@ -374,7 +447,9 @@ export default function AdminPanel({
   const [copyBgColor, setCopyBgColor] = useState("");
   const [copyIsActive, setCopyIsActive] = useState(true);
   const [copyIcon, setCopyIcon] = useState("UploadCloud");
+  const [copyTextColor, setCopyTextColor] = useState<"auto" | "white" | "black">("auto");
   const [iconSearch, setIconSearch] = useState("");
+  const [projIconOpen, setProjIconOpen] = useState(false);
   const [copyUseDatabase, setCopyUseDatabase] = useState(false);
   const [copyDatabaseId, setCopyDatabaseId] = useState("");
   const [copyDbColumns, setCopyDbColumns] = useState<DbColumn[]>([]);
@@ -408,7 +483,10 @@ export default function AdminPanel({
 
   // Two-view navigation: "browse" = visor of all projects/groups + create;
   // "detail" = the selected project's editor + its submissions.
-  const [adminView, setAdminView] = useState<"browse" | "detail">("browse");
+  // Persisted for the session so saving never kicks you back to the browse view.
+  const [adminView, setAdminView] = useState<"browse" | "detail">(() => {
+    try { return sessionStorage.getItem("envi_admin_view") === "detail" ? "detail" : "browse"; } catch { return "browse"; }
+  });
 
   // Adaptive panel surface: when a project with a bgColor is selected, the admin
   // cards become a translucent dark surface so the project's color bleeds through
@@ -428,9 +506,17 @@ export default function AdminPanel({
   const [isCreatingDb, setIsCreatingDb] = useState(false);
   const [copyGroupId, setCopyGroupId] = useState("");
 
-  // Drag & drop ordering state
-  const [dragId, setDragId] = useState<string | null>(null);
   const [isUploadingBg, setIsUploadingBg] = useState(false);
+  // Coalesce rapid color-picker changes into one state update per animation frame
+  // so dragging the picker stays smooth instead of firing dozens of renders.
+  const colorRafRef = useRef<number | null>(null);
+  const setCopyBgColorSmooth = (value: string) => {
+    if (colorRafRef.current !== null) cancelAnimationFrame(colorRafRef.current);
+    colorRafRef.current = requestAnimationFrame(() => {
+      setCopyBgColor(value);
+      colorRafRef.current = null;
+    });
+  };
   const [isSavingMeta, setIsSavingMeta] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [metaMessage, setMetaMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -458,6 +544,16 @@ export default function AdminPanel({
       // no-op
     }
   };
+
+  // Persist current view + selected project so a refresh keeps you editing in place.
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("envi_admin_view", adminView);
+      sessionStorage.setItem("envi_admin_project", selectedMetaProjectId || "");
+    } catch {
+      // no-op
+    }
+  }, [adminView, selectedMetaProjectId]);
 
   // Sync state on load
   useEffect(() => {
@@ -511,6 +607,7 @@ export default function AdminPanel({
     setCopyBackground(active.backgroundImage || "");
     setCopyBgBlur(typeof active.bgBlur === "number" ? active.bgBlur : 0);
     setCopyBgColor(active.bgColor || "");
+    setCopyTextColor(active.textColor === "white" || active.textColor === "black" ? active.textColor : "auto");
     setCopyIsActive(active.isActive !== false);
     setCopyIcon(active.icon || "UploadCloud");
     setCopyUseDatabase(!!active.useDatabase);
@@ -565,68 +662,78 @@ export default function AdminPanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedMetaProjectId, projectMeta]);
 
-  // Sync current editing visual customisations to parent App under adminPreview
+  // Sync current editing visual customisations to parent App under adminPreview.
+  // Debounced so dragging the color picker doesn't re-render the whole app (with its
+  // animated background) on every pixel — it only updates once movement settles.
   useEffect(() => {
     if (!onAdminPreviewChange || !selectedMetaProjectId) return;
-    // Only tint the environment with the project's color in the detail view.
-    // In the browse view (all projects) keep it neutral.
-    onAdminPreviewChange({
-      projectId: selectedMetaProjectId,
-      bgColor: adminView === "detail" ? copyBgColor : "",
-      backgroundImage: "",
-      bgBlur: 0,
-    });
-  }, [selectedMetaProjectId, copyBgColor, onAdminPreviewChange, adminView]);
+    const timer = setTimeout(() => {
+      onAdminPreviewChange({
+        projectId: selectedMetaProjectId,
+        bgColor: adminView === "detail" ? copyBgColor : "",
+        backgroundImage: "",
+        bgBlur: 0,
+        textColor: copyTextColor,
+      });
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [selectedMetaProjectId, copyBgColor, copyTextColor, onAdminPreviewChange, adminView]);
 
-  const handleSaveMeta = async (e: React.FormEvent) => {
-    e.preventDefault();
+  /** Snapshot the current editor state into a ProjectMeta payload. */
+  const buildProjectMeta = (): ProjectMeta => ({
+    title: copyTitle,
+    description: copyDesc,
+    customFields: copyCustomFields,
+    expirationDate: copyExpiration,
+    backgroundImage: "",
+    bgBlur: 0,
+    bgColor: copyBgColor,
+    icon: copyIcon,
+    textColor: copyTextColor,
+    isActive: copyIsActive,
+    useDatabase: copyUseDatabase,
+    databaseId: copyDatabaseId,
+    dbColumns: copyDbColumns,
+    groupId: copyGroupId,
+    order: projectMeta[selectedMetaProjectId]?.order ?? 0,
+  });
+
+  /**
+   * Persist the project meta and apply it optimistically. Deliberately does NOT
+   * refetch or refresh, so saving never bounces you out of the admin view.
+   */
+  const persistProjectMeta = async (successText: string) => {
     if (!selectedMetaProjectId) return;
-
-    const nextMeta: ProjectMeta = {
-      title: copyTitle,
-      description: copyDesc,
-      customFields: copyCustomFields,
-      expirationDate: copyExpiration,
-      backgroundImage: "",
-      bgBlur: 0,
-      bgColor: copyBgColor,
-      icon: copyIcon,
-      isActive: copyIsActive,
-      useDatabase: copyUseDatabase,
-      databaseId: copyDatabaseId,
-      dbColumns: copyDbColumns,
-      groupId: copyGroupId,
-      order: projectMeta[selectedMetaProjectId]?.order ?? 0,
-    };
-
+    const nextMeta = buildProjectMeta();
     setIsSavingMeta(true);
     setMetaMessage(null);
     try {
       const res = await fetch("/api/project-meta", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          projectId: selectedMetaProjectId,
-          ...nextMeta,
-        }),
+        body: JSON.stringify({ projectId: selectedMetaProjectId, ...nextMeta }),
       });
       const data = await res.json();
       if (data.success) {
         applyProjectMetaUpdate(selectedMetaProjectId, nextMeta);
-        setMetaMessage({ type: "success", text: "┬íTextos guardados correctamente!" });
-        await refreshProjectMeta(selectedMetaProjectId);
+        setMetaMessage({ type: "success", text: successText });
       } else {
-        setMetaMessage({ type: "error", text: data.error || "No se pudieron guardar los textos." });
+        setMetaMessage({ type: "error", text: data.error || "No se pudieron guardar los cambios." });
       }
     } catch (err) {
-      setMetaMessage({ type: "error", text: "Error de red al intentar guardar los textos." });
+      setMetaMessage({ type: "error", text: "Error de red al intentar guardar." });
     } finally {
       setIsSavingMeta(false);
     }
   };
 
-  const handleSaveHomeAppearance = async (e: React.FormEvent) => {
+  const handleSaveMeta = (e: React.FormEvent) => {
     e.preventDefault();
+    void persistProjectMeta("¡Textos guardados correctamente!");
+  };
+
+  const handleSaveHomeAppearance = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     setIsSavingHomeAppearance(true);
     setHomeAppearanceMessage(null);
 
@@ -736,42 +843,7 @@ export default function AdminPanel({
     }
   };
 
-  /** Persist only group/order for a project without touching the editor form. */
-  const persistOrderGroup = async (projId: string, patch: { groupId?: string; order?: number }) => {
-    const existing = projectMeta[projId] || { title: "", description: "" };
-    await fetch("/api/project-meta", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        projectId: projId,
-        ...existing,
-        groupId: patch.groupId !== undefined ? patch.groupId : existing.groupId || "",
-        order: patch.order !== undefined ? patch.order : existing.order ?? 0,
-      }),
-    });
-  };
 
-  /** Reorder projects via drag & drop, persisting the new order to each project. */
-  const handleDropReorder = async (targetId: string) => {
-    if (!dragId || dragId === targetId) {
-      setDragId(null);
-      return;
-    }
-    const ordered = [...orderedProjects];
-    const fromIdx = ordered.findIndex((p) => p.id === dragId);
-    const toIdx = ordered.findIndex((p) => p.id === targetId);
-    if (fromIdx === -1 || toIdx === -1) {
-      setDragId(null);
-      return;
-    }
-    const [moved] = ordered.splice(fromIdx, 1);
-    ordered.splice(toIdx, 0, moved);
-    setDragId(null);
-    // Persist new order index for every project.
-    await Promise.all(ordered.map((p, i) => persistOrderGroup(p.id, { order: i })));
-    await refreshProjectMeta();
-    await refreshProjects();
-  };
 
   const fetchSubmissions = async () => {
     setLoadingSubmissions(true);
@@ -1001,11 +1073,6 @@ export default function AdminPanel({
     }
   }
 
-  // Real Notion nesting tree: root nodes = those with no parent (or whose parent
-  // isn't one of our projects). Children are resolved by parentId in the tree item.
-  const projectIdSet = new Set(projects.map((p) => p.id));
-  const rootProjects = projects.filter((p) => !p.parentId || !projectIdSet.has(p.parentId));
-
   const filteredHomeIcons = ICON_OPTIONS.filter((option) => {
     if (!homeIconSearch.trim()) return true;
     const haystack = normalizeString(`${option.key} ${option.label} ${option.cat}`);
@@ -1014,9 +1081,8 @@ export default function AdminPanel({
 
   return (
     <div className="space-y-6">
-
-      {/* View header: browse (all projects) vs detail (one project) */}
-      {adminView === "detail" ? (
+      {/* Detail view keeps a back arrow; browse view has no header. */}
+      {adminView === "detail" && (
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -1033,114 +1099,207 @@ export default function AdminPanel({
             <p className="text-xs text-white/40">Editando proyecto · pulsa la flecha para volver</p>
           </div>
         </div>
-      ) : (
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-white">Panel de administración</h2>
-            <p className="text-xs text-white/40">Selecciona un proyecto para editarlo o crea uno nuevo</p>
+      )}
+
+    <div className={adminView === "detail" ? "grid grid-cols-1 lg:grid-cols-3 gap-8" : "space-y-8"}>
+
+      {/* Portada de Inicio — compact bar on top of the browse view (full width) */}
+      {adminView === "browse" && (
+        <div className={panelClass} style={panelStyle}>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="mr-auto min-w-0">
+              <h2 className="text-sm font-semibold text-white">Portada de Inicio</h2>
+              <p className="text-[11px] text-white/40">Color e icono de la página principal</p>
+            </div>
+
+            {/* Color picker button */}
+            <label
+              className="relative w-10 h-10 rounded-lg border border-white/15 cursor-pointer shrink-0 flex items-center justify-center overflow-hidden"
+              style={{ background: homeBgColor || "#050505" }}
+              title={`Color de fondo: ${homeBgColor || "#050505"}`}
+            >
+              <input
+                type="color"
+                value={homeBgColor || "#050505"}
+                onChange={(e) => setHomeBgColor(e.target.value)}
+                className="absolute inset-0 opacity-0 cursor-pointer"
+              />
+              <Palette className="w-4 h-4 text-white pointer-events-none mix-blend-difference" />
+            </label>
+
+            {/* Icon dropdown toggle */}
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setHomeIconOpen((v) => !v)}
+                className="h-10 px-3 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white flex items-center gap-2 transition-all"
+                title="Elegir icono de la portada"
+              >
+                {(() => { const I = ICON_BY_KEY[homeIcon] || UploadCloud; return <I className="w-4 h-4" />; })()}
+                <span className="text-xs">Icono</span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${homeIconOpen ? "rotate-180" : ""}`} />
+              </button>
+              {homeIconOpen && (
+                <div className="absolute right-0 mt-2 z-20 w-72 p-2 rounded-xl border border-white/10 bg-[#0d0d0d] shadow-2xl">
+                  <input
+                    type="text"
+                    placeholder="Buscar icono..."
+                    value={homeIconSearch}
+                    onChange={(e) => setHomeIconSearch(e.target.value)}
+                    className="w-full mb-2 px-2.5 py-2 bg-[#111111] border border-white/10 rounded-lg text-xs text-white placeholder-white/20 focus:border-white/30 focus:outline-none"
+                  />
+                  <div className="grid grid-cols-6 gap-1.5 max-h-52 overflow-y-auto pr-1">
+                    {filteredHomeIcons.map(({ key, Icon }) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => { setHomeIcon(key); setHomeIconOpen(false); }}
+                        className={`h-9 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${homeIcon === key ? "border-white bg-white/10 text-white" : "border-white/10 bg-[#111111] text-white/55 hover:text-white hover:border-white/25"}`}
+                        title={key}
+                      >
+                        <Icon className="w-4 h-4" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Save button */}
+            <button
+              type="button"
+              onClick={() => handleSaveHomeAppearance()}
+              disabled={isSavingHomeAppearance}
+              className="h-10 px-4 rounded-lg bg-white text-black text-xs font-bold uppercase tracking-wide hover:bg-white/90 transition-all disabled:opacity-50 shrink-0"
+            >
+              {isSavingHomeAppearance ? "Guardando..." : "Guardar"}
+            </button>
+
+            {homeAppearanceMessage && (
+              <span className={`text-xs shrink-0 ${homeAppearanceMessage.type === "success" ? "text-emerald-400" : "text-red-400"}`}>
+                {homeAppearanceMessage.text}
+              </span>
+            )}
           </div>
         </div>
       )}
 
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-
-      {/* Settings column */}
+      {/* Project editor column — detail view only */}
+      {adminView === "detail" && (
       <div className="col-span-1 space-y-8">
 
-        {adminView === "browse" && (
-        <div className={panelClass} style={panelStyle}>
-          <div className="mb-6">
-            <h2 className="text-base font-semibold text-white">Portada de Inicio</h2>
-          </div>
-
-          <form onSubmit={handleSaveHomeAppearance} className="space-y-4">
-            <div className="border-t border-white/5 pt-4">
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs font-semibold text-white/40 uppercase tracking-wide">
-                  Color de Fondo de la Portada
-                </label>
+        {/* Compact appearance bar (color + icon), mirroring the homepage cover bar. */}
+        {selectedMetaProjectId && projects.find((p) => p.id === selectedMetaProjectId) && (
+          <div className={`${panelClass} relative ${projIconOpen ? "z-50" : "z-10"}`} style={panelStyle}>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="mr-auto min-w-0">
+                <h2 className="text-sm font-semibold text-white">Apariencia del proyecto</h2>
+                <p className="text-[11px] text-white/40">Color e icono de la página del proyecto</p>
               </div>
-              <div className="flex items-center gap-2">
+
+              {/* Color picker button */}
+              <label
+                className="relative w-10 h-10 rounded-lg border border-white/15 cursor-pointer shrink-0 flex items-center justify-center overflow-hidden"
+                style={{ background: copyBgColor || "#050505" }}
+                title={`Color de fondo: ${copyBgColor || "sin color"}`}
+              >
                 <input
                   type="color"
-                  value={homeBgColor || "#050505"}
-                  onChange={(e) => setHomeBgColor(e.target.value)}
-                  className="w-9 h-9 cursor-pointer bg-transparent border border-white/10 p-0.5 rounded-lg"
+                  value={copyBgColor || "#050505"}
+                  onChange={(e) => setCopyBgColorSmooth(e.target.value)}
+                  className="absolute inset-0 opacity-0 cursor-pointer"
                 />
-                <input
-                  type="text"
-                  value={homeBgColor}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    if (/^#?[0-9a-fA-F]{0,6}$/.test(value)) {
-                      setHomeBgColor(value.startsWith("#") || value === "" ? value : `#${value}`);
-                    }
-                  }}
-                  maxLength={7}
-                  className="flex-1 px-2.5 py-2 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs font-mono text-white focus:border-white/30 focus:outline-none transition-all"
-                />
-                <div className="w-9 h-9 shrink-0 rounded-lg border border-white/10" style={{ background: homeBgColor || "#050505" }} />
-              </div>
-            </div>
-
-            <div className="border-t border-white/5 pt-4 space-y-3">
-              <label className="block text-xs font-semibold text-white/40 uppercase tracking-wide">
-                Icono de la Portada
+                <Palette className="w-4 h-4 text-white pointer-events-none mix-blend-difference" />
               </label>
-              <input
-                type="text"
-                placeholder="Buscar icono..."
-                value={homeIconSearch}
-                onChange={(e) => setHomeIconSearch(e.target.value)}
-                className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all"
-              />
-              <div className="grid grid-cols-5 gap-2 max-h-48 overflow-y-auto pr-1">
-                {filteredHomeIcons.map(({ key, Icon }) => (
+
+              {copyBgColor && (
+                <button
+                  type="button"
+                  onClick={() => setCopyBgColor("")}
+                  className="h-10 px-2.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-[11px] text-red-300 transition-all shrink-0"
+                  title="Quitar el color de fondo"
+                >
+                  Quitar color
+                </button>
+              )}
+
+              {/* Forced text contrast: auto / white / black */}
+              <div className="flex items-center rounded-lg border border-white/15 bg-white/5 overflow-hidden shrink-0 h-10" title="Forzar el color del texto">
+                {([
+                  { key: "auto", label: "Auto" },
+                  { key: "white", label: "Texto claro" },
+                  { key: "black", label: "Texto oscuro" },
+                ] as const).map((option) => (
                   <button
-                    key={key}
+                    key={option.key}
                     type="button"
-                    onClick={() => setHomeIcon(key)}
-                    className={`h-11 rounded-xl border flex items-center justify-center transition-all cursor-pointer ${homeIcon === key ? "border-white bg-white/10 text-white" : "border-white/10 bg-[#0d0d0d] text-white/55 hover:text-white hover:border-white/25"}`}
-                    title={key}
+                    onClick={() => setCopyTextColor(option.key)}
+                    className={`h-full px-2.5 text-[11px] font-semibold transition-all ${
+                      copyTextColor === option.key
+                        ? "bg-white text-black"
+                        : "text-white/60 hover:text-white hover:bg-white/10"
+                    }`}
                   >
-                    <Icon className="w-4 h-4" />
+                    {option.label}
                   </button>
                 ))}
               </div>
-            </div>
 
-            {homeAppearanceMessage && (
-              <div className={`p-3 rounded-xl text-xs flex gap-2 items-center ${homeAppearanceMessage.type === "success" ? "bg-emerald-950/30 border border-emerald-900/40 text-emerald-300" : "bg-red-950/30 border border-red-900/50 text-red-300"}`}>
-                {homeAppearanceMessage.type === "success" ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-                <span>{homeAppearanceMessage.text}</span>
+              {/* Icon dropdown toggle */}
+              <div className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setProjIconOpen((v) => !v)}
+                  className="h-10 px-3 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white flex items-center gap-2 transition-all"
+                  title="Elegir icono del proyecto"
+                >
+                  {(() => { const I = ICON_BY_KEY[copyIcon] || UploadCloud; return <I className="w-4 h-4" />; })()}
+                  <span className="text-xs">Icono</span>
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${projIconOpen ? "rotate-180" : ""}`} />
+                </button>
+                {projIconOpen && (
+                  <div className="admin-dark-popover absolute right-0 mt-2 z-50 w-72 p-2 rounded-xl border border-white/10 shadow-2xl">
+                    <input
+                      type="text"
+                      placeholder="Buscar icono..."
+                      value={iconSearch}
+                      onChange={(e) => setIconSearch(e.target.value)}
+                      className="w-full mb-2 px-2.5 py-2 bg-[#111111] border border-white/10 rounded-lg text-xs text-white placeholder-white/20 focus:border-white/30 focus:outline-none"
+                    />
+                    <div className="grid grid-cols-6 gap-1.5 max-h-52 overflow-y-auto pr-1">
+                      {ICON_OPTIONS.filter(({ key, label, cat }) => {
+                        const q = iconSearch.toLowerCase();
+                        return !q || label.toLowerCase().includes(q) || key.toLowerCase().includes(q) || cat.toLowerCase().includes(q);
+                      }).map(({ key, Icon }) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => { setCopyIcon(key); setProjIconOpen(false); }}
+                          className={`h-9 rounded-lg border flex items-center justify-center transition-all cursor-pointer ${copyIcon === key ? "border-white bg-white/10 text-white" : "border-white/10 bg-[#111111] text-white/55 hover:text-white hover:border-white/25"}`}
+                          title={key}
+                        >
+                          <Icon className="w-4 h-4" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
 
-            <button
-              type="submit"
-              disabled={isSavingHomeAppearance}
-              className="w-full h-[46px] font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden"
-              style={{ '--btn-color': safeRetroColor(homeBgColor) } as React.CSSProperties}
-            >
-              <div className="absolute inset-0 bg-[#000000] border border-black group-hover:bg-transparent group-hover:border-transparent transition-all duration-300 rounded-[4px] pointer-events-none" />
-              <div
-                className="absolute inset-[1px] bg-[#000000] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px] stripes-overlay"
-                style={{ backgroundImage: `repeating-linear-gradient(119deg, currentColor 0px, currentColor 1px, transparent 1px, transparent 10px)` }}
-              />
-              <span className="btn-motion-corner btn-motion-corner-tl" />
-              <span className="btn-motion-corner btn-motion-corner-tr" />
-              <span className="btn-motion-corner btn-motion-corner-bl" />
-              <span className="btn-motion-corner btn-motion-corner-br" />
-              <span className="relative z-10 flex items-center justify-center gap-2 font-extrabold transition-colors duration-300 font-mono hover-text-adaptive btn-text-content">
-                {isSavingHomeAppearance ? "Guardando..." : "Guardar portada"}
-              </span>
-            </button>
-          </form>
-        </div>
+              {/* Save button */}
+              <button
+                type="button"
+                onClick={() => void persistProjectMeta("Apariencia guardada.")}
+                disabled={isSavingMeta}
+                className="h-10 px-4 rounded-lg bg-white text-black text-xs font-bold uppercase tracking-wide hover:bg-white/90 transition-all disabled:opacity-50 shrink-0"
+              >
+                {isSavingMeta ? "Guardando..." : "Guardar"}
+              </button>
+            </div>
+          </div>
         )}
 
         {/* Project Custom Copywriting */}
-        {adminView === "detail" && (
         <div className={panelClass} style={panelStyle}>
           <div className="flex items-center gap-3 mb-6">
             <div className="p-2.5 bg-white/5 text-white rounded-xl">
@@ -1410,30 +1569,6 @@ export default function AdminPanel({
                 )}
               </div>
 
-              {/* Parent group selector (point 7) */}
-              <div className="border-t border-white/5 pt-4">
-                <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
-                  Grupo / Materia (contenedor)
-                </label>
-                <select
-                  value={copyGroupId}
-                  onChange={(e) => setCopyGroupId(e.target.value)}
-                  className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white transition-all cursor-pointer"
-                >
-                  <option value="">Sin grupo (suelto)</option>
-                  {projects
-                    .filter((p) => p.id !== selectedMetaProjectId)
-                    .map((p) => (
-                      <option key={p.id} value={p.id} className="bg-[#111] text-white">
-                        {p.name}
-                      </option>
-                    ))}
-                </select>
-                <p className="text-[10px] text-white/30 mt-1">
-                  Agrupa este proyecto dentro de otro (ej. una materia) para organizarlo. El orden se ajusta arrastrando en la lista de proyectos.
-                </p>
-              </div>
-
               <div>
                 <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
                   Fecha y Hora de Vencimiento (Límite)
@@ -1446,150 +1581,6 @@ export default function AdminPanel({
                 <p className="text-[10px] text-white/30 mt-1">
                   Establece el día y la hora límite. Pasado este momento, se inhabilitará la zona de carga para este proyecto.
                 </p>
-              </div>
-
-              {/* Solid background color */}
-              <div className="border-t border-white/5 pt-4">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-semibold text-white/40 uppercase tracking-wide">
-                    Color de Fondo Sólido
-                  </label>
-                  {copyBgColor && (
-                    <button
-                      type="button"
-                      onClick={() => setCopyBgColor("")}
-                      className="text-[10px] text-red-400 hover:underline cursor-pointer"
-                    >
-                      Quitar color
-                    </button>
-                  )}
-                </div>
-                <p className="text-[10px] text-white/30 mb-2.5">
-                  El texto, los inputs y los campos de entrega se adaptan de forma inteligente al fondo (claro u oscuro).
-                </p>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={copyBgColor || "#f5f011"}
-                    onChange={(e) => setCopyBgColor(e.target.value)}
-                    className="w-9 h-9 cursor-pointer bg-transparent border border-white/10 p-0.5 rounded-lg"
-                    title="Elegir color de fondo"
-                  />
-                  <input
-                    type="text"
-                    value={copyBgColor}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (/^#?[0-9a-fA-F]{0,6}$/.test(v)) {
-                        setCopyBgColor(v.startsWith("#") || v === "" ? v : "#" + v);
-                      }
-                    }}
-                    maxLength={7}
-                    placeholder="#f5f011"
-                    className="flex-1 px-2.5 py-2 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs font-mono text-white focus:border-white/30 focus:outline-none transition-all"
-                  />
-                  {copyBgColor && (
-                    <div
-                      className="w-9 h-9 shrink-0 rounded-lg border border-white/10"
-                      style={{ background: copyBgColor }}
-                    />
-                  )}
-                </div>
-                {!copyBgColor && (
-                  <p className="text-[10px] text-white/30 mt-2">
-                    Este proyecto no tiene un color guardado todavía. El selector muestra un color temporal hasta que elijas uno y guardes.
-                  </p>
-                )}
-                {/* Quick color presets */}
-                <div className="flex flex-wrap gap-1.5 mt-2.5">
-                  {["#f5f011", "#ffffff", "#f0f0f0", "#111111", "#0a0a0a", "#ff3b30", "#ff9500", "#34c759", "#007aff", "#af52de", "#ff2d55", "#e8d5b7"].map((hex) => (
-                    <button
-                      key={hex}
-                      type="button"
-                      title={hex}
-                      onClick={() => setCopyBgColor(hex)}
-                      className="w-6 h-6 rounded-md border transition-all hover:scale-110 shrink-0"
-                      style={{
-                        background: hex,
-                        borderColor: copyBgColor === hex ? "white" : "rgba(255,255,255,0.15)",
-                        outline: copyBgColor === hex ? "2px solid white" : "none",
-                        outlineOffset: "2px",
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {/* Icon picker for the card corner box */}
-              <div className="border-t border-white/5 pt-4">
-                <label className="block text-xs font-semibold text-white/40 mb-2 uppercase tracking-wide">
-                  Icono del Proyecto
-                </label>
-                <p className="text-[10px] text-white/30 mb-2.5">
-                  Se muestra en la esquina superior derecha y flota como partículas en el fondo.
-                </p>
-
-                {/* Selected preview + search input */}
-                <div className="flex items-center gap-2 mb-2">
-                  {(() => {
-                    const found = ICON_OPTIONS.find(o => o.key === copyIcon);
-                    const SelectedIcon = found?.Icon ?? UploadCloud;
-                    return (
-                      <div className="w-9 h-9 shrink-0 flex items-center justify-center rounded-xl bg-white/10 border border-white/20 text-white">
-                        <SelectedIcon className="w-5 h-5" />
-                      </div>
-                    );
-                  })()}
-                  <div className="relative flex-1">
-                    <Search className="absolute left-2.5 top-2.5 w-3 h-3 text-white/30" />
-                    <input
-                      type="text"
-                      placeholder="Buscar icono..."
-                      value={iconSearch}
-                      onChange={(e) => setIconSearch(e.target.value)}
-                      className="w-full pl-7 pr-2.5 py-2 bg-[#0d0d0d] border border-white/10 rounded-xl text-xs focus:border-white/30 focus:outline-none text-white placeholder-white/20 transition-all"
-                    />
-                  </div>
-                </div>
-
-                {/* Scrollable grid */}
-                <div className="overflow-y-auto max-h-48 rounded-xl border border-white/5 bg-[#0a0a0a] p-1.5">
-                  {(() => {
-                    const query = iconSearch.toLowerCase();
-                    const filtered = ICON_OPTIONS.filter(
-                      ({ key, label, cat }) =>
-                        !query ||
-                        label.toLowerCase().includes(query) ||
-                        key.toLowerCase().includes(query) ||
-                        cat.toLowerCase().includes(query)
-                    );
-                    if (filtered.length === 0) {
-                      return (
-                        <p className="text-[10px] text-white/30 text-center py-4">Sin resultados para "{iconSearch}"</p>
-                      );
-                    }
-                    return (
-                      <div className="grid grid-cols-7 gap-1">
-                        {filtered.map(({ key, Icon, label }) => (
-                          <button
-                            key={key}
-                            type="button"
-                            title={label}
-                            onClick={() => setCopyIcon(key)}
-                            className={`flex flex-col items-center justify-center gap-0.5 p-1.5 rounded-lg border transition-all cursor-pointer ${
-                              copyIcon === key
-                                ? "bg-white/15 border-white/40 text-white"
-                                : "bg-transparent border-transparent text-white/40 hover:border-white/15 hover:text-white/70 hover:bg-white/5"
-                            }`}
-                          >
-                            <Icon className="w-4 h-4 shrink-0" />
-                            <span className="text-[7px] font-semibold truncate w-full text-center leading-tight">{label}</span>
-                          </button>
-                        ))}
-                      </div>
-                    );
-                  })()}
-                </div>
               </div>
 
               {metaMessage && (
@@ -1634,9 +1625,9 @@ export default function AdminPanel({
             </form>
           )}
         </div>
-        )}
 
       </div>
+      )}
 
       {/* Projects and creations column */}
       <div className="col-span-1 lg:col-span-2 space-y-8">
@@ -1724,24 +1715,21 @@ export default function AdminPanel({
               <p className="text-xs text-white/20 mt-1">Crea tu primer proyecto utilizando el formulario superior.</p>
             </div>
           ) : (
-            <div className="flex flex-col gap-0.5 max-h-[32rem] overflow-y-auto pr-1">
-              {rootProjects.map((node) => (
-                <ProjectTreeItem
-                  key={node.id}
-                  node={node}
-                  allProjects={projects}
-                  depth={0}
-                  selectedId={selectedMetaProjectId}
-                  metaMap={projectMeta}
-                  submissionsCount={getSubmissionsCountForProject}
-                  isDeletingId={isDeletingProjectId}
-                  onOpen={openProject}
-                  onCreateChild={handleCreateChild}
-                  onRename={handleRenameProject}
-                  onDelete={handleDeleteProject}
-                  onToggleActive={handleToggleProjectActive}
-                />
-              ))}
+            <div className="flex flex-col max-h-[32rem] overflow-y-auto pr-1">
+              <ProjectTreeList
+                allProjects={projects}
+                parentId=""
+                depth={0}
+                selectedId={selectedMetaProjectId}
+                metaMap={projectMeta}
+                submissionsCount={getSubmissionsCountForProject}
+                isDeletingId={isDeletingProjectId}
+                onOpen={openProject}
+                onCreateChild={handleCreateChild}
+                onRename={handleRenameProject}
+                onDelete={handleDeleteProject}
+                onToggleActive={handleToggleProjectActive}
+              />
             </div>
           )}
         </div>

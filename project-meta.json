@@ -109,5 +109,24 @@
     "dbColumns": [],
     "groupId": "",
     "order": 0
+  },
+  "3a32640c-88f4-812e-a8ca-cfe029f43a22": {
+    "title": "ENVI",
+    "description": "ENVI agiliza la entrega de archivos por proyecto. Comparte este enlace para recibir archivos de forma rápida y ordenada.",
+    "step1": "",
+    "step2": "",
+    "step3": "",
+    "expirationDate": "",
+    "backgroundImage": "",
+    "bgBlur": 0,
+    "bgColor": "#80ff00",
+    "icon": "Leaf",
+    "isActive": true,
+    "customFields": [],
+    "useDatabase": false,
+    "databaseId": "",
+    "dbColumns": [],
+    "groupId": "",
+    "order": 0
   }
 }

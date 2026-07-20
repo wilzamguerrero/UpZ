@@ -77,6 +77,11 @@ export interface ProjectMeta {
   bgColor?: string;
   /** Lucide icon name shown in the corner box of the landing card. */
   icon?: string;
+  /**
+   * Forces the text/UI contrast instead of auto-deciding from the background
+   * luminance. "auto" = decide by luminance, "white" = light text, "black" = dark text.
+   */
+  textColor?: "auto" | "white" | "black";
 }
 
 export interface FileAttachment {

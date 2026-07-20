@@ -733,3 +733,37 @@ body {
     transform: translateY(calc(-100vh - 100%)) rotate(20deg);
   }
 }
+
+/* ── Admin dark popover: stays a solid dark surface regardless of adaptive theming ──
+   The adaptive light/has-bgcolor rules turn dark backgrounds translucent and force
+   dark text/icons. The icon picker popover must remain readable on any project color,
+   so these higher-specificity rules (placed last) win the cascade. */
+[data-adaptive] .admin-dark-popover,
+[data-has-bgcolor] .admin-dark-popover,
+.admin-dark-popover {
+  background-color: #141414 !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+}
+[data-adaptive="light"] .admin-dark-popover *,
+[data-has-bgcolor="true"] .admin-dark-popover * {
+  color: #ffffff !important;
+}
+[data-adaptive="light"] .admin-dark-popover svg,
+[data-has-bgcolor="true"] .admin-dark-popover svg {
+  color: #ffffff !important;
+}
+[data-adaptive="light"] .admin-dark-popover input,
+[data-has-bgcolor="true"] .admin-dark-popover input {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+}
+[data-adaptive="light"] .admin-dark-popover input::placeholder,
+[data-has-bgcolor="true"] .admin-dark-popover input::placeholder {
+  color: rgba(255, 255, 255, 0.35) !important;
+}
+[data-adaptive] .admin-dark-popover [class*="bg-[#111111]"],
+[data-has-bgcolor] .admin-dark-popover [class*="bg-[#111111]"] {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}

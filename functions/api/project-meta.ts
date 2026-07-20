@@ -71,6 +71,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
               useDatabase: !!data.useDatabase,
               databaseId: data.databaseId || "",
               dbColumns: Array.isArray(data.dbColumns) ? data.dbColumns : [],
+              textColor: data.textColor === "white" || data.textColor === "black" ? data.textColor : "auto",
             },
           });
         } catch {
@@ -124,7 +125,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const {
     projectId, title, description, step1, step2, step3,
     customFields, expirationDate, backgroundImage, isActive,
-    groupId, order, useDatabase, databaseId, dbColumns, bgBlur, bgColor, icon,
+    groupId, order, useDatabase, databaseId, dbColumns, bgBlur, bgColor, icon, textColor,
   } = body;
 
   if (!projectId) {
@@ -170,6 +171,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     bgBlur: typeof bgBlur === "number" ? bgBlur : 0,
     bgColor: (bgColor || "").trim(),
     icon: (icon || "").trim(),
+    textColor: textColor === "white" || textColor === "black" ? textColor : "auto",
   };
 
   if (notionSecret) {

@@ -102,7 +102,9 @@ export default function App() {
   const [isInitialLoadDone, setIsInitialLoadDone] = useState(false);
   // Extra flag: loader stays until the selected project's meta has been resolved at least once
   const [isMetaSettled, setIsMetaSettled] = useState(false);
-  const [activeTab, setActiveTab] = useState<"upload" | "admin">("upload");
+  const [activeTab, setActiveTab] = useState<"upload" | "admin">(() => {
+    try { return sessionStorage.getItem("envi_active_tab") === "admin" ? "admin" : "upload"; } catch { return "upload"; }
+  });
   const [projects, setProjects] = useState<Project[]>(getCachedProjects);
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [isProjectLocked, setIsProjectLocked] = useState(false);
@@ -137,8 +139,11 @@ export default function App() {
     });
   };
 
-  // Admin dynamic authentication states
-  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  // Admin dynamic authentication states. Persisted for the browser session so a
+  // reload (or an accidental navigation) never bounces you back to the home view.
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
+    try { return sessionStorage.getItem("envi_admin_auth") === "1"; } catch { return false; }
+  });
   const [adminPasswordInput, setAdminPasswordInput] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -169,7 +174,18 @@ export default function App() {
     bgColor: string;
     backgroundImage: string;
     bgBlur: number;
+    textColor?: "auto" | "white" | "black";
   } | null>(null);
+
+  // Persist the active tab and admin auth for the session, so a reload keeps you
+  // exactly where you were (the selected project + view are already persisted).
+  useEffect(() => {
+    try { sessionStorage.setItem("envi_active_tab", activeTab); } catch { /* no-op */ }
+  }, [activeTab]);
+
+  useEffect(() => {
+    try { sessionStorage.setItem("envi_admin_auth", isAdminAuthenticated ? "1" : "0"); } catch { /* no-op */ }
+  }, [isAdminAuthenticated]);
 
   // Load configuration, projects and copy text meta
   useEffect(() => {
@@ -603,7 +619,15 @@ export default function App() {
     }
     return 0.2126 * r + 0.7152 * g + 0.0722 * b;
   })();
-  const bgColorIsLight = bgColorLuminance !== null && bgColorLuminance > 0.5;
+  // Forced contrast override (per project). Falls back to luminance when "auto".
+  const forcedTextColor = activeTab === "admin" && adminPreview && adminPreview.projectId === activeProjectId
+    ? adminPreview.textColor
+    : (activeMeta?.textColor);
+  const bgColorIsLight = forcedTextColor === "black"
+    ? true
+    : forcedTextColor === "white"
+      ? false
+      : (bgColorLuminance !== null && bgColorLuminance > 0.5);
   const adaptiveText = hasBgColor ? (bgColorIsLight ? '#111111' : '#f0f0f0') : undefined;
   const adaptiveFieldBg = hasBgColor ? (bgColorIsLight ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.07)') : undefined;
   const adaptiveFieldBorder = hasBgColor ? (bgColorIsLight ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.12)') : undefined;
