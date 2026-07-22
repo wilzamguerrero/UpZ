@@ -1,112 +1,65 @@
-import { json, notionFetch, type Env } from "../_shared/notion";
+import { json, notionFetch, cleanNotionId, type Env } from "../_shared/notion";
+import { collectSubmissions, type ListChildrenFn } from "../_shared/submissions";
 
-/** Reads the effective Notion secret (KV override > env). */
-async function getSecret(env: Env): Promise<string> {
+/** Reads the effective Notion credentials (KV override > env vars). */
+async function getConfig(env: Env): Promise<{ notionSecret: string; parentPageId: string }> {
   let notionSecret = env.NOTION_SECRET || "";
+  let parentPageId = env.NOTION_ID_PAGE || "";
   if (env.SUBMISSIONS_KV) {
     try {
       const override = await env.SUBMISSIONS_KV.get("config");
       if (override) {
         const cfg = JSON.parse(override);
         if (cfg.notionSecret) notionSecret = cfg.notionSecret;
+        if (cfg.parentPageId) parentPageId = cfg.parentPageId;
       }
     } catch {
       // Ignore
     }
   }
-  return notionSecret;
+  return { notionSecret, parentPageId: cleanNotionId(parentPageId) };
 }
 
-/** Lists ALL child block ids of a Notion block/page, following pagination. */
-async function listAllChildBlockIds(blockId: string, token: string): Promise<Set<string>> {
-  const ids = new Set<string>();
+/** Lists ALL children of a block, following pagination. */
+async function listAllChildren(blockId: string, token: string): Promise<any[]> {
+  const out: any[] = [];
   let cursor: string | undefined;
   do {
-    const query = cursor ? `?start_cursor=${encodeURIComponent(cursor)}&page_size=100` : `?page_size=100`;
-    const data = await notionFetch("GET", `/blocks/${blockId}/children${query}`, token);
-    for (const block of data.results || []) {
-      if (block?.id) ids.add(block.id);
-    }
+    const q = cursor
+      ? `?start_cursor=${encodeURIComponent(cursor)}&page_size=100`
+      : `?page_size=100`;
+    const data = await notionFetch("GET", `/blocks/${blockId}/children${q}`, token);
+    for (const b of data.results || []) out.push(b);
     cursor = data.has_more ? data.next_cursor : undefined;
   } while (cursor);
-  return ids;
+  return out;
 }
 
 /**
- * GET /api/submissions
- * Returns logged submissions from KV, RECONCILED against Notion so the admin
- * view mirrors Notion: submissions whose toggle block was deleted in Notion are
- * removed from the list (and pruned from KV). Legacy records without a stored
- * notionBlockId are kept as-is (cannot be verified).
+ * GET /api/submissions[?projectId=xxx]
+ * Rebuilds the submissions list straight from Notion (source of truth), so it
+ * works the same on any platform without depending on KV.
+ * - Without projectId: light list of every submission (for counts).
+ * - With projectId: that project's submissions INCLUDING files + grades.
  */
 export const onRequestGet: PagesFunction<Env> = async (context) => {
-  const { SUBMISSIONS_KV } = context.env;
+  const { notionSecret, parentPageId } = await getConfig(context.env);
 
-  if (!SUBMISSIONS_KV) {
+  if (!notionSecret || !parentPageId) {
     return json({ success: true, submissions: [] });
   }
 
-  let submissions: any[] = [];
+  const url = new URL(context.request.url);
+  const projectId = url.searchParams.get("projectId") || undefined;
+
+  const list: ListChildrenFn = (blockId: string) => listAllChildren(blockId, notionSecret);
+
   try {
-    const raw = await SUBMISSIONS_KV.get("submissions");
-    submissions = raw ? JSON.parse(raw) : [];
-  } catch {
-    return json({ success: true, submissions: [] });
-  }
-
-  const notionSecret = await getSecret(context.env);
-  if (!notionSecret || submissions.length === 0) {
+    const submissions = await collectSubmissions(parentPageId, list, {
+      filesForProjectId: projectId,
+    });
     return json({ success: true, submissions });
+  } catch (err: any) {
+    return json({ success: true, submissions: [], error: err?.message });
   }
-
-  // Group verifiable submissions (those with a notionBlockId) by project.
-  const byProject: Record<string, any[]> = {};
-  for (const sub of submissions) {
-    if (sub?.notionBlockId && sub?.projectId) {
-      (byProject[sub.projectId] ||= []).push(sub);
-    }
-  }
-
-  // Fetch the current set of block ids for each involved project.
-  const existingByProject: Record<string, Set<string> | null> = {};
-  await Promise.all(
-    Object.keys(byProject).map(async (projectId) => {
-      try {
-        existingByProject[projectId] = await listAllChildBlockIds(projectId, notionSecret);
-      } catch {
-        // On error we cannot verify this project — keep its submissions untouched.
-        existingByProject[projectId] = null;
-      }
-    })
-  );
-
-  const removedIds: string[] = [];
-  const kept = submissions.filter((sub) => {
-    if (!sub?.notionBlockId || !sub?.projectId) return true; // legacy / unverifiable → keep
-    const existing = existingByProject[sub.projectId];
-    if (!existing) return true; // couldn't verify this project → keep
-    if (existing.has(sub.notionBlockId)) return true; // still in Notion → keep
-    removedIds.push(sub.id); // deleted in Notion → drop
-    return false;
-  });
-
-  // Persist the pruned list + clean up per-person keys.
-  if (removedIds.length > 0) {
-    try {
-      await SUBMISSIONS_KV.put("submissions", JSON.stringify(kept));
-    } catch {
-      // Non-critical
-    }
-    for (const sub of submissions) {
-      if (removedIds.includes(sub.id)) {
-        try {
-          await SUBMISSIONS_KV.delete(`person:${sub.projectId}:${sub.id}`);
-        } catch {
-          // Non-critical
-        }
-      }
-    }
-  }
-
-  return json({ success: true, submissions: kept });
 };

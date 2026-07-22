@@ -15,6 +15,7 @@ import {
   type PreviewProject,
 } from "./functions/_shared/preview";
 import { sendGmailMessage, buildReceiptEmail, hasGmailCredentials } from "./functions/_shared/gmail";
+import { collectSubmissions } from "./functions/_shared/submissions";
 
 dotenv.config();
 
@@ -771,14 +772,83 @@ app.post("/api/config/clear", (req, res) => {
   res.json({ success: true, message: "Configuración eliminada" });
 });
 
-// 3.0. Global appearance config for theme + homepage
-app.get("/api/appearance", (req, res) => {
-  const appearance = loadAppearance();
-  res.json({ success: true, appearance });
+// 3.0. Global appearance config for theme + homepage — stored in Notion (source
+// of truth) as a JSON code block on the parent page, with the local file as cache.
+const APPEARANCE_MARKER = "__envi_appearance__";
+
+async function findAppearanceBlockNotion(
+  notion: Client,
+  parentPageId: string
+): Promise<{ id: string; value: any } | null> {
+  let cursor: string | undefined;
+  do {
+    const resp: any = await notion.blocks.children.list({
+      block_id: parentPageId,
+      start_cursor: cursor,
+      page_size: 100,
+    });
+    for (const b of resp.results || []) {
+      if (b.type === "code" && b.code?.language === "json") {
+        try {
+          const parsed = JSON.parse(
+            (b.code.rich_text || []).map((rt: any) => rt.plain_text).join("").trim()
+          );
+          if (parsed && parsed[APPEARANCE_MARKER]) return { id: b.id, value: parsed };
+        } catch {
+          // Ignore malformed JSON.
+        }
+      }
+    }
+    cursor = resp.has_more ? resp.next_cursor : undefined;
+  } while (cursor);
+  return null;
+}
+
+app.get("/api/appearance", async (req, res) => {
+  const config = loadConfig();
+  if (config.notionSecret && config.parentPageId) {
+    try {
+      const notion = new Client({ auth: config.notionSecret });
+      const found = await findAppearanceBlockNotion(notion, config.parentPageId);
+      if (found) {
+        const { [APPEARANCE_MARKER]: _omit, ...appearance } = found.value;
+        return res.json({ success: true, appearance });
+      }
+    } catch {
+      // Fall through to local cache.
+    }
+  }
+  res.json({ success: true, appearance: loadAppearance() });
 });
 
-app.post("/api/appearance", (req, res) => {
+app.post("/api/appearance", async (req, res) => {
   const appearance = normalizeAppearance(req.body || {});
+  const config = loadConfig();
+  if (config.notionSecret && config.parentPageId) {
+    try {
+      const notion = new Client({ auth: config.notionSecret });
+      const payload = { [APPEARANCE_MARKER]: true, ...appearance };
+      const jsonString = JSON.stringify(payload, null, 2);
+      const found = await findAppearanceBlockNotion(notion, config.parentPageId);
+      if (found) {
+        await notion.blocks.update({
+          block_id: found.id,
+          code: { rich_text: [{ type: "text", text: { content: jsonString } }], language: "json" },
+        } as any);
+      } else {
+        await notion.blocks.children.append({
+          block_id: config.parentPageId,
+          children: [{
+            object: "block",
+            type: "code",
+            code: { rich_text: [{ type: "text", text: { content: jsonString } }], language: "json" },
+          }] as any,
+        });
+      }
+    } catch {
+      // Non-critical: still cache locally.
+    }
+  }
   saveAppearance(appearance);
   res.json({ success: true, message: "Apariencia guardada correctamente." });
 });
@@ -1415,50 +1485,38 @@ app.post("/api/projects/upload-bg", upload.single("bgImage"), async (req, res) =
   res.json({ success: true, url: fileUrl });
 });
 
-// 6. Get Submissions Logs — reconciled against Notion (source of truth).
+// 6. Get Submissions — rebuilt straight from Notion (source of truth), so it
+// works the same on any platform. ?projectId=xxx includes that project's files.
 app.get("/api/submissions", async (req, res) => {
-  const submissions = loadSubmissions();
   const config = loadConfig();
-
-  if (!config.notionSecret || submissions.length === 0) {
-    return res.json({ success: true, submissions });
+  if (!config.notionSecret || !config.parentPageId) {
+    return res.json({ success: true, submissions: [] });
   }
 
+  const notion = new Client({ auth: config.notionSecret });
+  const listAll = async (blockId: string): Promise<any[]> => {
+    const out: any[] = [];
+    let cursor: string | undefined;
+    do {
+      const resp: any = await notion.blocks.children.list({
+        block_id: blockId,
+        start_cursor: cursor,
+        page_size: 100,
+      });
+      for (const b of resp.results || []) out.push(b);
+      cursor = resp.has_more ? resp.next_cursor : undefined;
+    } while (cursor);
+    return out;
+  };
+
+  const projectId = typeof req.query.projectId === "string" ? req.query.projectId : undefined;
   try {
-    const notion = new Client({ auth: config.notionSecret });
-
-    // Group verifiable submissions (with a notionBlockId) by project.
-    const byProject: Record<string, boolean> = {};
-    for (const sub of submissions) {
-      if (sub?.notionBlockId && sub?.projectId) byProject[sub.projectId] = true;
-    }
-
-    const existingByProject: Record<string, Set<string> | null> = {};
-    await Promise.all(
-      Object.keys(byProject).map(async (projectId) => {
-        try {
-          existingByProject[projectId] = await listAllChildBlockIds(notion, projectId);
-        } catch {
-          existingByProject[projectId] = null; // couldn't verify → keep
-        }
-      })
-    );
-
-    let pruned = false;
-    const kept = submissions.filter((sub: any) => {
-      if (!sub?.notionBlockId || !sub?.projectId) return true;
-      const existing = existingByProject[sub.projectId];
-      if (!existing) return true;
-      if (existing.has(sub.notionBlockId)) return true;
-      pruned = true;
-      return false;
+    const submissions = await collectSubmissions(config.parentPageId, listAll, {
+      filesForProjectId: projectId,
     });
-
-    if (pruned) saveAllSubmissions(kept);
-    return res.json({ success: true, submissions: kept });
-  } catch (e) {
-    // On any failure, fall back to the raw list.
     return res.json({ success: true, submissions });
+  } catch (e) {
+    return res.json({ success: true, submissions: [] });
   }
 });
 
@@ -1519,30 +1577,90 @@ app.get("/api/submission-file", async (req, res) => {
   }
 });
 
-// 6.1. Delete a submission — removes it from Notion (toggle + db row) and locally.
+// 6.1. Delete a submission — the id is the Notion toggle block id.
 app.delete("/api/submissions/:id", async (req, res) => {
   const { id } = req.params;
   if (!id) {
     return res.status(400).json({ error: "El ID del envío es obligatorio." });
   }
 
-  const submissions = loadSubmissions();
-  const record = submissions.find((s: any) => s.id === id);
   const config = loadConfig();
-
-  if (record && config.notionSecret) {
-    const notion = new Client({ auth: config.notionSecret });
-    if (record.notionBlockId) {
-      try { await notion.blocks.delete({ block_id: record.notionBlockId }); } catch { /* already gone */ }
-    }
-    if (record.dbPageId) {
-      try { await notion.blocks.delete({ block_id: record.dbPageId }); } catch { /* non-critical */ }
-    }
+  if (!config.notionSecret) {
+    return res.status(400).json({ error: "Notion no está configurado." });
   }
 
-  const kept = submissions.filter((s: any) => s.id !== id);
-  saveAllSubmissions(kept);
-  res.json({ success: true, message: "Envío eliminado de Notion y del panel." });
+  const notion = new Client({ auth: config.notionSecret });
+  try {
+    await notion.blocks.delete({ block_id: id });
+  } catch {
+    // Already deleted or not accessible — treat as success so the UI updates.
+  }
+
+  // Optional: keep the legacy local log in sync.
+  try {
+    const subs = loadSubmissions();
+    const kept = subs.filter((s: any) => s.id !== id && s.notionBlockId !== id);
+    if (kept.length !== subs.length) saveAllSubmissions(kept);
+  } catch {
+    // Non-critical
+  }
+
+  res.json({ success: true, message: "Envío eliminado de Notion." });
+});
+
+// 6.2. Save grading/control values for a no-database submission — stored inside
+// the submission's Notion toggle (JSON code block), so it's portable.
+app.patch("/api/submission-grade", async (req, res) => {
+  const { submissionId, controlValues = {} } = req.body || {};
+  if (!submissionId) {
+    return res.status(400).json({ error: "submissionId es obligatorio." });
+  }
+  const config = loadConfig();
+  if (!config.notionSecret) {
+    return res.status(400).json({ error: "Notion no está configurado." });
+  }
+
+  const notion = new Client({ auth: config.notionSecret });
+  try {
+    const data: any = await notion.blocks.children.list({ block_id: submissionId });
+    const codeBlock = data.results.find(
+      (b: any) => b.type === "code" && b.code?.language === "json"
+    ) as any;
+
+    let merged: Record<string, string> = {};
+    if (codeBlock?.code?.rich_text) {
+      try {
+        const existing = JSON.parse(
+          codeBlock.code.rich_text.map((rt: any) => rt.plain_text).join("").trim()
+        );
+        if (existing && typeof existing === "object") merged = existing;
+      } catch {
+        // Ignore malformed JSON.
+      }
+    }
+    merged = { ...merged, ...controlValues };
+    const jsonString = JSON.stringify(merged, null, 2);
+
+    if (codeBlock) {
+      await notion.blocks.update({
+        block_id: codeBlock.id,
+        code: { rich_text: [{ type: "text", text: { content: jsonString } }], language: "json" },
+      } as any);
+    } else {
+      await notion.blocks.children.append({
+        block_id: submissionId,
+        children: [{
+          object: "block",
+          type: "code",
+          code: { rich_text: [{ type: "text", text: { content: jsonString } }], language: "json" },
+        }] as any,
+      });
+    }
+
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(500).json({ error: "No se pudo guardar la calificación." });
+  }
 });
 
 // Endpoint to receive files forwarded/uploaded from functions edge for larger files or error fallbacks

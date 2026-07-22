@@ -602,6 +602,17 @@ export default function AdminPanel({
     }
   }, [projects, selectedMetaProjectId]);
 
+  // Pull the selected project's meta straight from Notion whenever it changes, so
+  // the admin always reflects what's actually stored in Notion (colors, title,
+  // etc.) — even on a fresh deployment where the KV cache is still empty.
+  useEffect(() => {
+    if (selectedMetaProjectId) {
+      void refreshProjectMeta(selectedMetaProjectId);
+      void loadProjectSubmissions(selectedMetaProjectId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMetaProjectId]);
+
   useEffect(() => {
     setHomeIcon(appearance.homeIcon);
     setHomeBgColor(appearance.homeBgColor);
@@ -889,16 +900,45 @@ export default function AdminPanel({
 
 
 
+  // Light list of ALL submissions (headers only) — used for the per-project
+  // counts in the tree. Files are loaded per-project on demand.
   const fetchSubmissions = async () => {
     setLoadingSubmissions(true);
     try {
       const res = await fetch("/api/submissions");
       const data = await res.json();
       if (data.success) {
-        setSubmissions(data.submissions);
+        setSubmissions((prev) => {
+          // Keep any already-loaded full (with-files) entries; add the rest.
+          const withFiles = prev.filter((s) => Array.isArray(s.files) && s.files.length > 0);
+          const withFilesIds = new Set(withFiles.map((s) => s.id));
+          const incoming = (data.submissions as Submission[]).filter((s) => !withFilesIds.has(s.id));
+          return [...withFiles, ...incoming];
+        });
       }
     } catch (e) {
       console.error("Error loading submissions", e);
+    } finally {
+      setLoadingSubmissions(false);
+    }
+  };
+
+  /** Load a single project's submissions INCLUDING files + grades (from Notion),
+   *  and merge them in, replacing that project's lighter entries. */
+  const loadProjectSubmissions = async (projId: string) => {
+    if (!projId) return;
+    setLoadingSubmissions(true);
+    try {
+      const res = await fetch(`/api/submissions?projectId=${encodeURIComponent(projId)}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.submissions)) {
+        setSubmissions((prev) => {
+          const others = prev.filter((s) => s.projectId !== projId);
+          return [...others, ...(data.submissions as Submission[])];
+        });
+      }
+    } catch (e) {
+      console.error("Error loading project submissions", e);
     } finally {
       setLoadingSubmissions(false);
     }

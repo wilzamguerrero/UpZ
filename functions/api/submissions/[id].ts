@@ -19,8 +19,8 @@ async function getSecret(env: Env): Promise<string> {
 
 /**
  * DELETE /api/submissions/:id
- * Deletes a submission from Notion (the per-person toggle block + optional
- * database row) AND from the KV log, so removing it here removes it everywhere.
+ * The id is the submission's Notion toggle block id. Deletes that block in
+ * Notion (source of truth). If a KV log exists, it's cleaned up too (optional).
  */
 export const onRequestDelete: PagesFunction<Env> = async (context) => {
   const { SUBMISSIONS_KV } = context.env;
@@ -29,53 +29,34 @@ export const onRequestDelete: PagesFunction<Env> = async (context) => {
   if (!id) {
     return json({ error: "El ID del envío es obligatorio." }, 400);
   }
-  if (!SUBMISSIONS_KV) {
-    return json({ error: "Almacenamiento KV no configurado." }, 500);
-  }
 
-  let submissions: any[] = [];
-  try {
-    const raw = await SUBMISSIONS_KV.get("submissions");
-    submissions = raw ? JSON.parse(raw) : [];
-  } catch {
-    submissions = [];
-  }
-
-  const record = submissions.find((s) => s.id === id);
   const notionSecret = await getSecret(context.env);
-
-  // Best-effort delete from Notion (ignore if already gone).
-  if (record && notionSecret) {
-    if (record.notionBlockId) {
-      try {
-        await deleteBlock(record.notionBlockId, notionSecret);
-      } catch {
-        // Already deleted in Notion or not accessible — continue.
-      }
-    }
-    if (record.dbPageId) {
-      try {
-        await deleteBlock(record.dbPageId, notionSecret);
-      } catch {
-        // Non-critical.
-      }
-    }
+  if (!notionSecret) {
+    return json({ error: "Notion no está configurado." }, 400);
   }
 
-  // Remove from KV log + per-person key.
-  const kept = submissions.filter((s) => s.id !== id);
+  // Delete the toggle block in Notion (source of truth).
   try {
-    await SUBMISSIONS_KV.put("submissions", JSON.stringify(kept));
+    await deleteBlock(id, notionSecret);
   } catch {
-    return json({ error: "No se pudo actualizar el registro de envíos." }, 500);
+    // Already deleted or not accessible — treat as success so the UI updates.
   }
-  if (record?.projectId) {
+
+  // Optional: keep any legacy KV log in sync.
+  if (SUBMISSIONS_KV) {
     try {
-      await SUBMISSIONS_KV.delete(`person:${record.projectId}:${id}`);
+      const raw = await SUBMISSIONS_KV.get("submissions");
+      if (raw) {
+        const list = JSON.parse(raw);
+        const kept = list.filter((s: any) => s.id !== id && s.notionBlockId !== id);
+        if (kept.length !== list.length) {
+          await SUBMISSIONS_KV.put("submissions", JSON.stringify(kept));
+        }
+      }
     } catch {
       // Non-critical
     }
   }
 
-  return json({ success: true, message: "Envío eliminado de Notion y del panel." });
+  return json({ success: true, message: "Envío eliminado de Notion." });
 };
