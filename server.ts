@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import { Readable } from "node:stream";
 import multer from "multer";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
@@ -586,6 +587,32 @@ async function listAllChildBlockIds(notion: Client, blockId: string): Promise<Se
     cursor = resp.has_more ? resp.next_cursor : undefined;
   } while (cursor);
   return ids;
+}
+
+// Helper: resolve the real (signed, temporary) file URLs stored inside a
+// submission's toggle block, in document order. Notion exposes short-lived
+// signed URLs, so these are resolved fresh on each read.
+async function listToggleFileUrls(notion: Client, toggleId: string): Promise<string[]> {
+  const urls: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const resp: any = await notion.blocks.children.list({
+      block_id: toggleId,
+      start_cursor: cursor,
+      page_size: 100,
+    });
+    for (const block of resp.results || []) {
+      if (block?.type === "image" && block.image) {
+        const url = block.image.file?.url || block.image.external?.url;
+        if (url) urls.push(url);
+      } else if (block?.type === "file" && block.file) {
+        const url = block.file.file?.url || block.file.external?.url;
+        if (url) urls.push(url);
+      }
+    }
+    cursor = resp.has_more ? resp.next_cursor : undefined;
+  } while (cursor);
+  return urls;
 }
 
 async function listProjectsFromNotion(): Promise<Array<PreviewProject & { type: string; url: string; isActive: boolean }>> {
@@ -1431,6 +1458,63 @@ app.get("/api/submissions", async (req, res) => {
   } catch (e) {
     // On any failure, fall back to the raw list.
     return res.json({ success: true, submissions });
+  }
+});
+
+// 6.05 Proxy a submission's file so it can be viewed inline (same-origin, with
+// Range support). Resolves the fresh, short-lived Notion URL on each request,
+// avoiding CORS and URL-expiry problems.
+app.get("/api/submission-file", async (req, res) => {
+  const block = String(req.query.block || "");
+  const index = parseInt(String(req.query.i || "0"), 10) || 0;
+  const download = req.query.download === "1";
+
+  if (!block) {
+    return res.status(400).send("Falta el identificador del envío.");
+  }
+
+  const config = loadConfig();
+  if (!config.notionSecret) {
+    return res.status(400).send("Notion no está configurado.");
+  }
+
+  let fileUrl = "";
+  try {
+    const notion = new Client({ auth: config.notionSecret });
+    const urls = await listToggleFileUrls(notion, block);
+    fileUrl = urls[index] || "";
+  } catch {
+    return res.status(502).send("No se pudo resolver el archivo.");
+  }
+
+  if (!fileUrl) {
+    return res.status(404).send("Archivo no encontrado.");
+  }
+
+  try {
+    const range = req.headers.range;
+    const upstream = await fetch(fileUrl, {
+      headers: range ? { Range: range } : {},
+    });
+
+    res.status(upstream.status);
+    const ct = upstream.headers.get("content-type");
+    if (ct) res.setHeader("Content-Type", ct);
+    const cl = upstream.headers.get("content-length");
+    if (cl) res.setHeader("Content-Length", cl);
+    const cr = upstream.headers.get("content-range");
+    if (cr) res.setHeader("Content-Range", cr);
+    res.setHeader("Accept-Ranges", upstream.headers.get("accept-ranges") || "bytes");
+    res.setHeader("Cache-Control", "private, max-age=60");
+    if (download) res.setHeader("Content-Disposition", "attachment");
+
+    if (upstream.body) {
+      Readable.fromWeb(upstream.body as any).pipe(res);
+    } else {
+      res.end();
+    }
+  } catch {
+    res.status(502).send("Error al descargar el archivo desde Notion.");
   }
 });
 

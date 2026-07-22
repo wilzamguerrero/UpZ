@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useRef } from "react";
 import {
-  Key, FolderPlus, FileSpreadsheet, Eye, EyeOff, Check,
-  AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, Download, ArrowRight, ArrowLeft, Trash2,
+  Key, FolderPlus, Eye, EyeOff, Check,
+  AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, ArrowRight, ArrowLeft, Trash2,
   ChevronDown, ChevronRight, X, RefreshCw,
   Link, QrCode, Copy, GripVertical, Database, Table,
   // Icon picker icons
@@ -23,6 +23,7 @@ import { Project, Submission, NotionConfig, ProjectMeta, CustomField, DbColumn }
 import { ICON_OPTIONS, ICON_BY_KEY, ICON_CATEGORIES } from "../icons";
 import DateTimePicker from "./DateTimePicker";
 import GradingTable from "./GradingTable";
+import FileViewer, { ViewableFile, InlineFilePreview } from "./FileViewer";
 import { useTheme } from "../ThemeContext";
 
 const genId = () => `cf_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -559,6 +560,8 @@ export default function AdminPanel({
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedSenders, setExpandedSenders] = useState<Record<string, boolean>>({});
   const [isDeletingSubmissionId, setIsDeletingSubmissionId] = useState<string | null>(null);
+  // File currently open in the inline preview modal (null = closed).
+  const [viewerFile, setViewerFile] = useState<ViewableFile | null>(null);
 
   /** Open a project in the detail view. */
   const openProject = (projId: string) => {
@@ -1762,17 +1765,30 @@ export default function AdminPanel({
 
         {/* Senders Toggle List */}
         <div className={panelClass} style={panelStyle}>
-          <div className="flex items-center gap-3 mb-6">
-            <div className="p-2.5 bg-white/5 text-white rounded-xl">
-              <Users className="w-5 h-5" />
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-white/5 text-white rounded-xl">
+                <Users className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-semibold text-white">Remitentes</h2>
+                <p className="text-xs text-white/40">
+                  {selectedMetaProjectId
+                    ? `Envíos de "${selectedProjectName}"`
+                    : "Selecciona un proyecto para ver solo sus remitentes"}
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-base font-semibold text-white">Remitentes</h2>
-              <p className="text-xs text-white/40">
-                {selectedMetaProjectId
-                  ? `Envíos de "${selectedProjectName}"`
-                  : "Selecciona un proyecto para ver solo sus remitentes"}
-              </p>
+
+            <div className="relative">
+              <Search className="w-4 h-4 text-white/30 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                placeholder="Buscar remitente, correo, archivo..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 pr-3 py-1.5 bg-[#0d0d0d] border border-white/10 text-white rounded-xl text-xs w-full min-w-[240px] focus:outline-none focus:border-white/20 placeholder-white/20 transition-all"
+              />
             </div>
           </div>
 
@@ -1782,9 +1798,9 @@ export default function AdminPanel({
             </div>
           ) : (
             (() => {
-              // Group submissions by sender email (scoped to selected project)
+              // Group submissions by sender email (scoped to selected project + search filter)
               const grouped: Record<string, { name: string; email: string; submissions: Submission[] }> = {};
-              for (const sub of scopedSubmissions) {
+              for (const sub of filteredSubmissions) {
                 const email = sub.senderEmail.toLowerCase();
                 if (!grouped[email]) {
                   grouped[email] = { name: sub.senderName, email: sub.senderEmail, submissions: [] };
@@ -1858,29 +1874,23 @@ export default function AdminPanel({
                                     </button>
                                   </div>
                                 </div>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                                  {sub.files.map((file, fIdx) => (
-                                    <div
-                                      key={fIdx}
-                                      className="flex items-center justify-between p-2 rounded-lg bg-[#111111] border border-white/5 text-xs text-white/80 min-w-0"
-                                    >
-                                      <span className="truncate flex-1 pr-2" title={file.name}>
-                                        📎 {file.name}
-                                      </span>
-                                      <span className="text-[10px] text-white/40 font-mono shrink-0 whitespace-nowrap pr-2">
-                                        {(file.size / (1024 * 1024)).toFixed(2)} MB
-                                      </span>
-                                      <a
-                                        href={file.url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="bg-white/5 hover:bg-white/15 p-1 rounded-md border border-white/10 shrink-0 text-white/60 hover:text-white transition-colors"
-                                        title="Descargar Archivo"
-                                      >
-                                        <Download className="w-3.5 h-3.5" />
-                                      </a>
-                                    </div>
-                                  ))}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                  {sub.files.map((file, fIdx) => {
+                                    // Resolve files through a same-origin proxy that fetches the
+                                    // fresh Notion URL on demand (avoids CORS + URL expiry).
+                                    const blockId = (sub as unknown as { notionBlockId?: string }).notionBlockId;
+                                    const viewUrl = blockId
+                                      ? `/api/submission-file?block=${encodeURIComponent(blockId)}&i=${fIdx}`
+                                      : file.url;
+                                    const vf = { name: file.name, size: file.size, url: viewUrl };
+                                    return (
+                                      <InlineFilePreview
+                                        key={fIdx}
+                                        file={vf}
+                                        onExpand={() => setViewerFile(vf)}
+                                      />
+                                    );
+                                  })}
                                 </div>
                               </div>
                             ))}
@@ -1895,119 +1905,15 @@ export default function AdminPanel({
           )}
         </div>
 
-        {/* Deliveries Submission Log */}
-        <div className={panelClass} style={panelStyle}>
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-white/5 text-white rounded-xl">
-                <FileSpreadsheet className="w-5 h-5" />
-              </div>
-              <div>
-                <h2 className="text-base font-semibold text-white">Historial de Entregas</h2>
-                <p className="text-xs text-white/40">
-                  {selectedMetaProjectId
-                    ? `Entregas de "${selectedProjectName}"`
-                    : "Histórico de todas las transferencias registradas"}
-                </p>
-              </div>
-            </div>
-
-            <div className="relative">
-              <Search className="w-4 h-4 text-white/30 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Buscar remitente, correo, archivo..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 pr-3 py-1.5 bg-[#0d0d0d] border border-white/10 text-white rounded-xl text-xs w-full min-w-[240px] focus:outline-none focus:border-white/20 placeholder-white/20 transition-all"
-              />
-            </div>
-          </div>
-
-          {loadingSubmissions ? (
-            <div className="text-center py-10">
-              <p className="text-sm text-white/40">Cargando histórico...</p>
-            </div>
-          ) : filteredSubmissions.length === 0 ? (
-            <div className="text-center py-10 bg-[#0d0d0d]/35 rounded-2xl border border-dashed border-white/5">
-              <p className="text-sm text-white/40">No se encontraron entregas en la plataforma.</p>
-              <p className="text-xs text-white/20 mt-1">Envía tus primeros archivos usando la interfaz principal.</p>
-            </div>
-          ) : (
-            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-1">
-              {filteredSubmissions.map((sub) => (
-                <div
-                  key={sub.id}
-                  className="p-4 border border-white/5 hover:border-white/10 bg-[#0d0d0d] rounded-xl hover:shadow-none transition-all space-y-3"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/5 pb-2.5">
-                    <div>
-                      <h4 className="text-sm font-semibold text-white">{sub.senderName}</h4>
-                      <p className="text-xs text-white/50 flex items-center gap-1.5 mt-0.5">
-                        <Mail className="w-3.5 h-3.5 shrink-0" /> {sub.senderEmail}
-                      </p>
-                    </div>
-                    <div className="flex items-start gap-2">
-                      <div className="text-right">
-                        <span className="inline-block bg-white/5 text-white/70 text-[10px] font-semibold px-2.5 py-1 rounded-full border border-white/5 select-none">
-                          Proyecto: {sub.projectName}
-                        </span>
-                        <p className="text-[10px] text-white/35 mt-1 flex items-center justify-end gap-1 font-mono">
-                          <Calendar className="w-3 h-3" /> {new Date(sub.timestamp).toLocaleString()}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteSubmission(sub.id, sub.senderName)}
-                        disabled={isDeletingSubmissionId === sub.id}
-                        className="p-1.5 text-red-400/60 hover:text-red-400 hover:bg-red-950/20 border border-white/5 hover:border-red-900/20 rounded-lg transition-all disabled:opacity-50 cursor-pointer shrink-0"
-                        title="Eliminar envío (también en Notion)"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <p className="text-[10px] font-semibold text-white/35 uppercase tracking-widest">
-                      Archivos entregados ({sub.files.length})
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {sub.files.map((file, fIdx) => (
-                        <div
-                          key={fIdx}
-                          className="flex items-center justify-between p-2 rounded-lg bg-[#111111] border border-white/5 text-xs text-white/80 min-w-0"
-                        >
-                          <span className="truncate flex-1 pr-2" title={file.name}>
-                            ≡ƒôÄ {file.name}
-                          </span>
-                          <span className="text-[10px] text-white/40 font-mono shrink-0 whitespace-nowrap pr-2">
-                            {(file.size / (1024 * 1024)).toFixed(2)} MB
-                          </span>
-                          <a
-                            href={file.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="bg-white/5 hover:bg-white/15 p-1 rounded-md border border-white/10 shrink-0 text-white/60 hover:text-white transition-colors"
-                            title="Descargar Archivo"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                          </a>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
         </>
         )}
 
       </div>
 
     </div>
+
+    {/* Inline file preview modal (view files directly instead of only downloading). */}
+    <FileViewer file={viewerFile} onClose={() => setViewerFile(null)} />
 
     </div>
   );

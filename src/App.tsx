@@ -773,7 +773,8 @@ export default function App() {
                       </div>
                     );
                   })() : submitSuccess ? (
-                    // Submission Success feedback View
+                    // Submission Success feedback View — stays on screen until the
+                    // user decides to send again (via the button below). No auto page reset.
                     <motion.div
                       initial={{ scale: 0.95, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
@@ -805,6 +806,23 @@ export default function App() {
                         <div className="flex justify-between">
                           <span className="text-white/40">Proyecto:</span>
                           <span className="font-semibold text-slate-200">{submitSuccess.projectName}</span>
+                        </div>
+                        <div className="flex justify-between gap-3">
+                          <span className="text-white/40 shrink-0">Fecha y hora de envío:</span>
+                          <span className="font-semibold text-slate-200 text-right">
+                            {(() => {
+                              const raw = submitSuccess.timestamp;
+                              const d = raw ? new Date(raw) : new Date();
+                              if (isNaN(d.getTime())) return "—";
+                              return d.toLocaleString("es-ES", {
+                                day: "2-digit",
+                                month: "long",
+                                year: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              });
+                            })()}
+                          </span>
                         </div>
                         <div className="flex justify-between border-t border-white/5 pt-3">
                           <span className="text-white/40">Archivos totales:</span>
