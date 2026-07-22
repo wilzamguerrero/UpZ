@@ -1,6 +1,7 @@
 ﻿import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
-  Key, FolderPlus, Eye, EyeOff, Check,
+  Key, FolderPlus, Eye, EyeOff, Check, Save,
   AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, ArrowRight, ArrowLeft, Trash2,
   ChevronDown, ChevronRight, X, RefreshCw, PanelLeftClose, PanelLeftOpen,
   Link, QrCode, Copy, GripVertical, Database, Table,
@@ -19,7 +20,7 @@ import {
   ChartBar, ChartPie, TrendingUp, BarChart3, Sigma, FunctionSquare,
   type LucideIcon
 } from "lucide-react";
-import { Project, Submission, NotionConfig, ProjectMeta, CustomField, DbColumn } from "../types";
+import { Project, Submission, NotionConfig, ProjectMeta, CustomField, DbColumn, FeedbackDraft } from "../types";
 import { ICON_OPTIONS, ICON_BY_KEY, ICON_CATEGORIES } from "../icons";
 import DateTimePicker from "./DateTimePicker";
 import GradingTable from "./GradingTable";
@@ -35,6 +36,42 @@ const randomIconKey = () => {
   return pool[Math.floor(Math.random() * pool.length)]?.key || "UploadCloud";
 };
 const EMPTY_META_LOAD_SIGNATURE = "__missing__";
+
+/** Rasterizes a Lucide icon into a PNG Blob so it can be embedded inline in an
+ *  email (Gmail strips inline SVG, so we send a real PNG referenced by Content-ID).
+ *  Renders the icon to an SVG string, draws it on a canvas, and exports PNG.
+ *  Returns null on any failure (the icon is purely decorative). */
+async function rasterizeIconPng(iconKey: string, color: string, size = 128): Promise<Blob | null> {
+  try {
+    const Icon = ICON_BY_KEY[iconKey] || UploadCloud;
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    let svg = renderToStaticMarkup(
+      React.createElement(Icon as LucideIcon, { color, size, strokeWidth: 2.5 } as any)
+    );
+    if (!/xmlns=/.test(svg)) {
+      svg = svg.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"');
+    }
+    const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    // NOTE: `Image` from lucide-react shadows the DOM constructor, so use window.Image.
+    const img = new window.Image();
+    const loaded = await new Promise<boolean>((resolve) => {
+      img.onload = () => resolve(true);
+      img.onerror = () => resolve(false);
+      img.src = svgUrl;
+    });
+    if (!loaded) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.clearRect(0, 0, size, size);
+    ctx.drawImage(img, 0, 0, size, size);
+    return await new Promise<Blob | null>((resolve) => canvas.toBlob((b) => resolve(b), "image/png"));
+  } catch {
+    return null;
+  }
+}
 
 // ICON_OPTIONS, ICON_BY_KEY and ICON_CATEGORIES now live in ../icons (shared with the landing).
 
@@ -408,6 +445,18 @@ function safeRetroColor(bgColor?: string | null): string {
   return lum <= 0.5 ? "#ffffff" : bgColor;
 }
 
+/** True when a #rgb / #rrggbb color is light (needs dark text/stripes on top). */
+function isHexLight(hex?: string | null): boolean {
+  if (!hex) return false;
+  const h = hex.replace("#", "").trim();
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  if (full.length !== 6 || !/^[0-9a-fA-F]{6}$/.test(full)) return false;
+  const r = parseInt(full.slice(0, 2), 16) / 255;
+  const g = parseInt(full.slice(2, 4), 16) / 255;
+  const b = parseInt(full.slice(4, 6), 16) / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55;
+}
+
 /** Previews a locally-selected File (before sending) using an object URL, with a
  *  remove button. Reuses InlineFilePreview so it looks like the received files. */
 const LocalFilePreview: React.FC<{
@@ -573,6 +622,15 @@ export default function AdminPanel({
   const [isDeletingProjectId, setIsDeletingProjectId] = useState<string | null>(null);
   const [projectError, setProjectError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  // Reusable styled confirm dialog (replaces native window.confirm everywhere).
+  const [confirmDialog, setConfirmDialog] = useState<{
+    title: string;
+    message: React.ReactNode;
+    confirmLabel: string;
+    accentColor?: string;
+    onConfirm: () => void | Promise<void>;
+  } | null>(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   /** Re-pull projects + metadata from Notion without reloading the page. */
@@ -599,16 +657,41 @@ export default function AdminPanel({
     note: string;
     files: File[];
     sending: boolean;
+    savingDraft?: boolean;
     msg?: { type: "success" | "error"; text: string };
   }>>({});
 
   // Which feedback-history entry is being viewed per sender (carousel index).
   const [feedbackView, setFeedbackView] = useState<Record<string, number>>({});
+  // Remembers which draft version (savedAt) we've already loaded into the compose
+  // form per sender, so refreshes don't overwrite the admin's in-progress edits.
+  const draftSeededRef = useRef<Record<string, string>>({});
 
   const getFeedback = (email: string) =>
     feedback[email] || { comment: "", note: "", files: [], sending: false };
-  const setFeedbackFor = (email: string, patch: Partial<{ comment: string; note: string; files: File[]; sending: boolean; msg?: { type: "success" | "error"; text: string } }>) =>
+  const setFeedbackFor = (email: string, patch: Partial<{ comment: string; note: string; files: File[]; sending: boolean; savingDraft: boolean; msg?: { type: "success" | "error"; text: string } }>) =>
     setFeedback((prev) => ({ ...prev, [email]: { ...getFeedback(email), ...patch } }));
+
+  /** Rebuilds File objects from a draft's Notion-stored files so the compose form
+   *  is fully restored (and sending re-uploads/emails them as usual). */
+  const reconstructDraftFiles = async (draft: FeedbackDraft): Promise<File[]> => {
+    if (!draft.filesBlockId || !draft.files?.length) return [];
+    const out: File[] = [];
+    for (let i = 0; i < draft.files.length; i++) {
+      const meta = draft.files[i];
+      const name = typeof meta === "string" ? meta : meta.name;
+      try {
+        const res = await fetch(`/api/submission-file?block=${encodeURIComponent(draft.filesBlockId)}&i=${i}`);
+        if (!res.ok) continue;
+        const blob = await res.blob();
+        // NOTE: `File` from lucide-react shadows the DOM constructor here, so use window.File.
+        out.push(new window.File([blob], name, { type: blob.type || "application/octet-stream" }));
+      } catch {
+        // Skip a file we can't fetch; the rest still load.
+      }
+    }
+    return out;
+  };
 
   /** Send feedback (comment + optional note + attachments) to a sender by email.
    *  `submissionId` is the sender's anchor toggle where the history is stored. */
@@ -630,6 +713,12 @@ export default function AdminPanel({
       form.append("submissionId", submissionId || "");
       fb.files.forEach((f) => form.append("files", f, f.name));
 
+      // Rasterize the project's icon to a PNG and attach it so the email can show
+      // it inline next to "ENVI" (color contrasts with the accent header bg).
+      const iconColor = copyBgColor && isBgColorLight ? "#111111" : "#ffffff";
+      const iconBlob = await rasterizeIconPng(copyIcon, iconColor, 128);
+      if (iconBlob) form.append("icon", iconBlob, "icono.png");
+
       const res = await fetch("/api/send-feedback", { method: "POST", body: form });
       const data = await res.json();
       if (data.success) {
@@ -639,12 +728,14 @@ export default function AdminPanel({
           files: fb.files.map((f) => f.name),
           sentAt: new Date().toISOString(),
         };
-        // Optimistically append to the anchor submission's history so it shows now.
+        // Optimistically append to the anchor submission's history so it shows now,
+        // and clear any saved draft (sending supersedes it).
         if (submissionId) {
+          draftSeededRef.current[email] = "__sent__";
           setSubmissions((prev) =>
             prev.map((s) =>
               s.id === submissionId
-                ? { ...s, feedbackHistory: [...(s.feedbackHistory || []), entry] }
+                ? { ...s, feedbackHistory: [...(s.feedbackHistory || []), entry], feedbackDraft: null }
                 : s
             )
           );
@@ -663,31 +754,125 @@ export default function AdminPanel({
     }
   };
 
-  /** Delete a feedback entry (and its files) from Notion. */
-  const deleteFeedback = async (email: string, submissionId: string, index: number) => {
-    if (!window.confirm("¿Eliminar esta retroalimentación de Notion? No se puede deshacer.")) return;
+  /** Save feedback (comment + note + attachments) as a DRAFT in Notion, without
+   *  emailing it. Replaces any previous draft for this sender. */
+  const saveFeedbackDraft = async (email: string, submissionId: string) => {
+    const fb = getFeedback(email);
+    if (!fb.comment.trim() && !fb.note.trim() && fb.files.length === 0) {
+      setFeedbackFor(email, { msg: { type: "error", text: "Escribe un comentario, una nota o adjunta un archivo para guardar." } });
+      return;
+    }
+    if (!submissionId) {
+      setFeedbackFor(email, { msg: { type: "error", text: "No se pudo determinar dónde guardar." } });
+      return;
+    }
+    setFeedbackFor(email, { savingDraft: true, msg: undefined });
     try {
-      const res = await fetch(
-        `/api/send-feedback?submissionId=${encodeURIComponent(submissionId)}&index=${index}`,
-        { method: "DELETE" }
-      );
+      const form = new FormData();
+      form.append("submissionId", submissionId);
+      form.append("comment", fb.comment);
+      form.append("note", fb.note);
+      fb.files.forEach((f) => form.append("files", f, f.name));
+
+      const res = await fetch("/api/feedback-draft", { method: "POST", body: form });
       const data = await res.json();
       if (data.success) {
+        const draft: FeedbackDraft = data.draft || {
+          comment: fb.comment,
+          note: fb.note,
+          files: fb.files.map((f) => ({ name: f.name, size: f.size })),
+          savedAt: new Date().toISOString(),
+        };
+        // Remember this version so the seeding effect won't overwrite the form.
+        draftSeededRef.current[email] = draft.savedAt || "1";
         setSubmissions((prev) =>
-          prev.map((s) =>
-            s.id === submissionId
-              ? { ...s, feedbackHistory: (s.feedbackHistory || []).filter((_, i) => i !== index) }
-              : s
-          )
+          prev.map((s) => (s.id === submissionId ? { ...s, feedbackDraft: draft } : s))
         );
-        // Keep the viewer index within bounds after removal.
-        setFeedbackView((v) => ({ ...v, [email]: Math.max(0, (v[email] ?? index) - 1) }));
+        setFeedbackFor(email, { savingDraft: false, msg: { type: "success", text: "Guardado (sin enviar)." } });
       } else {
-        alert(data.error || "No se pudo eliminar la retroalimentación.");
+        setFeedbackFor(email, { savingDraft: false, msg: { type: "error", text: data.error || "No se pudo guardar." } });
       }
     } catch {
-      alert("Error de red al eliminar la retroalimentación.");
+      setFeedbackFor(email, { savingDraft: false, msg: { type: "error", text: "Error de red al guardar." } });
     }
+  };
+
+  /** Cancel/clear the compose form at once (comment + note + files). If there is a
+   *  saved draft in Notion, it (and its files) is deleted too, after confirming. */
+  const cancelFeedbackDraft = (email: string, submissionId: string) => {
+    const fb = getFeedback(email);
+    const anchorSub = submissions.find((s) => s.id === submissionId);
+    const hasDraft = !!anchorSub?.feedbackDraft;
+    const hasContent = !!(fb.comment.trim() || fb.note.trim() || fb.files.length > 0);
+    if (!hasDraft && !hasContent) return;
+
+    const clearAll = () => {
+      draftSeededRef.current[email] = "__cancelled__";
+      setFeedback((prev) => ({ ...prev, [email]: { comment: "", note: "", files: [], sending: false, savingDraft: false } }));
+    };
+
+    // Nothing saved in Notion yet: just clear the form instantly (non-destructive).
+    if (!hasDraft) {
+      clearAll();
+      return;
+    }
+
+    // A draft is stored in Notion: confirm before deleting it (and its files).
+    setConfirmDialog({
+      title: "Descartar retroalimentación",
+      message: (
+        <>
+          ¿Seguro que quieres descartar esta retroalimentación? Se borrarán el comentario, la nota y los archivos guardados en Notion. Esta acción no se puede deshacer.
+        </>
+      ),
+      confirmLabel: "Descartar",
+      onConfirm: async () => {
+        try {
+          await fetch(`/api/feedback-draft?submissionId=${encodeURIComponent(submissionId)}`, { method: "DELETE" });
+        } catch {
+          // Ignore network errors; still clear the form locally.
+        }
+        setSubmissions((prev) => prev.map((s) => (s.id === submissionId ? { ...s, feedbackDraft: null } : s)));
+        clearAll();
+      },
+    });
+  };
+
+  /** Delete a feedback entry (and its files) from Notion. */
+  const deleteFeedback = (email: string, submissionId: string, index: number) => {
+    setConfirmDialog({
+      title: "Eliminar retroalimentación",
+      message: (
+        <>
+          ¿Seguro que quieres eliminar esta retroalimentación? Se borrará de Notion junto con sus archivos. Esta acción no se puede deshacer.
+        </>
+      ),
+      confirmLabel: "Eliminar",
+      onConfirm: async () => {
+        try {
+          const res = await fetch(
+            `/api/send-feedback?submissionId=${encodeURIComponent(submissionId)}&index=${index}`,
+            { method: "DELETE" }
+          );
+          const data = await res.json();
+          if (data.success) {
+            setSubmissions((prev) =>
+              prev.map((s) =>
+                s.id === submissionId
+                  ? { ...s, feedbackHistory: (s.feedbackHistory || []).filter((_, i) => i !== index) }
+                  : s
+              )
+            );
+            // Keep the viewer index within bounds after removal.
+            setFeedbackView((v) => ({ ...v, [email]: Math.max(0, (v[email] ?? index) - 1) }));
+          } else {
+            setProjectError(data.error || "No se pudo eliminar la retroalimentación.");
+          }
+        } catch {
+          setProjectError("Error de red al eliminar la retroalimentación.");
+        }
+      },
+    });
   };
   // File currently open in the inline preview modal (null = closed).
   const [viewerFile, setViewerFile] = useState<ViewableFile | null>(null);
@@ -736,6 +921,32 @@ export default function AdminPanel({
       }
     }
   }, [projects, selectedMetaProjectId]);
+
+  // Load any saved feedback DRAFT into the compose form (once per draft version),
+  // so an admin can keep editing where they left off. Text loads immediately;
+  // attached files are rebuilt from Notion in the background.
+  useEffect(() => {
+    submissions.forEach((s) => {
+      const draft = s.feedbackDraft;
+      const email = s.senderEmail;
+      if (!draft || !email) return;
+      const version = draft.savedAt || "1";
+      if (draftSeededRef.current[email] === version) return;
+      draftSeededRef.current[email] = version;
+      setFeedback((prev) => {
+        const cur = prev[email] || { comment: "", note: "", files: [], sending: false };
+        return { ...prev, [email]: { ...cur, comment: draft.comment || "", note: draft.note || "", savingDraft: false } };
+      });
+      void reconstructDraftFiles(draft).then((fileObjs) => {
+        if (!fileObjs.length) return;
+        setFeedback((prev) => {
+          const cur = prev[email] || { comment: "", note: "", files: [], sending: false };
+          return { ...prev, [email]: { ...cur, files: fileObjs } };
+        });
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submissions]);
 
   // Pull the selected project's meta straight from Notion whenever it changes, so
   // the admin always reflects what's actually stored in Notion (colors, title,
@@ -1080,22 +1291,33 @@ export default function AdminPanel({
   };
 
   /** Delete a submission everywhere: Notion (toggle + db row) and the local log. */
-  const handleDeleteSubmission = async (submissionId: string, senderName: string) => {
-    if (!window.confirm(`¿Eliminar el envío de "${senderName}"? Se borrará también de Notion y no se puede deshacer.`)) return;
-    setIsDeletingSubmissionId(submissionId);
-    try {
-      const res = await fetch(`/api/submissions/${submissionId}`, { method: "DELETE" });
-      const data = await res.json();
-      if (data.success) {
-        setSubmissions((prev) => prev.filter((s) => s.id !== submissionId));
-      } else {
-        alert(data.error || "No se pudo eliminar el envío.");
-      }
-    } catch {
-      alert("Error de red al eliminar el envío.");
-    } finally {
-      setIsDeletingSubmissionId(null);
-    }
+  const handleDeleteSubmission = (submissionId: string, senderName: string) => {
+    setConfirmDialog({
+      title: "Eliminar envío",
+      message: (
+        <>
+          ¿Seguro que quieres eliminar el envío de{" "}
+          <span className="text-white font-semibold">"{senderName}"</span>? Se borrará también de Notion. Esta acción no se puede deshacer.
+        </>
+      ),
+      confirmLabel: "Eliminar",
+      onConfirm: async () => {
+        setIsDeletingSubmissionId(submissionId);
+        try {
+          const res = await fetch(`/api/submissions/${submissionId}`, { method: "DELETE" });
+          const data = await res.json();
+          if (data.success) {
+            setSubmissions((prev) => prev.filter((s) => s.id !== submissionId));
+          } else {
+            setProjectError(data.error || "No se pudo eliminar el envío.");
+          }
+        } catch {
+          setProjectError("Error de red al eliminar el envío.");
+        } finally {
+          setIsDeletingSubmissionId(null);
+        }
+      },
+    });
   };
 
   const handleSaveConfig = async (e: React.FormEvent) => {
@@ -1224,21 +1446,31 @@ export default function AdminPanel({
     }
   };
 
-  const handleClearConfig = async () => {
-    if (!window.confirm("┬┐Est├ís seguro de que quieres eliminar las credenciales de Notion actuales?")) return;
-    try {
-      const res = await fetch("/api/config/clear", { method: "POST" });
-      const data = await res.json();
-      if (data.success) {
-        setNotionSecret("");
-        setParentPageId("");
-        setSaveMessage({ type: "success", text: "Configuraci├│n eliminada." });
-        await refreshConfig();
-        await refreshProjects();
-      }
-    } catch (e) {
-      console.error(e);
-    }
+  const handleClearConfig = () => {
+    setConfirmDialog({
+      title: "Eliminar credenciales",
+      message: (
+        <>
+          ¿Seguro que quieres eliminar las credenciales de Notion actuales? Tendrás que volver a configurarlas para conectar de nuevo.
+        </>
+      ),
+      confirmLabel: "Eliminar",
+      onConfirm: async () => {
+        try {
+          const res = await fetch("/api/config/clear", { method: "POST" });
+          const data = await res.json();
+          if (data.success) {
+            setNotionSecret("");
+            setParentPageId("");
+            setSaveMessage({ type: "success", text: "Configuración eliminada." });
+            await refreshConfig();
+            await refreshProjects();
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      },
+    });
   };
 
   // When a project is selected, scope submissions to that project only.
@@ -1311,9 +1543,9 @@ export default function AdminPanel({
   return (
     <div className="space-y-6">
       {/* Delete confirmation — styled modal matching the interface (no native dialog). */}
-      {deleteTarget && (
+      {deleteTarget && createPortal(
         <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md p-4"
           onClick={() => setDeleteTarget(null)}
         >
           <div
@@ -1340,13 +1572,21 @@ export default function AdminPanel({
               <button
                 type="button"
                 onClick={() => void performDeleteProject()}
-                className="h-11 px-6 font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden"
-                style={{ '--btn-color': '#ff3b30' } as React.CSSProperties}
+                className="h-11 px-6 font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro btn-accent-border group overflow-hidden"
+                style={{ '--btn-color': '#ffffff' } as React.CSSProperties}
               >
-                <div className="absolute inset-0 bg-[#000000] border border-black group-hover:bg-transparent group-hover:border-transparent transition-all duration-300 rounded-[4px] pointer-events-none" />
+                {/* Accent fill (fades out on hover to reveal the environment) */}
                 <div
-                  className="absolute inset-[1px] bg-[#000000] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px] stripes-overlay"
-                  style={{ backgroundImage: `repeating-linear-gradient(119deg, currentColor 0px, currentColor 1px, transparent 1px, transparent 10px)` }}
+                  className="absolute inset-0 opacity-100 group-hover:opacity-0 transition-opacity duration-300 rounded-[4px] pointer-events-none"
+                  style={{ backgroundColor: '#ff3b30' }}
+                />
+                {/* Diagonal lines on top of the accent */}
+                <div
+                  className="absolute inset-[1px] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px]"
+                  style={{
+                    backgroundColor: '#ff3b30',
+                    backgroundImage: `repeating-linear-gradient(119deg, rgba(255,255,255,0.22) 0px, rgba(255,255,255,0.22) 1px, transparent 1px, transparent 10px)`,
+                  }}
                 />
                 <span className="btn-motion-corner btn-motion-corner-tl" />
                 <span className="btn-motion-corner btn-motion-corner-tr" />
@@ -1358,7 +1598,94 @@ export default function AdminPanel({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Reusable styled confirmation modal (submissions, feedback, config, etc.).
+          Rendered via a portal to <body> so the fixed backdrop always covers the
+          whole viewport (an ancestor's transform would otherwise clip it). */}
+      {confirmDialog && createPortal(
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md p-4"
+          onClick={() => { if (!confirmBusy) setConfirmDialog(null); }}
+        >
+          <div
+            className="w-full max-w-sm bg-[#111111] border border-white/10 rounded-2xl p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                style={{ backgroundColor: `${confirmDialog.accentColor || "#ff3b30"}26`, color: confirmDialog.accentColor || "#ff3b30" }}
+              >
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <h3 className="text-base font-semibold text-white">{confirmDialog.title}</h3>
+            </div>
+            <p className="text-sm text-white/60 leading-relaxed mb-6">
+              {confirmDialog.message}
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={confirmBusy}
+                onClick={() => setConfirmDialog(null)}
+                className="h-11 px-4 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white text-sm font-medium transition-all disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              {(() => {
+                const accent = confirmDialog.accentColor || '#ff3b30';
+                const light = isHexLight(accent);
+                const stripe = light ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.22)';
+                return (
+                  <button
+                    type="button"
+                    disabled={confirmBusy}
+                    onClick={() => {
+                      const dialog = confirmDialog;
+                      void (async () => {
+                        setConfirmBusy(true);
+                        try {
+                          await dialog.onConfirm();
+                        } finally {
+                          setConfirmBusy(false);
+                          setConfirmDialog(null);
+                        }
+                      })();
+                    }}
+                    className="h-11 px-6 font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro btn-accent-border group overflow-hidden disabled:opacity-60"
+                    style={{ '--btn-color': light ? '#111111' : '#ffffff' } as React.CSSProperties}
+                  >
+                    {/* Accent fill (fades out on hover to reveal the environment) */}
+                    <div
+                      className="absolute inset-0 opacity-100 group-hover:opacity-0 transition-opacity duration-300 rounded-[4px] pointer-events-none"
+                      style={{ backgroundColor: accent }}
+                    />
+                    {/* Diagonal lines on top of the accent */}
+                    <div
+                      className="absolute inset-[1px] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px]"
+                      style={{
+                        backgroundColor: accent,
+                        backgroundImage: `repeating-linear-gradient(119deg, ${stripe} 0px, ${stripe} 1px, transparent 1px, transparent 10px)`,
+                      }}
+                    />
+                    <span className="btn-motion-corner btn-motion-corner-tl" />
+                    <span className="btn-motion-corner btn-motion-corner-tr" />
+                    <span className="btn-motion-corner btn-motion-corner-bl" />
+                    <span className="btn-motion-corner btn-motion-corner-br" />
+                    <span className="relative z-10 flex items-center justify-center gap-2 font-extrabold transition-colors duration-300 font-mono hover-text-adaptive btn-text-content">
+                      {confirmBusy ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                      {confirmDialog.confirmLabel}
+                    </span>
+                  </button>
+                );
+              })()}
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* Detail view keeps a back arrow; browse view has no header. */}
@@ -2046,6 +2373,7 @@ export default function AdminPanel({
                       (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
                     )[0];
                     const fbCount = fbAnchor?.feedbackHistory?.length || 0;
+                    const hasDraft = !!fbAnchor?.feedbackDraft;
                     return (
                       <div key={person.email} className="border border-white/5 rounded-xl overflow-hidden">
                         <button
@@ -2070,6 +2398,14 @@ export default function AdminPanel({
                             </div>
                           </div>
                           <div className="flex items-center gap-2 shrink-0 ml-3">
+                            {hasDraft && (
+                              <span
+                                className="text-[10px] text-white/50 font-mono bg-white/5 px-2 py-1 rounded-md border border-white/5 whitespace-nowrap flex items-center gap-1"
+                                title="Retroalimentación guardada (borrador), aún sin enviar"
+                              >
+                                <Save className="w-3 h-3" /> Borrador
+                              </span>
+                            )}
                             {fbCount > 0 && (
                               <span
                                 className="text-[10px] text-white font-mono bg-white/15 px-2 py-1 rounded-md border border-white/25 whitespace-nowrap flex items-center gap-1"
@@ -2290,11 +2626,37 @@ export default function AdminPanel({
                                           {fb.msg.text}
                                         </span>
                                       )}
+                                      {/* Guardar / Cancelar: aparecen cuando hay algo que guardar o ya
+                                          existe un borrador; desaparecen tras enviar. */}
+                                      {(fb.comment.trim() || fb.note.trim() || fb.files.length > 0 || !!anchor?.feedbackDraft) && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => cancelFeedbackDraft(person.email, anchor?.id || "")}
+                                            disabled={fb.savingDraft || fb.sending}
+                                            className="h-10 px-4 rounded-lg border border-white/20 bg-white/5 hover:bg-red-950/25 hover:border-red-900/40 text-white/70 hover:text-red-300 text-[11px] font-mono uppercase tracking-widest flex items-center gap-2 transition-all disabled:opacity-50 shrink-0 cursor-pointer"
+                                            title="Descartar comentario, nota y archivos (también en Notion)"
+                                          >
+                                            <X className="w-3.5 h-3.5" />
+                                            Cancelar
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => saveFeedbackDraft(person.email, anchor?.id || "")}
+                                            disabled={fb.savingDraft || fb.sending}
+                                            className="h-10 px-4 rounded-lg border border-white/20 bg-white/5 hover:bg-white/10 text-white text-[11px] font-mono uppercase tracking-widest flex items-center gap-2 transition-all disabled:opacity-50 shrink-0 cursor-pointer"
+                                            title="Guardar sin enviar (borrador)"
+                                          >
+                                            {fb.savingDraft ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                                            {fb.savingDraft ? "Guardando..." : "Guardar"}
+                                          </button>
+                                        </>
+                                      )}
                                       <button
                                         type="button"
                                         onClick={() => sendFeedback(person.email, person.name, anchor?.id || "")}
                                         disabled={fb.sending}
-                                        className="h-10 px-5 font-mono tracking-widest text-[11px] uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden shrink-0 disabled:opacity-50"
+                                        className="h-10 px-5 font-mono tracking-widest text-[11px] uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro btn-accent-border group overflow-hidden shrink-0 disabled:opacity-50"
                                         style={{ '--btn-color': (copyBgColor && isBgColorLight ? '#111111' : '#ffffff') } as React.CSSProperties}
                                       >
                                         {/* Accent-colored fill (fades out on hover to reveal the environment) */}

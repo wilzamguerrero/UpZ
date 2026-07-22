@@ -15,7 +15,7 @@ import {
   type PreviewProject,
 } from "./functions/_shared/preview";
 import { sendGmailMessage, buildReceiptEmail, buildFeedbackEmail, hasGmailCredentials, type MailAttachment } from "./functions/_shared/gmail";
-import { collectSubmissions, collectProjectMetas, FEEDBACK_MARKER } from "./functions/_shared/submissions";
+import { collectSubmissions, collectProjectMetas, FEEDBACK_MARKER, FEEDBACK_DRAFT_MARKER } from "./functions/_shared/submissions";
 import { uploadFileToNotion, buildNotionFileBlocks } from "./functions/_shared/notion";
 
 /** Parse a Notion code(json) block's content, or null. */
@@ -1699,14 +1699,16 @@ app.patch("/api/submission-grade", async (req, res) => {
 });
 
 // 6.3. Send feedback (comment + optional note + attachments) to a sender by email.
-app.post("/api/send-feedback", uploadMemory.array("files"), async (req, res) => {
+app.post("/api/send-feedback", uploadMemory.fields([{ name: "files" }, { name: "icon", maxCount: 1 }]), async (req, res) => {
   const recipientEmail = String(req.body?.recipientEmail || "").trim();
   const recipientName = String(req.body?.recipientName || "").trim() || "Remitente";
   const projectName = String(req.body?.projectName || "Proyecto").trim();
   const comment = String(req.body?.comment || "");
   const note = String(req.body?.note || "");
   const bgColor = String(req.body?.bgColor || "");
-  const files = (req.files as Express.Multer.File[] | undefined) || [];
+  const filesMap = (req.files as { [field: string]: Express.Multer.File[] } | undefined) || {};
+  const files = filesMap.files || [];
+  const iconFile = (filesMap.icon || [])[0];
 
   if (!recipientEmail) {
     return res.status(400).json({ error: "Falta el correo del destinatario." });
@@ -1733,6 +1735,20 @@ app.post("/api/send-feedback", uploadMemory.array("files"), async (req, res) => 
     content: new Uint8Array(f.buffer),
   }));
 
+  // Optional inline header icon (rasterized PNG). Kept separate from `files` so
+  // it isn't stored in Notion nor listed as an attachment.
+  let iconCid: string | undefined;
+  if (iconFile && iconFile.buffer && iconFile.buffer.byteLength > 0 && iconFile.buffer.byteLength <= 512 * 1024) {
+    iconCid = "projicon";
+    attachments.unshift({
+      filename: "icono.png",
+      contentType: iconFile.mimetype || "image/png",
+      content: new Uint8Array(iconFile.buffer),
+      contentId: iconCid,
+      inline: true,
+    });
+  }
+
   const { subject, html, text } = buildFeedbackEmail({
     recipientName,
     projectName,
@@ -1740,6 +1756,7 @@ app.post("/api/send-feedback", uploadMemory.array("files"), async (req, res) => 
     note,
     files: files.map((f) => ({ name: f.originalname || "archivo" })),
     accentColor: bgColor,
+    iconCid,
   });
 
   try {
@@ -1834,11 +1851,30 @@ app.post("/api/send-feedback", uploadMemory.array("files"), async (req, res) => 
     } catch {
       // Non-critical: the email was already sent.
     }
+
+    // 3) Sending supersedes any saved draft for this sender: remove it.
+    try {
+      const data: any = await notion.blocks.children.list({ block_id: submissionId });
+      const draftBlock = data.results.find((b: any) => {
+        if (b.type !== "code" || b.code?.language !== "json") return false;
+        const parsed = parseJsonCodeBlock(b);
+        return parsed && parsed[FEEDBACK_DRAFT_MARKER] && typeof parsed[FEEDBACK_DRAFT_MARKER] === "object";
+      }) as any;
+      if (draftBlock) {
+        const draft = parseJsonCodeBlock(draftBlock)?.[FEEDBACK_DRAFT_MARKER];
+        if (draft?.filesBlockId) {
+          try { await notion.blocks.delete({ block_id: draft.filesBlockId }); } catch { /* already gone */ }
+        }
+        try { await notion.blocks.delete({ block_id: draftBlock.id }); } catch { /* already gone */ }
+      }
+    } catch {
+      // Non-critical.
+    }
   }
 
   const entry = { comment, note, files: entryFiles, filesBlockId, sentAt: new Date().toISOString() };
 
-  res.json({ success: true, message: "Retroalimentación enviada por correo.", entry });
+  res.json({ success: true, message: "Retroalimentación enviada por correo.", entry, draftCleared: true });
 });
 
 // 6.4. Delete a feedback entry (and its stored files) from Notion.
@@ -1881,6 +1917,108 @@ app.delete("/api/send-feedback", async (req, res) => {
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: `No se pudo eliminar: ${err.message || "error desconocido"}.` });
+  }
+});
+
+// 6.5. Feedback DRAFT: save (comment + note + files) in Notion WITHOUT emailing,
+// and delete it. Lets an admin keep work-in-progress feedback before sending.
+async function clearFeedbackDraftServer(notion: any, submissionId: string): Promise<void> {
+  const data: any = await notion.blocks.children.list({ block_id: submissionId });
+  const draftBlock = data.results.find((b: any) => {
+    if (b.type !== "code" || b.code?.language !== "json") return false;
+    const parsed = parseJsonCodeBlock(b);
+    return parsed && parsed[FEEDBACK_DRAFT_MARKER] && typeof parsed[FEEDBACK_DRAFT_MARKER] === "object";
+  }) as any;
+  if (!draftBlock) return;
+  const draft = parseJsonCodeBlock(draftBlock)?.[FEEDBACK_DRAFT_MARKER];
+  if (draft?.filesBlockId) {
+    try { await notion.blocks.delete({ block_id: draft.filesBlockId }); } catch { /* already gone */ }
+  }
+  try { await notion.blocks.delete({ block_id: draftBlock.id }); } catch { /* already gone */ }
+}
+
+app.post("/api/feedback-draft", uploadMemory.array("files"), async (req, res) => {
+  const comment = String(req.body?.comment || "");
+  const note = String(req.body?.note || "");
+  const submissionId = String(req.body?.submissionId || "").trim();
+  const files = (req.files as Express.Multer.File[] | undefined) || [];
+
+  if (!submissionId) return res.status(400).json({ error: "Falta el identificador del envío." });
+  if (!comment.trim() && !note.trim() && files.length === 0) {
+    return res.status(400).json({ error: "Escribe un comentario, una nota o adjunta un archivo." });
+  }
+  const config = loadConfig();
+  if (!config.notionSecret) return res.status(400).json({ error: "Notion no está configurado." });
+
+  const notion = new Client({ auth: config.notionSecret });
+  const MAX_STORE_PER_FILE = 20 * 1024 * 1024;
+  try {
+    // Replace any previous draft (and its files) first.
+    await clearFeedbackDraftServer(notion, submissionId);
+
+    let filesBlockId = "";
+    let entryFiles: { name: string; size: number }[] = files.map((f) => ({ name: f.originalname || "archivo", size: f.size || 0 }));
+    if (files.length > 0) {
+      const records: { uploadId: string; name: string; size: number; mimeType: string; extModified: boolean }[] = [];
+      for (const f of files) {
+        if ((f.size || 0) > MAX_STORE_PER_FILE) continue;
+        const fileLike = {
+          name: f.originalname || "archivo",
+          type: f.mimetype || "application/octet-stream",
+          arrayBuffer: async () => f.buffer.buffer.slice(f.buffer.byteOffset, f.buffer.byteOffset + f.buffer.byteLength),
+        } as unknown as File;
+        const up = await uploadFileToNotion(fileLike, config.notionSecret);
+        records.push({
+          uploadId: up.id,
+          name: up.originalName,
+          size: f.size || 0,
+          mimeType: f.mimetype || "application/octet-stream",
+          extModified: up.extModified,
+        });
+      }
+      if (records.length > 0) {
+        const appendRes: any = await notion.blocks.children.append({
+          block_id: submissionId,
+          children: [{
+            object: "block",
+            type: "toggle",
+            toggle: {
+              rich_text: [{ type: "text", text: { content: `📝 Borrador — ${new Date().toLocaleString("es-ES")}` } }],
+              children: buildNotionFileBlocks(records),
+            },
+          }] as any,
+        });
+        filesBlockId = appendRes?.results?.[0]?.id || "";
+        entryFiles = records.map((r) => ({ name: r.name, size: r.size }));
+      }
+    }
+
+    const draft = { comment, note, files: entryFiles, filesBlockId, savedAt: new Date().toISOString() };
+    await notion.blocks.children.append({
+      block_id: submissionId,
+      children: [{
+        object: "block",
+        type: "code",
+        code: { rich_text: [{ type: "text", text: { content: JSON.stringify({ [FEEDBACK_DRAFT_MARKER]: draft }, null, 2) } }], language: "json" },
+      }] as any,
+    });
+    res.json({ success: true, message: "Borrador guardado.", draft });
+  } catch (err: any) {
+    res.status(500).json({ error: `No se pudo guardar el borrador: ${err.message || "error desconocido"}.` });
+  }
+});
+
+app.delete("/api/feedback-draft", async (req, res) => {
+  const submissionId = String(req.query.submissionId || "").trim();
+  if (!submissionId) return res.status(400).json({ error: "Parámetros inválidos." });
+  const config = loadConfig();
+  if (!config.notionSecret) return res.status(400).json({ error: "Notion no está configurado." });
+  try {
+    const notion = new Client({ auth: config.notionSecret });
+    await clearFeedbackDraftServer(notion, submissionId);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: `No se pudo eliminar el borrador: ${err.message || "error desconocido"}.` });
   }
 });
 

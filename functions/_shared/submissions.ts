@@ -20,6 +20,15 @@ export interface RebuiltFeedback {
   sentAt: string;
 }
 
+/** A saved-but-not-sent feedback draft (same shape, but savedAt instead of sentAt). */
+export interface RebuiltDraft {
+  comment: string;
+  note?: string;
+  files: (string | { name: string; size?: number })[];
+  filesBlockId?: string;
+  savedAt: string;
+}
+
 export interface RebuiltSubmission {
   id: string;
   projectId: string;
@@ -30,12 +39,17 @@ export interface RebuiltSubmission {
   files: RebuiltFile[];
   controlValues: Record<string, string>;
   feedbackHistory: RebuiltFeedback[];
+  /** Draft feedback saved but not yet emailed (null/undefined when none). */
+  feedbackDraft?: RebuiltDraft | null;
   notionBlockId: string;
   dbPageId: string;
 }
 
 /** Marker that identifies the feedback-history JSON code block inside a toggle. */
 export const FEEDBACK_MARKER = "__envi_feedback__";
+
+/** Marker that identifies the saved-draft JSON code block inside a toggle. */
+export const FEEDBACK_DRAFT_MARKER = "__envi_feedback_draft__";
 
 export type ListChildrenFn = (blockId: string) => Promise<any[]>;
 
@@ -127,6 +141,8 @@ export async function collectSubmissions(
           if (parsed && typeof parsed === "object") {
             if (Array.isArray(parsed[FEEDBACK_MARKER])) {
               sub.feedbackHistory = parsed[FEEDBACK_MARKER];
+            } else if (parsed[FEEDBACK_DRAFT_MARKER] && typeof parsed[FEEDBACK_DRAFT_MARKER] === "object") {
+              sub.feedbackDraft = parsed[FEEDBACK_DRAFT_MARKER] as RebuiltDraft;
             } else {
               sub.controlValues = parsed as Record<string, string>;
             }

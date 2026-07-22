@@ -109,6 +109,15 @@ export interface FeedbackEntry {
   sentAt: string;
 }
 
+/** Feedback saved as a draft (persisted in Notion) but not yet emailed. */
+export interface FeedbackDraft {
+  comment: string;
+  note?: string;
+  files: (string | FeedbackFile)[];
+  filesBlockId?: string;
+  savedAt: string;
+}
+
 export interface Submission {
   id: string;
   projectId: string;
@@ -123,4 +132,6 @@ export interface Submission {
   controlValues?: Record<string, string>;
   /** History of feedback messages sent to this sender (stored in Notion). */
   feedbackHistory?: FeedbackEntry[];
+  /** Feedback saved but not yet emailed (stored in Notion). */
+  feedbackDraft?: FeedbackDraft | null;
 }

@@ -468,6 +468,22 @@ body {
   border: 1px solid #000000 !important;
 }
 
+/* Accent buttons (e.g. "Enviar") carry an accent fill, so their border must
+   adapt to the theme (white on dark, black on light) instead of staying black.
+   Placed after the base rule so it wins on equal specificity; the :hover rule
+   above still overrides it to transparent on hover. */
+.btn-motion-retro.btn-accent-border {
+  border-color: var(--btn-color, #ffffff) !important;
+}
+.btn-motion-retro.btn-accent-border:not(:disabled):hover {
+  border-color: transparent !important;
+}
+/* Keep the adaptive border while the button is disabled (e.g. "Enviando..."),
+   instead of falling back to the fixed black disabled border. */
+.btn-motion-retro.btn-accent-border:disabled {
+  border-color: var(--btn-color, #ffffff) !important;
+}
+
 /* Force children of .btn-motion-retro to use the button's color rules */
 .btn-motion-retro,
 .btn-motion-retro *,

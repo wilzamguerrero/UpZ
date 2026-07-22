@@ -17,6 +17,10 @@ export interface MailAttachment {
   contentType: string;
   /** Raw file bytes. */
   content: Uint8Array;
+  /** If set, the part is referenced from the HTML via `cid:<contentId>`. */
+  contentId?: string;
+  /** Render inline (e.g. an image in the header) instead of as a download. */
+  inline?: boolean;
 }
 
 export interface MailInput {
@@ -147,7 +151,13 @@ function buildRawMessage(creds: GmailCredentials, mail: MailInput): string {
     const filename = sanitizeFilename(att.filename);
     parts.push(`--${boundary}`);
     parts.push(`Content-Type: ${att.contentType || "application/octet-stream"}; name="${filename}"`);
-    parts.push(`Content-Disposition: attachment; filename="${filename}"`);
+    if (att.inline || att.contentId) {
+      // Inline part referenced from the HTML via cid: (e.g. the header icon).
+      parts.push(`Content-Disposition: inline; filename="${filename}"`);
+      if (att.contentId) parts.push(`Content-ID: <${att.contentId}>`);
+    } else {
+      parts.push(`Content-Disposition: attachment; filename="${filename}"`);
+    }
     parts.push("Content-Transfer-Encoding: base64");
     parts.push("");
     parts.push(wrap76(bytesToBase64(att.content)));
@@ -376,6 +386,8 @@ export function buildFeedbackEmail(data: {
   note?: string;
   files: { name: string }[];
   accentColor?: string;
+  /** Content-ID of an inline PNG icon to show next to "ENVI" in the header. */
+  iconCid?: string;
 }): { subject: string; html: string; text: string } {
   const headerBg = normalizeHex(data.accentColor) || "#d21f28";
   const headerLight = isLightColor(headerBg);
@@ -387,10 +399,25 @@ export function buildFeedbackEmail(data: {
 
   const subject = `Retroalimentación · ${data.projectName}`;
 
+  // Mismo fondo que el recibo: solo líneas diagonales del color del proyecto
+  // sobre un fondo transparente (deja ver el fondo del cliente de correo).
+  const stripes = `repeating-linear-gradient(119deg, ${headerBg} 0px, ${headerBg} 1px, transparent 1px, transparent 10px)`;
+  const bgOuter = `background-color:transparent;background-image:${stripes};`;
+
+  // Icono del proyecto embebido (CID) al lado de "ENVI", un poco más grande que
+  // el texto para diferenciar visualmente este correo del comprobante de envío.
+  const iconImg = data.iconCid
+    ? `<img src="cid:${data.iconCid}" width="46" height="46" alt="" style="display:inline-block;vertical-align:middle;margin-right:12px;border:0;outline:none;" />`
+    : "";
+
+  // La nota (calificación) se muestra centrada y en grande para que el estudiante
+  // la vea claramente, en vez de repartida de extremo a extremo.
   const noteBlock = data.note && data.note.trim()
     ? `<tr>
-         <td style="padding:7px 0;color:#7a7a7a;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-family:${monoStack};">Nota</td>
-         <td style="padding:7px 0;color:${headerBg};font-size:18px;font-weight:800;text-align:right;font-family:${monoStack};">${escapeHtml(data.note.trim())}</td>
+         <td style="padding:6px 0 18px;text-align:center;">
+           <div style="color:#7a7a7a;font-size:12px;text-transform:uppercase;letter-spacing:3px;font-family:${monoStack};margin-bottom:10px;">Nota</div>
+           <div style="color:${headerBg};font-size:72px;font-weight:800;line-height:1;text-align:center;font-family:${monoStack};">${escapeHtml(data.note.trim())}</div>
+         </td>
        </tr>`
     : "";
 
@@ -411,13 +438,13 @@ export function buildFeedbackEmail(data: {
   const html = `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background-color:#050505;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#050505;">
-    <tr><td align="center" style="padding:24px;">
+<body style="margin:0;padding:0;${bgOuter}">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="${bgOuter}">
+    <tr><td align="center" style="padding:32px 24px;${bgOuter}">
       <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#0d0d0d;border:1px solid rgba(255,255,255,0.10);border-radius:0;">
         <tr>
           <td style="background-color:${headerBg};padding:30px 24px;text-align:center;">
-            <div style="font-size:30px;font-weight:800;color:${headerText};letter-spacing:3px;font-family:${fontStack};">ENVI</div>
+            <div style="font-size:30px;font-weight:800;color:${headerText};letter-spacing:3px;font-family:${fontStack};white-space:nowrap;">${iconImg}<span style="vertical-align:middle;">ENVI</span></div>
             <div style="font-size:11px;color:${headerSub};margin-top:8px;letter-spacing:2px;text-transform:uppercase;font-family:${monoStack};">Retroalimentación</div>
             <div style="font-size:10px;color:${headerSub};margin-top:6px;letter-spacing:1px;font-family:${monoStack};">Dev by WilZamGuerrero</div>
           </td>
@@ -438,7 +465,6 @@ export function buildFeedbackEmail(data: {
         </tr>
         <tr><td style="height:4px;background-color:${headerBg};font-size:0;line-height:0;">&nbsp;</td></tr>
       </table>
-      <div style="text-align:center;color:#555;font-size:10px;margin-top:16px;letter-spacing:1px;font-family:${monoStack};">Dev by WilZamGuerrero</div>
     </td></tr>
   </table>
 </body>

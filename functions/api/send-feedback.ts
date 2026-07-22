@@ -1,6 +1,6 @@
 import { json, listChildren, appendChildren, updateBlock, deleteBlock, uploadFileToNotion, buildNotionFileBlocks, type Env } from "../_shared/notion";
 import { sendGmailMessage, buildFeedbackEmail, hasGmailCredentials, type MailAttachment } from "../_shared/gmail";
-import { FEEDBACK_MARKER } from "../_shared/submissions";
+import { FEEDBACK_MARKER, FEEDBACK_DRAFT_MARKER } from "../_shared/submissions";
 
 const MAX_STORE_PER_FILE = 20 * 1024 * 1024; // Notion single-part upload limit (~20MB)
 
@@ -66,6 +66,22 @@ async function persistFeedback(
   }
 }
 
+/** Removes the saved draft (block + its files) from a toggle, if present. */
+async function clearDraft(toggleId: string, token: string): Promise<void> {
+  const data = await listChildren(toggleId, token);
+  const block = data.results?.find((b: any) => {
+    if (b.type !== "code" || b.code?.language !== "json") return false;
+    const parsed = parseJsonBlock(b);
+    return parsed && parsed[FEEDBACK_DRAFT_MARKER] && typeof parsed[FEEDBACK_DRAFT_MARKER] === "object";
+  }) as any;
+  if (!block) return;
+  const draft = parseJsonBlock(block)?.[FEEDBACK_DRAFT_MARKER];
+  if (draft?.filesBlockId) {
+    try { await deleteBlock(draft.filesBlockId, token); } catch { /* already gone */ }
+  }
+  try { await deleteBlock(block.id, token); } catch { /* already gone */ }
+}
+
 /**
  * POST /api/send-feedback  (multipart/form-data)
  * Fields: recipientEmail, recipientName, projectName, comment, note, bgColor,
@@ -127,6 +143,25 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
   }
 
+  // Optional inline header icon (a small PNG rasterized on the frontend from the
+  // project's Lucide icon). Kept separate from `files` so it isn't stored/listed.
+  let iconCid: string | undefined;
+  const iconEntry = form.get("icon");
+  if (iconEntry && typeof (iconEntry as any).arrayBuffer === "function") {
+    const iconFile = iconEntry as unknown as File;
+    const iconBuf = new Uint8Array(await iconFile.arrayBuffer());
+    if (iconBuf.byteLength > 0 && iconBuf.byteLength <= 512 * 1024) {
+      iconCid = "projicon";
+      attachments.unshift({
+        filename: "icono.png",
+        contentType: iconFile.type || "image/png",
+        content: iconBuf,
+        contentId: iconCid,
+        inline: true,
+      });
+    }
+  }
+
   const { subject, html, text } = buildFeedbackEmail({
     recipientName,
     projectName,
@@ -134,6 +169,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     note,
     files: fileObjects.map((f) => ({ name: f.name || "archivo" })),
     accentColor: bgColor,
+    iconCid,
   });
 
   try {
@@ -194,9 +230,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     } catch {
       // Non-critical: the email was already sent.
     }
+    // Sending supersedes any saved draft for this sender.
+    try {
+      await clearDraft(submissionId, notionSecret);
+    } catch {
+      // Non-critical.
+    }
   }
 
-  return json({ success: true, message: "Retroalimentación enviada por correo.", entry });
+  return json({ success: true, message: "Retroalimentación enviada por correo.", entry, draftCleared: true });
 };
 
 /**
