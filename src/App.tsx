@@ -479,6 +479,8 @@ export default function App() {
             .map((cf) => ({ id: cf.id, label: cf.label })),
           useDatabase: !!submitMeta?.useDatabase,
           databaseId: submitMeta?.databaseId || "",
+          // Color del proyecto, para que el correo de comprobante use el mismo color.
+          bgColor: submitMeta?.bgColor || "",
         }),
       });
       const data = await res.json();

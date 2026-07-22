@@ -1,4 +1,5 @@
 import { json, appendChildren, notionFetch, cleanNotionId, type Env } from "../_shared/notion";
+import { sendGmailMessage, buildReceiptEmail, hasGmailCredentials } from "../_shared/gmail";
 
 async function getCredentials(env: Env): Promise<{ notionSecret: string }> {
   let notionSecret = env.NOTION_SECRET || "";
@@ -49,6 +50,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     customFields?: { id: string; label: string }[];
     useDatabase?: boolean;
     databaseId?: string;
+    bgColor?: string;
   };
   try {
     body = await context.request.json();
@@ -66,6 +68,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     customFields = [],
     useDatabase = false,
     databaseId = "",
+    bgColor = "",
   } = body;
 
   if (!senderName || !senderEmail || !projectId) {
@@ -247,6 +250,31 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     } catch {
       // Non-critical
     }
+  }
+
+  // Enviar comprobante por correo al remitente (Gmail API). Best-effort: no
+  // bloquea la respuesta ni hace fallar el envío si el correo no se puede mandar.
+  const gmailCreds = {
+    clientId: context.env.GMAIL_CLIENT_ID || "",
+    clientSecret: context.env.GMAIL_CLIENT_SECRET || "",
+    refreshToken: context.env.GMAIL_REFRESH_TOKEN || "",
+    sender: context.env.GMAIL_SENDER || "",
+    senderName: context.env.MAIL_FROM_NAME || "ENVI",
+  };
+  if (hasGmailCredentials(gmailCreds)) {
+    const { subject, html, text } = buildReceiptEmail({
+      senderName,
+      senderEmail,
+      projectName,
+      timestamp: submissionRecord.timestamp,
+      files: submissionRecord.files.map((f) => ({ name: f.name, size: f.size })),
+      accentColor: bgColor,
+    });
+    context.waitUntil(
+      sendGmailMessage(gmailCreds, { to: senderEmail, toName: senderName, subject, html, text }).catch(
+        (err) => console.error("No se pudo enviar el comprobante por correo:", err)
+      )
+    );
   }
 
   return json({

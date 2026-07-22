@@ -14,6 +14,7 @@ import {
   resolvePreview,
   type PreviewProject,
 } from "./functions/_shared/preview";
+import { sendGmailMessage, buildReceiptEmail, hasGmailCredentials } from "./functions/_shared/gmail";
 
 dotenv.config();
 
@@ -1770,7 +1771,7 @@ app.post("/api/upload-part", upload.single("file"), async (req, res) => {
 
 // 8. Submit files (creates Toggle block inside specific project child page using pre-uploaded fileIDs)
 app.post("/api/submit", async (req, res) => {
-  const { senderName, senderEmail, projectId, projectName, fileRecords = [] } = req.body;
+  const { senderName, senderEmail, projectId, projectName, fileRecords = [], bgColor = "" } = req.body;
 
   if (!senderName || !senderEmail || !projectId) {
     return res.status(400).json({ error: "Faltan campos obligatorios (nombre, correo o proyecto)." });
@@ -1918,6 +1919,33 @@ app.post("/api/submit", async (req, res) => {
       })),
     };
     saveSubmission(submissionRecord);
+
+    // Enviar comprobante por correo al remitente (Gmail API). Best-effort:
+    // no bloquea la respuesta ni hace fallar el envío si el correo no se manda.
+    const gmailCreds = {
+      clientId: process.env.GMAIL_CLIENT_ID || "",
+      clientSecret: process.env.GMAIL_CLIENT_SECRET || "",
+      refreshToken: process.env.GMAIL_REFRESH_TOKEN || "",
+      sender: process.env.GMAIL_SENDER || "",
+      senderName: process.env.MAIL_FROM_NAME || "ENVI",
+    };
+    if (hasGmailCredentials(gmailCreds)) {
+      const { subject, html, text } = buildReceiptEmail({
+        senderName: submissionRecord.senderName,
+        senderEmail: submissionRecord.senderEmail,
+        projectName: submissionRecord.projectName,
+        timestamp: submissionRecord.timestamp,
+        files: submissionRecord.files.map((f: any) => ({ name: f.name, size: f.size })),
+        accentColor: bgColor,
+      });
+      sendGmailMessage(gmailCreds, {
+        to: submissionRecord.senderEmail,
+        toName: submissionRecord.senderName,
+        subject,
+        html,
+        text,
+      }).catch((err) => console.error("No se pudo enviar el comprobante por correo:", err));
+    }
 
     res.json({
       success: true,

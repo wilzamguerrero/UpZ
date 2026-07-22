@@ -6,6 +6,12 @@ export interface Env {
   NOTION_ID_PAGE: string;
   SUBMISSIONS_KV?: KVNamespace;
   FILES_BUCKET?: R2Bucket;
+  // Gmail API (OAuth2) para enviar el comprobante de envío por correo.
+  GMAIL_CLIENT_ID?: string;
+  GMAIL_CLIENT_SECRET?: string;
+  GMAIL_REFRESH_TOKEN?: string;
+  GMAIL_SENDER?: string;
+  MAIL_FROM_NAME?: string;
 }
 
 export function json(data: unknown, status = 200): Response {
