@@ -167,3 +167,66 @@ export async function collectSubmissions(
   subs.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
   return subs;
 }
+
+/**
+ * Reconstruye la metadata (color, icono, título, etc.) de TODOS los proyectos
+ * leyendo el bloque JSON guardado dentro de cada proyecto en Notion. Devuelve un
+ * mapa { projectId: meta } — la misma forma que usaba la caché KV.
+ */
+export async function collectProjectMetas(
+  rootPageId: string,
+  list: ListChildrenFn
+): Promise<Record<string, any>> {
+  const metas: Record<string, any> = {};
+
+  const readMetaBlock = (children: any[]): any | null => {
+    const codeBlock = children.find(
+      (c: any) => c.type === "code" && c.code?.language === "json"
+    );
+    if (!codeBlock?.code?.rich_text) return null;
+    try {
+      const parsed = JSON.parse(
+        codeBlock.code.rich_text.map((rt: any) => rt.plain_text).join("").trim()
+      );
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const processProject = async (projId: string, depth: number) => {
+    if (depth > MAX_TREE_DEPTH) return;
+    let children: any[];
+    try {
+      children = await list(projId);
+    } catch {
+      return;
+    }
+    const meta = readMetaBlock(children);
+    if (meta) metas[projId] = meta;
+
+    for (const c of children) {
+      if (c.type === "child_page") {
+        await processProject(c.id, depth + 1);
+      } else if (c.type === "toggle" && !isSubmissionHeader(toggleText(c))) {
+        await processProject(c.id, depth + 1);
+      }
+    }
+  };
+
+  let rootChildren: any[];
+  try {
+    rootChildren = await list(rootPageId);
+  } catch {
+    return metas;
+  }
+  for (const b of rootChildren) {
+    if (b.type === "child_page") {
+      await processProject(b.id, 1);
+    } else if (b.type === "toggle" && !isSubmissionHeader(toggleText(b))) {
+      await processProject(b.id, 1);
+    }
+  }
+
+  return metas;
+}

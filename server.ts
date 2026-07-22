@@ -15,7 +15,7 @@ import {
   type PreviewProject,
 } from "./functions/_shared/preview";
 import { sendGmailMessage, buildReceiptEmail, hasGmailCredentials } from "./functions/_shared/gmail";
-import { collectSubmissions } from "./functions/_shared/submissions";
+import { collectSubmissions, collectProjectMetas } from "./functions/_shared/submissions";
 
 dotenv.config();
 
@@ -977,6 +977,28 @@ app.get("/api/project-meta", async (req, res) => {
       }
     } catch (err: any) {
       console.warn("No metadata blocks found directly in Notion child yet, falling back to cache.", err.message);
+    }
+  }
+
+  // No specific project requested → rebuild ALL project metas from Notion
+  // (source of truth) so the tree shows every project's color/icon.
+  if (!projectId && config.notionSecret && config.parentPageId) {
+    try {
+      const notion = new Client({ auth: config.notionSecret });
+      const listAll = async (blockId: string): Promise<any[]> => {
+        const out: any[] = [];
+        let cursor: string | undefined;
+        do {
+          const resp: any = await notion.blocks.children.list({ block_id: blockId, start_cursor: cursor, page_size: 100 });
+          for (const b of resp.results || []) out.push(b);
+          cursor = resp.has_more ? resp.next_cursor : undefined;
+        } while (cursor);
+        return out;
+      };
+      const allMeta = await collectProjectMetas(config.parentPageId, listAll);
+      return res.json({ success: true, meta: allMeta });
+    } catch (e) {
+      // Fall through to local cache.
     }
   }
 

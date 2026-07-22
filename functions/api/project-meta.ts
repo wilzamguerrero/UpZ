@@ -1,4 +1,5 @@
-import { json, listChildren, appendChildren, updateBlock, type Env } from "../_shared/notion";
+import { json, listChildren, appendChildren, updateBlock, cleanNotionId, notionFetch, type Env } from "../_shared/notion";
+import { collectProjectMetas, type ListChildrenFn } from "../_shared/submissions";
 
 async function getCredentials(env: Env): Promise<{ notionSecret: string; parentPageId: string }> {
   let notionSecret = env.NOTION_SECRET || "";
@@ -25,7 +26,7 @@ async function getCredentials(env: Env): Promise<{ notionSecret: string; parentP
  * (no projectId)  – returns all cached metas from KV, or empty object
  */
 export const onRequestGet: PagesFunction<Env> = async (context) => {
-  const { notionSecret } = await getCredentials(context.env);
+  const { notionSecret, parentPageId } = await getCredentials(context.env);
   const { SUBMISSIONS_KV } = context.env;
 
   const url = new URL(context.request.url);
@@ -85,6 +86,40 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       }
     } catch (err: any) {
       // Fall through to KV cache
+    }
+  }
+
+  // No specific project requested → rebuild ALL project metas from Notion
+  // (source of truth) so the tree shows every project's color/icon on any
+  // platform. KV is only used as a fast cache.
+  if (!projectId && notionSecret && parentPageId) {
+    try {
+      const cleanParent = cleanNotionId(parentPageId);
+      const list: ListChildrenFn = async (blockId: string) => {
+        const out: any[] = [];
+        let cursor: string | undefined;
+        do {
+          const q = cursor
+            ? `?start_cursor=${encodeURIComponent(cursor)}&page_size=100`
+            : `?page_size=100`;
+          const data = await notionFetch("GET", `/blocks/${blockId}/children${q}`, notionSecret);
+          for (const b of data.results || []) out.push(b);
+          cursor = data.has_more ? data.next_cursor : undefined;
+        } while (cursor);
+        return out;
+      };
+      const allMeta = await collectProjectMetas(cleanParent, list);
+      // Refresh the KV cache for speed on subsequent loads.
+      if (SUBMISSIONS_KV) {
+        try {
+          await SUBMISSIONS_KV.put("project-meta", JSON.stringify(allMeta));
+        } catch {
+          // Non-critical
+        }
+      }
+      return json({ success: true, meta: allMeta });
+    } catch {
+      // Fall through to KV cache.
     }
   }
 
