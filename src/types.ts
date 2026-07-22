@@ -92,6 +92,23 @@ export interface FileAttachment {
   url: string;
 }
 
+/** A single feedback attachment reference. Old entries stored just the name (string). */
+export interface FeedbackFile {
+  name: string;
+  size?: number;
+}
+
+/** A single feedback message sent to a sender (comment + optional note + attached files). */
+export interface FeedbackEntry {
+  comment: string;
+  note?: string;
+  /** File names (legacy) or {name,size} objects (current). */
+  files: (string | FeedbackFile)[];
+  /** Notion block id whose children hold the attached files, for inline preview. */
+  filesBlockId?: string;
+  sentAt: string;
+}
+
 export interface Submission {
   id: string;
   projectId: string;
@@ -104,4 +121,6 @@ export interface Submission {
   customValues?: Record<string, string>;
   /** Values for control/grading columns, keyed by column id (nota, estado...). */
   controlValues?: Record<string, string>;
+  /** History of feedback messages sent to this sender (stored in Notion). */
+  feedbackHistory?: FeedbackEntry[];
 }

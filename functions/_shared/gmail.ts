@@ -12,12 +12,20 @@ export interface GmailCredentials {
   senderName?: string;
 }
 
+export interface MailAttachment {
+  filename: string;
+  contentType: string;
+  /** Raw file bytes. */
+  content: Uint8Array;
+}
+
 export interface MailInput {
   to: string;
   toName?: string;
   subject: string;
   html: string;
   text?: string;
+  attachments?: MailAttachment[];
 }
 
 /** ¿Están completas las credenciales de Gmail? */
@@ -44,6 +52,30 @@ function toBase64(input: string): string {
 /** base64 → base64url (sin +, /, ni relleno =), requerido por la Gmail API. */
 function toBase64Url(input: string): string {
   return toBase64(input).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** Bytes binarios → base64 estándar (para adjuntos). */
+function bytesToBase64(bytes: Uint8Array): string {
+  const g = globalThis as any;
+  if (typeof g.Buffer !== "undefined") {
+    return g.Buffer.from(bytes).toString("base64");
+  }
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return g.btoa(binary);
+}
+
+/** Parte líneas base64 en tramos de 76 caracteres (recomendado por MIME). */
+function wrap76(base64: string): string {
+  return (base64.match(/.{1,76}/g) || []).join("\r\n");
+}
+
+/** Nombre de archivo seguro para cabeceras MIME (evita comillas/saltos). */
+function sanitizeFilename(name: string): string {
+  return (name || "archivo").replace(/["\r\n]/g, "_");
 }
 
 /** Codifica un asunto con acentos según RFC 2047. */
@@ -78,19 +110,51 @@ async function getAccessToken(creds: GmailCredentials): Promise<string> {
 function buildRawMessage(creds: GmailCredentials, mail: MailInput): string {
   const fromName = creds.senderName || "ENVI";
   const toHeader = mail.toName ? `${mail.toName} <${mail.to}>` : mail.to;
+  const htmlB64 = wrap76(toBase64(mail.html));
+  const attachments = mail.attachments || [];
 
+  // Sin adjuntos: mensaje simple text/html en base64.
+  if (attachments.length === 0) {
+    const headers = [
+      `From: ${fromName} <${creds.sender}>`,
+      `To: ${toHeader}`,
+      `Subject: ${encodeSubject(mail.subject)}`,
+      "MIME-Version: 1.0",
+      "Content-Type: text/html; charset=UTF-8",
+      "Content-Transfer-Encoding: base64",
+    ];
+    return `${headers.join("\r\n")}\r\n\r\n${htmlB64}`;
+  }
+
+  // Con adjuntos: multipart/mixed (cuerpo HTML + cada archivo como adjunto).
+  const boundary = `envi_boundary_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
   const headers = [
     `From: ${fromName} <${creds.sender}>`,
     `To: ${toHeader}`,
     `Subject: ${encodeSubject(mail.subject)}`,
     "MIME-Version: 1.0",
-    "Content-Type: text/html; charset=UTF-8",
-    "Content-Transfer-Encoding: base64",
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
   ];
 
-  // El cuerpo va en base64 para preservar acentos/UTF-8 de forma segura.
-  const body = toBase64(mail.html);
-  return `${headers.join("\r\n")}\r\n\r\n${body}`;
+  const parts: string[] = [];
+  parts.push(`--${boundary}`);
+  parts.push("Content-Type: text/html; charset=UTF-8");
+  parts.push("Content-Transfer-Encoding: base64");
+  parts.push("");
+  parts.push(htmlB64);
+
+  for (const att of attachments) {
+    const filename = sanitizeFilename(att.filename);
+    parts.push(`--${boundary}`);
+    parts.push(`Content-Type: ${att.contentType || "application/octet-stream"}; name="${filename}"`);
+    parts.push(`Content-Disposition: attachment; filename="${filename}"`);
+    parts.push("Content-Transfer-Encoding: base64");
+    parts.push("");
+    parts.push(wrap76(bytesToBase64(att.content)));
+  }
+  parts.push(`--${boundary}--`);
+
+  return `${headers.join("\r\n")}\r\n\r\n${parts.join("\r\n")}`;
 }
 
 /** Envía un correo con la Gmail API. Lanza error si falla. */
@@ -126,6 +190,17 @@ const escapeHtml = (s: string): string =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+
+/** Escapes HTML and turns http(s) URLs into clickable links (good email formatting). */
+const linkifyHtml = (text: string, linkColor = "#7fb2ff"): string => {
+  return escapeHtml(text).replace(/(https?:\/\/[^\s<]+)/g, (url) => {
+    // Move trailing punctuation out of the link.
+    const trailingMatch = url.match(/[.,;:!?)]+$/);
+    const trailing = trailingMatch ? trailingMatch[0] : "";
+    const clean = trailing ? url.slice(0, -trailing.length) : url;
+    return `<a href="${clean}" target="_blank" style="color:${linkColor};text-decoration:underline;word-break:break-all;">${clean}</a>${trailing}`;
+  });
+};
 
 const formatBytes = (bytes: number): string => {
   if (!bytes || bytes < 0) return "0 B";
@@ -286,6 +361,96 @@ export function buildReceiptEmail(data: {
     ``,
     `Archivos:`,
     ...data.files.map((f) => `- ${f.name} (${formatBytes(f.size)})`),
+    ``,
+    `Este es un correo automático, por favor no respondas.`,
+  ].join("\n");
+
+  return { subject, html, text };
+}
+
+/** Genera el correo de retroalimentación (comentarios + nota + adjuntos). */
+export function buildFeedbackEmail(data: {
+  recipientName: string;
+  projectName: string;
+  comment: string;
+  note?: string;
+  files: { name: string }[];
+  accentColor?: string;
+}): { subject: string; html: string; text: string } {
+  const headerBg = normalizeHex(data.accentColor) || "#d21f28";
+  const headerLight = isLightColor(headerBg);
+  const headerText = headerLight ? "#111111" : "#ffffff";
+  const headerSub = headerLight ? "rgba(0,0,0,0.65)" : "rgba(255,255,255,0.80)";
+
+  const fontStack = "'Segoe UI', Helvetica, Arial, sans-serif";
+  const monoStack = "'Courier New', Consolas, monospace";
+
+  const subject = `Retroalimentación · ${data.projectName}`;
+
+  const noteBlock = data.note && data.note.trim()
+    ? `<tr>
+         <td style="padding:7px 0;color:#7a7a7a;font-size:11px;text-transform:uppercase;letter-spacing:1px;font-family:${monoStack};">Nota</td>
+         <td style="padding:7px 0;color:${headerBg};font-size:18px;font-weight:800;text-align:right;font-family:${monoStack};">${escapeHtml(data.note.trim())}</td>
+       </tr>`
+    : "";
+
+  const commentBlock = data.comment && data.comment.trim()
+    ? `<div style="background-color:#080808;border:1px solid rgba(255,255,255,0.10);border-radius:0;padding:14px;margin-bottom:20px;">
+         <div style="color:#7a7a7a;font-size:10px;text-transform:uppercase;letter-spacing:2px;font-family:${monoStack};margin-bottom:8px;">Comentarios</div>
+         <div style="color:#e5e5e5;font-size:14px;line-height:1.6;font-family:${fontStack};white-space:pre-wrap;">${linkifyHtml(data.comment.trim())}</div>
+       </div>`
+    : "";
+
+  const filesBlock = data.files.length > 0
+    ? `<div style="background-color:#080808;border:1px solid rgba(255,255,255,0.10);border-radius:0;padding:12px 14px;">
+         <div style="color:#7a7a7a;font-size:10px;text-transform:uppercase;letter-spacing:2px;font-family:${monoStack};margin-bottom:8px;">Archivos adjuntos (${data.files.length})</div>
+         ${data.files.map((f) => `<div style="color:#e5e5e5;font-size:13px;font-family:${fontStack};padding:3px 0;word-break:break-all;">📎 ${escapeHtml(f.name)}</div>`).join("")}
+       </div>`
+    : "";
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background-color:#050505;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#050505;">
+    <tr><td align="center" style="padding:24px;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background-color:#0d0d0d;border:1px solid rgba(255,255,255,0.10);border-radius:0;">
+        <tr>
+          <td style="background-color:${headerBg};padding:30px 24px;text-align:center;">
+            <div style="font-size:30px;font-weight:800;color:${headerText};letter-spacing:3px;font-family:${fontStack};">ENVI</div>
+            <div style="font-size:11px;color:${headerSub};margin-top:8px;letter-spacing:2px;text-transform:uppercase;font-family:${monoStack};">Retroalimentación</div>
+            <div style="font-size:10px;color:${headerSub};margin-top:6px;letter-spacing:1px;font-family:${monoStack};">Dev by WilZamGuerrero</div>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:28px 24px;">
+            <p style="color:#e5e5e5;font-size:15px;line-height:1.6;margin:0 0 22px;font-family:${fontStack};">Hola <strong style="color:#ffffff;">${escapeHtml(data.recipientName)}</strong>, tienes una nueva retroalimentación para el proyecto <strong style="color:#ffffff;">${escapeHtml(data.projectName)}</strong>.</p>
+
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:${noteBlock ? "20px" : "0"};">
+              ${noteBlock}
+            </table>
+
+            ${commentBlock}
+            ${filesBlock}
+
+            <p style="color:#5a5a5a;font-size:11px;margin:24px 0 0;text-align:center;font-family:${fontStack};">Este es un correo automático, por favor no respondas a este mensaje.</p>
+          </td>
+        </tr>
+        <tr><td style="height:4px;background-color:${headerBg};font-size:0;line-height:0;">&nbsp;</td></tr>
+      </table>
+      <div style="text-align:center;color:#555;font-size:10px;margin-top:16px;letter-spacing:1px;font-family:${monoStack};">Dev by WilZamGuerrero</div>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  const text = [
+    `Retroalimentación - ${data.projectName}`,
+    ``,
+    `Hola ${data.recipientName}, tienes una nueva retroalimentación.`,
+    ...(data.note && data.note.trim() ? [``, `Nota: ${data.note.trim()}`] : []),
+    ...(data.comment && data.comment.trim() ? [``, `Comentarios:`, data.comment.trim()] : []),
+    ...(data.files.length > 0 ? [``, `Archivos adjuntos:`, ...data.files.map((f) => `- ${f.name}`)] : []),
     ``,
     `Este es un correo automático, por favor no respondas.`,
   ].join("\n");

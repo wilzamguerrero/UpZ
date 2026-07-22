@@ -31,6 +31,34 @@ export default function GradingTable({ project, meta, submissions, refreshSubmis
 
   const projectSubs = submissions.filter((s) => s.projectId === project.id);
 
+  // Group submissions by sender (one row per person, so the count matches the
+  // Remitentes panel). The most recent submission represents the person for
+  // grading; the entry-order number (#) uses their earliest submission.
+  const groupedSubs = (() => {
+    const map = new Map<string, Submission[]>();
+    for (const s of projectSubs) {
+      const em = s.senderEmail.toLowerCase();
+      if (!map.has(em)) map.set(em, []);
+      (map.get(em) as Submission[]).push(s);
+    }
+    const rows = [...map.values()].map((subs) => {
+      const sorted = [...subs].sort(
+        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
+      const earliest = sorted[0];
+      const latest = sorted[sorted.length - 1];
+      return {
+        rep: latest,
+        name: earliest.senderName,
+        email: earliest.senderEmail,
+        earliestTs: new Date(earliest.timestamp).getTime(),
+        count: subs.length,
+      };
+    });
+    rows.sort((a, b) => a.earliestTs - b.earliestTs);
+    return rows.map((r, i) => ({ ...r, order: i + 1 }));
+  })();
+
   const loadDbRows = async () => {
     if (!useDb) return;
     setLoading(true);
@@ -111,10 +139,18 @@ export default function GradingTable({ project, meta, submissions, refreshSubmis
         ) : dbRows.length === 0 ? (
           <p className="text-xs text-white/40 text-center py-4">Sin filas todavía.</p>
         ) : (
-          <div className="overflow-x-auto">
+          (() => {
+            // Entry-order number (#1 = earliest) for database rows, by send date.
+            const dbEntryOrder = new Map<string, number>();
+            [...dbRows]
+              .sort((a, b) => new Date(a.values["Fecha de envío"] || 0).getTime() - new Date(b.values["Fecha de envío"] || 0).getTime())
+              .forEach((r, i) => dbEntryOrder.set(r.pageId, i + 1));
+            return (
+          <div className="w-full">
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="text-left text-white/40 border-b border-white/10">
+                  <th className="py-2 px-2 font-semibold whitespace-nowrap">#</th>
                   {baseCols.map((c) => (
                     <th key={c} className="py-2 px-2 font-semibold whitespace-nowrap">{c}</th>
                   ))}
@@ -126,6 +162,7 @@ export default function GradingTable({ project, meta, submissions, refreshSubmis
               <tbody>
                 {dbRows.map((row) => (
                   <tr key={row.pageId} className="border-b border-white/5 hover:bg-white/5">
+                    <td className="py-1.5 px-2 text-white/40 font-mono">{dbEntryOrder.get(row.pageId)}</td>
                     {baseCols.map((c) => (
                       <td key={c} className="py-1.5 px-2 text-white/70 max-w-[160px] truncate">
                         {String(row.values[c] ?? "")}
@@ -146,6 +183,8 @@ export default function GradingTable({ project, meta, submissions, refreshSubmis
               </tbody>
             </table>
           </div>
+            );
+          })()
         )}
       </div>
     );
@@ -160,10 +199,11 @@ export default function GradingTable({ project, meta, submissions, refreshSubmis
       {projectSubs.length === 0 ? (
         <p className="text-xs text-white/40 text-center py-4">Sin entregas todavía.</p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="w-full">
           <table className="w-full text-xs border-collapse">
             <thead>
               <tr className="text-left text-white/40 border-b border-white/10">
+                <th className="py-2 px-2 font-semibold">#</th>
                 <th className="py-2 px-2 font-semibold">Nombre</th>
                 <th className="py-2 px-2 font-semibold">Correo</th>
                 <th className="py-2 px-2 font-semibold">Fecha</th>
@@ -174,12 +214,16 @@ export default function GradingTable({ project, meta, submissions, refreshSubmis
               </tr>
             </thead>
             <tbody>
-              {projectSubs.map((sub) => {
+              {groupedSubs.map((row) => {
+                const sub = row.rep;
                 const current = edits[sub.id] || sub.controlValues || {};
                 return (
                   <tr key={sub.id} className="border-b border-white/5 hover:bg-white/5">
-                    <td className="py-1.5 px-2 text-white/80">{sub.senderName}</td>
-                    <td className="py-1.5 px-2 text-white/60">{sub.senderEmail}</td>
+                    <td className="py-1.5 px-2 text-white/40 font-mono">{row.order}</td>
+                    <td className="py-1.5 px-2 text-white/80">
+                      {row.name}{row.count > 1 ? <span className="text-white/40 font-mono"> ({row.count})</span> : ""}
+                    </td>
+                    <td className="py-1.5 px-2 text-white/60">{row.email}</td>
                     <td className="py-1.5 px-2 text-white/50 whitespace-nowrap">{new Date(sub.timestamp).toLocaleDateString()}</td>
                     {controlColumns.map((col) => (
                       <td key={col.id} className="py-1.5 px-2">

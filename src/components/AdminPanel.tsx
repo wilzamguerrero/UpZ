@@ -2,7 +2,7 @@
 import {
   Key, FolderPlus, Eye, EyeOff, Check,
   AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, ArrowRight, ArrowLeft, Trash2,
-  ChevronDown, ChevronRight, X, RefreshCw,
+  ChevronDown, ChevronRight, X, RefreshCw, PanelLeftClose, PanelLeftOpen,
   Link, QrCode, Copy, GripVertical, Database, Table,
   // Icon picker icons
   UploadCloud, FileText, BookOpen, Code2, Palette, Microscope,
@@ -408,6 +408,39 @@ function safeRetroColor(bgColor?: string | null): string {
   return lum <= 0.5 ? "#ffffff" : bgColor;
 }
 
+/** Previews a locally-selected File (before sending) using an object URL, with a
+ *  remove button. Reuses InlineFilePreview so it looks like the received files. */
+const LocalFilePreview: React.FC<{
+  file: File;
+  onRemove: () => void;
+  onExpand: (vf: ViewableFile) => void;
+}> = ({ file, onRemove, onExpand }) => {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    const u = URL.createObjectURL(file);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
+
+  if (!url) {
+    return <div className="h-40 rounded-lg bg-white/5 border border-white/10 animate-pulse" />;
+  }
+  const vf: ViewableFile = { name: file.name, size: file.size, url };
+  return (
+    <div className="relative">
+      <InlineFilePreview file={vf} onExpand={() => onExpand(vf)} heightClass="h-40" />
+      <button
+        type="button"
+        onClick={onRemove}
+        className="absolute -top-2 -right-2 z-10 w-6 h-6 rounded-full bg-red-500/90 hover:bg-red-500 text-white flex items-center justify-center shadow-lg"
+        title="Quitar archivo"
+      >
+        <X className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+};
+
 export default function AdminPanel({
   projects,
   refreshProjects,
@@ -560,8 +593,110 @@ export default function AdminPanel({
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedSenders, setExpandedSenders] = useState<Record<string, boolean>>({});
   const [isDeletingSubmissionId, setIsDeletingSubmissionId] = useState<string | null>(null);
+  // Per-sender feedback state (comment + optional note + attachments), keyed by email.
+  const [feedback, setFeedback] = useState<Record<string, {
+    comment: string;
+    note: string;
+    files: File[];
+    sending: boolean;
+    msg?: { type: "success" | "error"; text: string };
+  }>>({});
+
+  // Which feedback-history entry is being viewed per sender (carousel index).
+  const [feedbackView, setFeedbackView] = useState<Record<string, number>>({});
+
+  const getFeedback = (email: string) =>
+    feedback[email] || { comment: "", note: "", files: [], sending: false };
+  const setFeedbackFor = (email: string, patch: Partial<{ comment: string; note: string; files: File[]; sending: boolean; msg?: { type: "success" | "error"; text: string } }>) =>
+    setFeedback((prev) => ({ ...prev, [email]: { ...getFeedback(email), ...patch } }));
+
+  /** Send feedback (comment + optional note + attachments) to a sender by email.
+   *  `submissionId` is the sender's anchor toggle where the history is stored. */
+  const sendFeedback = async (email: string, name: string, submissionId: string) => {
+    const fb = getFeedback(email);
+    if (!fb.comment.trim() && !fb.note.trim() && fb.files.length === 0) {
+      setFeedbackFor(email, { msg: { type: "error", text: "Escribe un comentario, una nota o adjunta un archivo." } });
+      return;
+    }
+    setFeedbackFor(email, { sending: true, msg: undefined });
+    try {
+      const form = new FormData();
+      form.append("recipientEmail", email);
+      form.append("recipientName", name);
+      form.append("projectName", selectedProjectName || "Proyecto");
+      form.append("comment", fb.comment);
+      form.append("note", fb.note);
+      form.append("bgColor", copyBgColor || "");
+      form.append("submissionId", submissionId || "");
+      fb.files.forEach((f) => form.append("files", f, f.name));
+
+      const res = await fetch("/api/send-feedback", { method: "POST", body: form });
+      const data = await res.json();
+      if (data.success) {
+        const entry = data.entry || {
+          comment: fb.comment,
+          note: fb.note,
+          files: fb.files.map((f) => f.name),
+          sentAt: new Date().toISOString(),
+        };
+        // Optimistically append to the anchor submission's history so it shows now.
+        if (submissionId) {
+          setSubmissions((prev) =>
+            prev.map((s) =>
+              s.id === submissionId
+                ? { ...s, feedbackHistory: [...(s.feedbackHistory || []), entry] }
+                : s
+            )
+          );
+        }
+        // Clear the form and jump the viewer to the newest entry.
+        setFeedback((prev) => ({
+          ...prev,
+          [email]: { comment: "", note: "", files: [], sending: false, msg: { type: "success", text: "¡Retroalimentación enviada al correo!" } },
+        }));
+        setFeedbackView((v) => ({ ...v, [email]: Number.MAX_SAFE_INTEGER }));
+      } else {
+        setFeedbackFor(email, { sending: false, msg: { type: "error", text: data.error || "No se pudo enviar." } });
+      }
+    } catch {
+      setFeedbackFor(email, { sending: false, msg: { type: "error", text: "Error de red al enviar." } });
+    }
+  };
+
+  /** Delete a feedback entry (and its files) from Notion. */
+  const deleteFeedback = async (email: string, submissionId: string, index: number) => {
+    if (!window.confirm("¿Eliminar esta retroalimentación de Notion? No se puede deshacer.")) return;
+    try {
+      const res = await fetch(
+        `/api/send-feedback?submissionId=${encodeURIComponent(submissionId)}&index=${index}`,
+        { method: "DELETE" }
+      );
+      const data = await res.json();
+      if (data.success) {
+        setSubmissions((prev) =>
+          prev.map((s) =>
+            s.id === submissionId
+              ? { ...s, feedbackHistory: (s.feedbackHistory || []).filter((_, i) => i !== index) }
+              : s
+          )
+        );
+        // Keep the viewer index within bounds after removal.
+        setFeedbackView((v) => ({ ...v, [email]: Math.max(0, (v[email] ?? index) - 1) }));
+      } else {
+        alert(data.error || "No se pudo eliminar la retroalimentación.");
+      }
+    } catch {
+      alert("Error de red al eliminar la retroalimentación.");
+    }
+  };
   // File currently open in the inline preview modal (null = closed).
   const [viewerFile, setViewerFile] = useState<ViewableFile | null>(null);
+  // Whether the info sidebar (title/description/db/date) is shown. The bar button
+  // toggles it; when hidden, the grading table + senders expand to full width.
+  const [showSidebar, setShowSidebar] = useState(true);
+  // Collapse toggles for the two sections in the detail view.
+  const [remitentesCollapsed, setRemitentesCollapsed] = useState(false);
+  const [gradingCollapsed, setGradingCollapsed] = useState(false);
 
   /** Open a project in the detail view. */
   const openProject = (projId: string) => {
@@ -1244,16 +1379,115 @@ export default function AdminPanel({
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h2 className="text-base font-semibold text-white truncate">
               {selectedProjectName || "Proyecto"}
             </h2>
             <p className="text-xs text-white/40">Editando proyecto · pulsa la flecha para volver</p>
           </div>
+
+          {/* Control buttons — right side of the header, same row as the back arrow */}
+          {selectedMetaProjectId && projects.find((p) => p.id === selectedMetaProjectId) && (
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Color picker */}
+              <label
+                className="relative w-10 h-10 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 cursor-pointer shrink-0 flex items-center justify-center transition-all"
+                title={`Color de fondo: ${copyBgColor || "sin color"}`}
+              >
+                <input
+                  type="color"
+                  value={copyBgColor || "#050505"}
+                  onChange={(e) => setCopyBgColorSmooth(e.target.value)}
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                />
+                <Palette className="w-4 h-4 text-white pointer-events-none" />
+              </label>
+
+              {copyBgColor && (
+                <button
+                  type="button"
+                  onClick={() => setCopyBgColor("")}
+                  className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-red-300 transition-all shrink-0"
+                  title="Quitar el color de fondo"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+
+              {/* Icon picker — popover opens to the right since we're near the edge */}
+              <CategorizedIconPicker
+                value={copyIcon}
+                onChange={setCopyIcon}
+                align="right"
+                title="Elegir icono del proyecto"
+              />
+
+              {/* Share: copy public link + QR + toggle info sidebar */}
+              {(() => {
+                const proj = projects.find((p) => p.id === selectedMetaProjectId);
+                if (!proj) return null;
+                const shareUrl = `${window.location.origin}/${normalizeString(proj.name)}`;
+                const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(shareUrl)}`;
+                const copyShareLink = async () => {
+                  try {
+                    await navigator.clipboard.writeText(shareUrl);
+                    setCopiedLink(true);
+                    setTimeout(() => setCopiedLink(false), 1500);
+                  } catch {
+                    window.prompt("Copia el enlace:", shareUrl);
+                  }
+                };
+                const copyShareQr = async () => {
+                  try {
+                    const resp = await fetch(qrUrl);
+                    const blob = await resp.blob();
+                    const ClipItem = (window as any).ClipboardItem;
+                    if (navigator.clipboard && ClipItem) {
+                      await navigator.clipboard.write([new ClipItem({ [blob.type || "image/png"]: blob })]);
+                      setCopiedShareQr(true);
+                      setTimeout(() => setCopiedShareQr(false), 1500);
+                    } else {
+                      window.open(qrUrl, "_blank");
+                    }
+                  } catch {
+                    window.open(qrUrl, "_blank");
+                  }
+                };
+                return (
+                  <>
+                    <button
+                      type="button"
+                      onClick={copyShareLink}
+                      title="Copiar enlace para compartir"
+                      className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all"
+                    >
+                      {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Link className="w-4 h-4" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={copyShareQr}
+                      title="Copiar código QR"
+                      className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all"
+                    >
+                      {copiedShareQr ? <Check className="w-4 h-4 text-emerald-400" /> : <QrCode className="w-4 h-4" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowSidebar((v) => !v)}
+                      title={showSidebar ? "Ocultar panel de textos (ensancha las tablas)" : "Mostrar panel de textos"}
+                      className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all"
+                    >
+                      {showSidebar ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeftOpen className="w-4 h-4" />}
+                    </button>
+                  </>
+                );
+              })()}
+            </div>
+          )}
         </div>
       )}
 
-    <div className={adminView === "detail" ? "grid grid-cols-1 lg:grid-cols-3 gap-8" : "space-y-8"}>
+    <div className={adminView === "detail" ? "grid grid-cols-1 lg:grid-cols-3 gap-8 items-start" : "space-y-8"}>
 
       {/* Portada de Inicio — compact bar on top of the browse view (full width) */}
       {adminView === "browse" && (
@@ -1328,106 +1562,13 @@ export default function AdminPanel({
         </div>
       )}
 
-      {/* Project editor column — detail view only */}
-      {adminView === "detail" && (
-      <div className="col-span-1 space-y-8">
+      {/* Info sidebar (title/description/database/date) — shown on the RIGHT
+          (lg:order-2) so the tables take the left. Toggled from the header. */}
+      {adminView === "detail" && showSidebar && (
+      <div className="col-span-1 space-y-8 lg:order-2">
 
-        {/* Compact appearance bar — icon-only controls on a single line. */}
-        {selectedMetaProjectId && projects.find((p) => p.id === selectedMetaProjectId) && (
-          <div className={`${panelClass} relative z-10`} style={panelStyle}>
-            <div className="flex items-center gap-2">
-              {/* Color picker — same look as the other icon buttons (the chosen color
-                  already shows across the whole environment). */}
-              <label
-                className="relative w-10 h-10 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 cursor-pointer shrink-0 flex items-center justify-center transition-all"
-                title={`Color de fondo: ${copyBgColor || "sin color"}`}
-              >
-                <input
-                  type="color"
-                  value={copyBgColor || "#050505"}
-                  onChange={(e) => setCopyBgColorSmooth(e.target.value)}
-                  className="absolute inset-0 opacity-0 cursor-pointer"
-                />
-                <Palette className="w-4 h-4 text-white pointer-events-none" />
-              </label>
-
-              {copyBgColor && (
-                <button
-                  type="button"
-                  onClick={() => setCopyBgColor("")}
-                  className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-red-300 transition-all shrink-0"
-                  title="Quitar el color de fondo"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-
-              {/* Icon picker — shared categorized component */}
-              <CategorizedIconPicker
-                value={copyIcon}
-                onChange={setCopyIcon}
-                title="Elegir icono del proyecto"
-              />
-
-              {/* Share: copy public link + copy QR image (like the project tree / home) */}
-              {(() => {
-                const proj = projects.find((p) => p.id === selectedMetaProjectId);
-                if (!proj) return null;
-                const shareUrl = `${window.location.origin}/${normalizeString(proj.name)}`;
-                const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(shareUrl)}`;
-
-                const copyShareLink = async () => {
-                  try {
-                    await navigator.clipboard.writeText(shareUrl);
-                    setCopiedLink(true);
-                    setTimeout(() => setCopiedLink(false), 1500);
-                  } catch {
-                    window.prompt("Copia el enlace:", shareUrl);
-                  }
-                };
-                const copyShareQr = async () => {
-                  try {
-                    const resp = await fetch(qrUrl);
-                    const blob = await resp.blob();
-                    const ClipItem = (window as any).ClipboardItem;
-                    if (navigator.clipboard && ClipItem) {
-                      await navigator.clipboard.write([new ClipItem({ [blob.type || "image/png"]: blob })]);
-                      setCopiedShareQr(true);
-                      setTimeout(() => setCopiedShareQr(false), 1500);
-                    } else {
-                      window.open(qrUrl, "_blank");
-                    }
-                  } catch {
-                    window.open(qrUrl, "_blank");
-                  }
-                };
-
-                return (
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={copyShareLink}
-                      title="Copiar enlace para compartir"
-                      className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all"
-                    >
-                      {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Link className="w-4 h-4" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={copyShareQr}
-                      title="Copiar código QR"
-                      className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all"
-                    >
-                      {copiedShareQr ? <Check className="w-4 h-4 text-emerald-400" /> : <QrCode className="w-4 h-4" />}
-                    </button>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-        )}
-
-        {/* Project Custom Copywriting */}
+        {/* Project Custom Copywriting — no borders, as before */}
+        {showSidebar && (
         <div className={panelClass} style={panelStyle}>
           {projects.length === 0 ? (
             <div className="text-center py-6 bg-[#0d0d0d]/50 rounded-xl border border-white/5">
@@ -1656,12 +1797,13 @@ export default function AdminPanel({
             </form>
           )}
         </div>
+        )}
 
       </div>
       )}
 
-      {/* Projects and creations column */}
-      <div className="col-span-1 lg:col-span-2 space-y-8">
+      {/* Projects and creations column — LEFT side (lg:order-1); full width when the sidebar is hidden */}
+      <div className={adminView === "detail" && !showSidebar ? "lg:col-span-3 flex flex-col gap-8 lg:order-1" : "col-span-1 lg:col-span-2 flex flex-col gap-8 lg:order-1"}>
 
         {/* Project creator Section */}
         {adminView === "browse" && (
@@ -1780,46 +1922,65 @@ export default function AdminPanel({
         {adminView === "detail" && (
         <>
 
-        {/* Grading table per project (point 9) */}
+        {/* Grading table per project — shown AFTER Remitentes (order-2), collapsible */}
         {selectedMetaProjectId && projects.find((p) => p.id === selectedMetaProjectId) && (
-          <div className={panelClass} style={panelStyle}>
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-2.5 bg-white/5 text-white rounded-xl">
+          <div className={`${panelClass} order-2`} style={panelStyle}>
+            <button
+              type="button"
+              onClick={() => setGradingCollapsed((v) => !v)}
+              className="flex items-center gap-3 mb-6 text-left w-full min-w-0"
+              title={gradingCollapsed ? "Expandir tabla" : "Contraer tabla"}
+            >
+              <div className="p-2.5 bg-white/5 text-white rounded-xl shrink-0">
                 <Table className="w-5 h-5" />
               </div>
-              <div>
-                <h2 className="text-base font-semibold text-white">Tabla de Calificaciones</h2>
-                <p className="text-xs text-white/40">
+              <div className="min-w-0">
+                <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                  Tabla de Calificaciones
+                  <ChevronDown className={`w-4 h-4 text-white/40 transition-transform ${gradingCollapsed ? "-rotate-90" : ""}`} />
+                </h2>
+                <p className="text-xs text-white/40 truncate">
                   {projects.find((p) => p.id === selectedMetaProjectId)?.name}
                 </p>
               </div>
-            </div>
+            </button>
+            {!gradingCollapsed && (
             <GradingTable
               project={projects.find((p) => p.id === selectedMetaProjectId)!}
               meta={projectMeta[selectedMetaProjectId]}
               submissions={submissions}
               refreshSubmissions={fetchSubmissions}
             />
+            )}
           </div>
         )}
 
-        {/* Senders Toggle List */}
-        <div className={panelClass} style={panelStyle}>
+        {/* Remitentes — shown FIRST (order-1), collapsible, contained in a bounded box */}
+        <div className={`${panelClass} order-1`} style={panelStyle}>
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-white/5 text-white rounded-xl">
+            <button
+              type="button"
+              onClick={() => setRemitentesCollapsed((v) => !v)}
+              className="flex items-center gap-3 text-left min-w-0"
+              title={remitentesCollapsed ? "Expandir remitentes" : "Contraer remitentes"}
+            >
+              <div className="p-2.5 bg-white/5 text-white rounded-xl shrink-0">
                 <Users className="w-5 h-5" />
               </div>
-              <div>
-                <h2 className="text-base font-semibold text-white">Remitentes</h2>
-                <p className="text-xs text-white/40">
+              <div className="min-w-0">
+                <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                  Remitentes
+                  <ChevronDown className={`w-4 h-4 text-white/40 transition-transform ${remitentesCollapsed ? "-rotate-90" : ""}`} />
+                </h2>
+                <p className="text-xs text-white/40 truncate">
                   {selectedMetaProjectId
                     ? `Envíos de "${selectedProjectName}"`
                     : "Selecciona un proyecto para ver solo sus remitentes"}
                 </p>
               </div>
-            </div>
+            </button>
 
+            {!remitentesCollapsed && (
             <div className="relative">
               <Search className="w-4 h-4 text-white/30 absolute left-3 top-2.5" />
               <input
@@ -1830,9 +1991,10 @@ export default function AdminPanel({
                 className="pl-9 pr-3 py-1.5 bg-[#0d0d0d] border border-white/10 text-white rounded-xl text-xs w-full min-w-[240px] focus:outline-none focus:border-white/20 placeholder-white/20 transition-all"
               />
             </div>
+            )}
           </div>
 
-          {loadingSubmissions ? (
+          {!remitentesCollapsed && (loadingSubmissions ? (
             <div className="text-center py-10">
               <p className="text-sm text-white/40">Cargando remitentes...</p>
             </div>
@@ -1849,6 +2011,24 @@ export default function AdminPanel({
               }
               const people = Object.values(grouped);
 
+              // Entry-order number per sender (earliest submission = #1), computed over
+              // ALL of the project's submissions so it stays stable while searching.
+              // NB: a plain object is used because the lucide "Map" icon shadows the
+              // global Map constructor in this file.
+              const senderOrder: Record<string, number> = (() => {
+                const earliest: Record<string, number> = {};
+                for (const sub of scopedSubmissions) {
+                  const em = sub.senderEmail.toLowerCase();
+                  const t = new Date(sub.timestamp).getTime();
+                  if (!(em in earliest) || t < earliest[em]) earliest[em] = t;
+                }
+                const order: Record<string, number> = {};
+                Object.entries(earliest)
+                  .sort((a, b) => a[1] - b[1])
+                  .forEach(([em], i) => { order[em] = i + 1; });
+                return order;
+              })();
+
               if (people.length === 0) {
                 return (
                   <div className="text-center py-10 bg-[#0d0d0d]/35 rounded-2xl border border-dashed border-white/5">
@@ -1858,18 +2038,27 @@ export default function AdminPanel({
               }
 
               return (
-                <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1">
+                <div className="space-y-2">
                   {people.map((person) => {
                     const totalFiles = person.submissions.reduce((acc, s) => acc + s.files.length, 0);
                     const isOpen = expandedSenders[person.email] || false;
+                    const fbAnchor = [...person.submissions].sort(
+                      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+                    )[0];
+                    const fbCount = fbAnchor?.feedbackHistory?.length || 0;
                     return (
                       <div key={person.email} className="border border-white/5 rounded-xl overflow-hidden">
                         <button
                           type="button"
                           onClick={() => setExpandedSenders(prev => ({ ...prev, [person.email]: !prev[person.email] }))}
-                          className="w-full flex items-center justify-between p-3 bg-[#0d0d0d] hover:bg-[#141414] transition-all cursor-pointer text-left"
+                          className="w-full flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 transition-all cursor-pointer text-left"
                         >
                           <div className="flex items-center gap-3 min-w-0">
+                            {senderOrder[person.email.toLowerCase()] !== undefined && (
+                              <span className="shrink-0 w-6 h-6 flex items-center justify-center rounded-md bg-white/10 text-white/70 text-[10px] font-mono font-bold" title="Orden de entrada">
+                                {senderOrder[person.email.toLowerCase()]}
+                              </span>
+                            )}
                             <div className={`shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`}>
                               <ArrowRight className="w-3.5 h-3.5 text-white/30" />
                             </div>
@@ -1881,6 +2070,14 @@ export default function AdminPanel({
                             </div>
                           </div>
                           <div className="flex items-center gap-2 shrink-0 ml-3">
+                            {fbCount > 0 && (
+                              <span
+                                className="text-[10px] text-white font-mono bg-white/15 px-2 py-1 rounded-md border border-white/25 whitespace-nowrap flex items-center gap-1"
+                                title={`${fbCount} retroalimentación(es) enviada(s)`}
+                              >
+                                <Check className="w-3 h-3" /> {fbCount} resp{fbCount === 1 ? 'uesta' : 'uestas'}
+                              </span>
+                            )}
                             <span className="text-[10px] text-white/50 font-mono bg-white/5 px-2 py-1 rounded-md border border-white/5 whitespace-nowrap">
                               {person.submissions.length} env{person.submissions.length === 1 ? 'ío' : 'íos'}
                             </span>
@@ -1891,7 +2088,7 @@ export default function AdminPanel({
                         </button>
 
                         {isOpen && (
-                          <div className="border-t border-white/5 bg-[#090909]">
+                          <div className="border-t border-white/5 bg-black/10">
                             {person.submissions.map((sub) => (
                               <div key={sub.id} className="p-3 border-b border-white/5 last:border-b-0">
                                 <div className="flex items-center justify-between mb-2">
@@ -1934,6 +2131,199 @@ export default function AdminPanel({
                                 </div>
                               </div>
                             ))}
+
+                            {/* Feedback: comentario + adjuntos + nota opcional + enviar */}
+                            {(() => {
+                              const fb = getFeedback(person.email);
+                              const anchor = [...person.submissions].sort(
+                                (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+                              )[0];
+                              const history = anchor?.feedbackHistory || [];
+                              const viewIdx = history.length
+                                ? Math.min(feedbackView[person.email] ?? history.length - 1, history.length - 1)
+                                : -1;
+                              const current = viewIdx >= 0 ? history[viewIdx] : null;
+                              return (
+                                <div className="p-3 border-t border-white/10 space-y-3">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest flex items-center gap-1.5">
+                                      <Mail className="w-3 h-3" /> Retroalimentación por correo
+                                    </div>
+                                    {history.length > 0 && (
+                                      <div className="flex items-center gap-1.5 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => setFeedbackView((v) => ({ ...v, [person.email]: Math.max(0, viewIdx - 1) }))}
+                                          disabled={viewIdx <= 0}
+                                          className="w-6 h-6 flex items-center justify-center rounded-md border border-white/10 bg-white/5 hover:bg-white/10 text-white/60 disabled:opacity-30"
+                                          title="Retroalimentación anterior"
+                                        >
+                                          <ArrowLeft className="w-3 h-3" />
+                                        </button>
+                                        <span className="text-[10px] text-white/50 font-mono whitespace-nowrap">{viewIdx + 1} / {history.length}</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => setFeedbackView((v) => ({ ...v, [person.email]: Math.min(history.length - 1, viewIdx + 1) }))}
+                                          disabled={viewIdx >= history.length - 1}
+                                          className="w-6 h-6 flex items-center justify-center rounded-md border border-white/10 bg-white/5 hover:bg-white/10 text-white/60 disabled:opacity-30"
+                                          title="Retroalimentación siguiente"
+                                        >
+                                          <ArrowRight className="w-3 h-3" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {current && (
+                                    <div className="rounded-lg border border-white/10 bg-white/5 p-2.5 space-y-1.5">
+                                      <div className="flex items-center justify-between gap-2 text-[10px] text-white/40 font-mono">
+                                        <span><Calendar className="w-3 h-3 inline mr-1" />{new Date(current.sentAt).toLocaleString()}</span>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          {current.note && current.note.trim() && (
+                                            <span className="text-white/80 font-bold whitespace-nowrap">Nota: {current.note}</span>
+                                          )}
+                                          <button
+                                            type="button"
+                                            onClick={() => deleteFeedback(person.email, anchor?.id || "", viewIdx)}
+                                            className="p-1 text-red-400/60 hover:text-red-400 hover:bg-red-950/20 border border-white/5 hover:border-red-900/20 rounded-md transition-all shrink-0"
+                                            title="Eliminar esta retroalimentación de Notion"
+                                          >
+                                            <Trash2 className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                      {current.comment && current.comment.trim() && (
+                                        <p className="text-xs text-white/80 whitespace-pre-wrap break-words">{current.comment}</p>
+                                      )}
+                                      {current.files && current.files.length > 0 && (
+                                        current.filesBlockId ? (
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
+                                            {current.files.map((f, i) => {
+                                              const fname = typeof f === "string" ? f : f.name;
+                                              const fsize = typeof f === "string" ? undefined : f.size;
+                                              const vf: ViewableFile = {
+                                                name: fname,
+                                                size: fsize,
+                                                url: `/api/submission-file?block=${encodeURIComponent(current.filesBlockId as string)}&i=${i}`,
+                                              };
+                                              return (
+                                                <InlineFilePreview
+                                                  key={i}
+                                                  file={vf}
+                                                  onExpand={() => setViewerFile(vf)}
+                                                  heightClass="h-40"
+                                                />
+                                              );
+                                            })}
+                                          </div>
+                                        ) : (
+                                          <div className="flex flex-wrap gap-1 pt-0.5">
+                                            {current.files.map((f, i) => (
+                                              <span key={i} className="text-[10px] text-white/50 bg-white/5 border border-white/10 rounded px-1.5 py-0.5 truncate max-w-[180px]">
+                                                📎 {typeof f === "string" ? f : f.name}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        )
+                                      )}
+                                    </div>
+                                  )}
+
+                                  <div className="text-[10px] text-white/30 uppercase tracking-widest">Nueva retroalimentación</div>
+
+                                  <textarea
+                                    value={fb.comment}
+                                    onChange={(e) => setFeedbackFor(person.email, { comment: e.target.value })}
+                                    rows={3}
+                                    placeholder="Escribe tus comentarios / feedback..."
+                                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:border-white/30 focus:outline-none resize-y"
+                                  />
+
+                                  {/* Adjuntos (arrastra o haz clic) */}
+                                  <label
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={(e) => {
+                                      e.preventDefault();
+                                      const dropped = Array.from(e.dataTransfer.files || []);
+                                      if (dropped.length) setFeedbackFor(person.email, { files: [...fb.files, ...dropped] });
+                                    }}
+                                    className="flex items-center gap-2 px-3 py-2.5 bg-white/5 border border-dashed border-white/15 rounded-lg text-xs text-white/50 hover:text-white/80 hover:border-white/30 cursor-pointer transition-all"
+                                  >
+                                    <UploadCloud className="w-4 h-4 shrink-0" />
+                                    <span>Arrastra archivos o haz clic para adjuntar al correo</span>
+                                    <input
+                                      type="file"
+                                      multiple
+                                      className="hidden"
+                                      onChange={(e) => {
+                                        const selected = Array.from(e.target.files || []);
+                                        if (selected.length) setFeedbackFor(person.email, { files: [...fb.files, ...selected] });
+                                        e.target.value = "";
+                                      }}
+                                    />
+                                  </label>
+
+                                  {fb.files.length > 0 && (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                      {fb.files.map((f, i) => (
+                                        <LocalFilePreview
+                                          key={i}
+                                          file={f}
+                                          onExpand={(vf) => setViewerFile(vf)}
+                                          onRemove={() => setFeedbackFor(person.email, { files: fb.files.filter((_, idx) => idx !== i) })}
+                                        />
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  <div className="flex items-center gap-2">
+                                    <input
+                                      type="text"
+                                      value={fb.note}
+                                      onChange={(e) => setFeedbackFor(person.email, { note: e.target.value })}
+                                      placeholder="Nota (ej: 4.5 / 5) · opcional"
+                                      className="w-48 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-xs text-white placeholder-white/30 focus:border-white/30 focus:outline-none"
+                                    />
+                                    <div className="ml-auto flex items-center gap-3">
+                                      {fb.msg && (
+                                        <span className={`text-[11px] ${fb.msg.type === "success" ? "text-white/70" : "text-red-300"}`}>
+                                          {fb.msg.text}
+                                        </span>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() => sendFeedback(person.email, person.name, anchor?.id || "")}
+                                        disabled={fb.sending}
+                                        className="h-10 px-5 font-mono tracking-widest text-[11px] uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden shrink-0 disabled:opacity-50"
+                                        style={{ '--btn-color': (copyBgColor && isBgColorLight ? '#111111' : '#ffffff') } as React.CSSProperties}
+                                      >
+                                        {/* Accent-colored fill (fades out on hover to reveal the environment) */}
+                                        <div
+                                          className="absolute inset-0 opacity-100 group-hover:opacity-0 transition-opacity duration-300 rounded-[4px] pointer-events-none"
+                                          style={{ backgroundColor: copyBgColor || '#c72323' }}
+                                        />
+                                        {/* Diagonal lines on top of the accent */}
+                                        <div
+                                          className="absolute inset-[1px] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px]"
+                                          style={{
+                                            backgroundColor: copyBgColor || '#c72323',
+                                            backgroundImage: `repeating-linear-gradient(119deg, ${isBgColorLight ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.22)'} 0px, ${isBgColorLight ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.22)'} 1px, transparent 1px, transparent 10px)`,
+                                          }}
+                                        />
+                                        <span className="btn-motion-corner btn-motion-corner-tl" />
+                                        <span className="btn-motion-corner btn-motion-corner-tr" />
+                                        <span className="btn-motion-corner btn-motion-corner-bl" />
+                                        <span className="btn-motion-corner btn-motion-corner-br" />
+                                        <span className="relative z-10 flex items-center justify-center gap-2 font-extrabold">
+                                          {fb.sending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
+                                          {fb.sending ? "Enviando..." : "Enviar"}
+                                        </span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
                         )}
                       </div>
@@ -1942,7 +2332,7 @@ export default function AdminPanel({
                 </div>
               );
             })()
-          )}
+          ))}
         </div>
 
         </>
@@ -1953,7 +2343,7 @@ export default function AdminPanel({
     </div>
 
     {/* Inline file preview modal (view files directly instead of only downloading). */}
-    <FileViewer file={viewerFile} onClose={() => setViewerFile(null)} />
+    <FileViewer file={viewerFile} onClose={() => setViewerFile(null)} accentColor={copyBgColor} />
 
     </div>
   );

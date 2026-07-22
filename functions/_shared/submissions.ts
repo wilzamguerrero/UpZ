@@ -12,6 +12,14 @@ export interface RebuiltFile {
   url: string;
 }
 
+export interface RebuiltFeedback {
+  comment: string;
+  note?: string;
+  files: (string | { name: string; size?: number })[];
+  filesBlockId?: string;
+  sentAt: string;
+}
+
 export interface RebuiltSubmission {
   id: string;
   projectId: string;
@@ -21,9 +29,13 @@ export interface RebuiltSubmission {
   timestamp: string;
   files: RebuiltFile[];
   controlValues: Record<string, string>;
+  feedbackHistory: RebuiltFeedback[];
   notionBlockId: string;
   dbPageId: string;
 }
+
+/** Marker that identifies the feedback-history JSON code block inside a toggle. */
+export const FEEDBACK_MARKER = "__envi_feedback__";
 
 export type ListChildrenFn = (blockId: string) => Promise<any[]>;
 
@@ -107,12 +119,17 @@ export async function collectSubmissions(
         });
         fileIndex++;
       } else if (blk.type === "code" && blk.code?.language === "json") {
-        // Bloque de calificaciones (controlValues) del modo sin base de datos.
+        // Un bloque JSON puede ser: historial de retroalimentación (marcado) o
+        // los valores de calificación (controlValues) del modo sin base de datos.
         try {
           const jsonText = (blk.code.rich_text || []).map((rt: any) => rt.plain_text).join("").trim();
           const parsed = JSON.parse(jsonText);
           if (parsed && typeof parsed === "object") {
-            sub.controlValues = parsed as Record<string, string>;
+            if (Array.isArray(parsed[FEEDBACK_MARKER])) {
+              sub.feedbackHistory = parsed[FEEDBACK_MARKER];
+            } else {
+              sub.controlValues = parsed as Record<string, string>;
+            }
           }
         } catch {
           // Ignorar JSON malformado.
@@ -147,6 +164,7 @@ export async function collectSubmissions(
             timestamp: b.created_time || new Date().toISOString(),
             files: [],
             controlValues: {},
+            feedbackHistory: [],
           };
           if (opts.filesForProjectId && opts.filesForProjectId === projectId) {
             await hydrateFiles(sub, b.id);

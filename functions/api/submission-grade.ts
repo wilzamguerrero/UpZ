@@ -1,4 +1,14 @@
 import { json, listChildren, appendChildren, updateBlock, type Env } from "../_shared/notion";
+import { FEEDBACK_MARKER } from "../_shared/submissions";
+
+/** Reads and parses a code(json) block's content, or null. */
+function parseJsonBlock(block: any): any {
+  try {
+    return JSON.parse((block?.code?.rich_text || []).map((rt: any) => rt.plain_text).join("").trim());
+  } catch {
+    return null;
+  }
+}
 
 /** Reads the effective Notion secret (KV override > env). */
 async function getSecret(env: Env): Promise<string> {
@@ -39,22 +49,18 @@ export const onRequestPatch: PagesFunction<Env> = async (context) => {
   if (!notionSecret) return json({ error: "Notion no está configurado." }, 400);
 
   try {
-    // Find an existing JSON code block inside the submission toggle.
+    // Find the grade JSON code block (a code(json) block WITHOUT the feedback marker).
     const data = await listChildren(submissionId, notionSecret);
-    const codeBlock = data.results?.find(
-      (b: any) => b.type === "code" && b.code?.language === "json"
-    ) as any;
+    const codeBlock = data.results?.find((b: any) => {
+      if (b.type !== "code" || b.code?.language !== "json") return false;
+      const parsed = parseJsonBlock(b);
+      return !(parsed && Array.isArray(parsed[FEEDBACK_MARKER]));
+    }) as any;
 
     let merged: Record<string, string> = {};
-    if (codeBlock?.code?.rich_text) {
-      try {
-        const existing = JSON.parse(
-          codeBlock.code.rich_text.map((rt: any) => rt.plain_text).join("").trim()
-        );
-        if (existing && typeof existing === "object") merged = existing;
-      } catch {
-        // Ignore malformed JSON.
-      }
+    if (codeBlock) {
+      const existing = parseJsonBlock(codeBlock);
+      if (existing && typeof existing === "object" && !Array.isArray(existing[FEEDBACK_MARKER])) merged = existing;
     }
     merged = { ...merged, ...controlValues };
     const jsonString = JSON.stringify(merged, null, 2);

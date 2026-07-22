@@ -57,6 +57,38 @@ export async function appendChildren(blockId: string, children: unknown[], token
   return notionFetch("PATCH", `/blocks/${blockId}/children`, token, { children });
 }
 
+const IMAGE_MIME_TYPES = new Set([
+  "image/png", "image/jpeg", "image/jpg", "image/gif",
+  "image/webp", "image/svg+xml", "image/bmp", "image/tiff",
+]);
+
+/** Builds Notion image/file blocks (with captions) from uploaded file records.
+ *  Shared by the submission flow and the feedback flow so previews stay consistent. */
+export function buildNotionFileBlocks(
+  records: { uploadId: string; name: string; size: number; mimeType: string; extModified: boolean }[]
+): any[] {
+  return records.map((f) => {
+    const isImage = IMAGE_MIME_TYPES.has(f.mimeType);
+    const sizeLabel = (f.size / (1024 * 1024)).toFixed(2) + " MB";
+    const caption = f.extModified
+      ? [{ type: "text", text: { content: `⚠️ .zip agregado. Nombre original: ${f.name} (${sizeLabel})` } }]
+      : [{ type: "text", text: { content: `${isImage ? "🖼️" : "📄"} ${f.name} (${sizeLabel})` } }];
+
+    if (isImage) {
+      return {
+        object: "block",
+        type: "image",
+        image: { type: "file_upload", file_upload: { id: f.uploadId }, caption },
+      };
+    }
+    return {
+      object: "block",
+      type: "file",
+      file: { type: "file_upload", file_upload: { id: f.uploadId }, caption },
+    };
+  });
+}
+
 /** Update a Notion block */
 export async function updateBlock(blockId: string, update: unknown, token: string): Promise<any> {
   return notionFetch("PATCH", `/blocks/${blockId}`, token, update);

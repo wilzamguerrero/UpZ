@@ -1,8 +1,21 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   X, Download, ExternalLink, Loader2, FileText, AlertCircle, Maximize2,
   Image as ImageIcon, Film, Music, FileType2, File as FileIcon,
 } from "lucide-react";
+
+/** True if the given hex color is light (so dark text should be used on it). */
+const isLightHex = (hex?: string): boolean => {
+  if (!hex) return false;
+  const h = hex.replace("#", "").trim();
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  if (full.length !== 6) return false;
+  const r = parseInt(full.slice(0, 2), 16) / 255;
+  const g = parseInt(full.slice(2, 4), 16) / 255;
+  const b = parseInt(full.slice(4, 6), 16) / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6;
+};
 
 export interface ViewableFile {
   name: string;
@@ -147,7 +160,7 @@ export const InlineFilePreview: React.FC<{
             alt={file.name}
             loading="lazy"
             onClick={onExpand}
-            className="w-full h-full object-contain bg-black cursor-zoom-in"
+            className="w-full h-full object-contain bg-black/30 cursor-zoom-in"
           />
         );
       case "video":
@@ -156,12 +169,12 @@ export const InlineFilePreview: React.FC<{
             src={file.url}
             controls
             preload="metadata"
-            className="w-full h-full object-contain bg-black"
+            className="w-full h-full object-contain bg-black/30"
           />
         );
       case "audio":
         return (
-          <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[#0a0a0a] px-3">
+          <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-white/5 px-3">
             <Music className="w-8 h-8 text-white/40" />
             <audio src={file.url} controls className="w-full max-w-[95%]" />
           </div>
@@ -176,7 +189,7 @@ export const InlineFilePreview: React.FC<{
         );
       case "text":
         return (
-          <div className="w-full h-full overflow-hidden bg-[#0a0a0a]">
+          <div className="w-full h-full overflow-hidden bg-white/5">
             <TextPreview url={file.url} />
           </div>
         );
@@ -185,7 +198,7 @@ export const InlineFilePreview: React.FC<{
           <button
             type="button"
             onClick={onExpand}
-            className="w-full h-full flex flex-col items-center justify-center gap-2 bg-[#0a0a0a] text-white/50 hover:text-white/80 transition-colors"
+            className="w-full h-full flex flex-col items-center justify-center gap-2 bg-white/5 text-white/50 hover:text-white/80 transition-colors"
           >
             <KindIcon kind={kind} className="w-9 h-9" />
             <span className="text-[11px] px-3 text-center">Abrir vista previa</span>
@@ -195,7 +208,7 @@ export const InlineFilePreview: React.FC<{
   };
 
   return (
-    <div className="rounded-lg border border-white/10 bg-[#111111] overflow-hidden flex flex-col group/preview">
+    <div className="rounded-lg border border-white/10 bg-white/5 overflow-hidden flex flex-col group/preview">
       <div className={`${heightClass} w-full overflow-hidden relative`}>
         {preview()}
         {onExpand && (
@@ -232,11 +245,13 @@ export const InlineFilePreview: React.FC<{
 interface FileViewerProps {
   file: ViewableFile | null;
   onClose: () => void;
+  /** Project color used to tint the header bar so it matches the interface. */
+  accentColor?: string;
 }
 
 /** Full-screen modal that previews a file inline (image/video/audio/pdf/text/office)
  *  and always offers open-in-new-tab and download as a fallback. */
-const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
+const FileViewer: React.FC<FileViewerProps> = ({ file, onClose, accentColor }) => {
   useEffect(() => {
     if (!file) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -325,23 +340,31 @@ const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
     }
   };
 
-  return (
+  const accent = accentColor && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(accentColor) ? accentColor : "";
+  const headerLight = isLightHex(accent);
+  const headerTextClass = headerLight ? "text-black" : "text-white";
+  const headerMutedClass = headerLight ? "text-black/50" : "text-white/40";
+
+  // Rendered through a portal on <body> so it always covers the whole screen and
+  // never overlaps with the header buttons (which live inside transformed parents).
+  return createPortal(
     <div
-      className="fixed inset-0 z-[300] flex flex-col bg-black/85 backdrop-blur-sm"
+      className="fixed inset-0 z-[9999] flex flex-col bg-black/85 backdrop-blur-sm"
       onClick={onClose}
     >
-      {/* Header bar */}
+      {/* Header bar — tinted with the project color */}
       <div
-        className="flex items-center gap-3 px-4 py-3 border-b border-white/10 bg-[#0d0d0d]/80 shrink-0"
+        className="flex items-center gap-3 px-4 py-3 border-b border-white/10 shrink-0"
+        style={{ backgroundColor: accent || "rgba(13,13,13,0.95)" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="w-9 h-9 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0 text-white/60">
+        <div className={`w-9 h-9 rounded-lg bg-white/10 border border-white/15 flex items-center justify-center shrink-0 ${headerMutedClass}`}>
           <KindIcon kind={kind} className="w-4.5 h-4.5" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-white truncate" title={file.name}>{file.name}</p>
+          <p className={`text-sm font-semibold truncate ${headerTextClass}`} title={file.name}>{file.name}</p>
           {file.size != null && (
-            <p className="text-[11px] text-white/40 font-mono">{formatSize(file.size)}</p>
+            <p className={`text-[11px] font-mono ${headerMutedClass}`}>{formatSize(file.size)}</p>
           )}
         </div>
         <a
@@ -378,7 +401,8 @@ const FileViewer: React.FC<FileViewerProps> = ({ file, onClose }) => {
       >
         {renderBody()}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
