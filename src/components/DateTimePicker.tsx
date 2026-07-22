@@ -359,8 +359,8 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
   const textMuted = resolvedSurfaceColor ? (isSurfaceLight ? "rgba(17,17,17,0.52)" : "rgba(255,255,255,0.42)") : "rgba(255,255,255,0.40)";
   const textFaint = resolvedSurfaceColor ? (isSurfaceLight ? "rgba(17,17,17,0.28)" : "rgba(255,255,255,0.22)") : "rgba(255,255,255,0.20)";
   const todayBorder = resolvedSurfaceColor
-    ? mixHexColors(panelBg, "#10b981", isSurfaceLight ? 0.35 : 0.5)
-    : "rgba(16,185,129,0.40)";
+    ? mixHexColors(panelBg, isSurfaceLight ? "#000000" : "#ffffff", isSurfaceLight ? 0.35 : 0.5)
+    : "rgba(255,255,255,0.40)";
   const destructiveBg = resolvedSurfaceColor
     ? mixHexColors(panelBg, isSurfaceLight ? "#dc2626" : "#7f1d1d", isSurfaceLight ? 0.12 : 0.18)
     : undefined;
@@ -389,7 +389,7 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
       >
         <div className="flex items-center gap-2.5 min-w-0">
           {selectedDay !== null ? (
-            <CalendarDays className="w-4 h-4 text-emerald-400 shrink-0" />
+            <CalendarDays className="w-4 h-4 shrink-0" style={{ color: textPrimary }} />
           ) : (
             <CalendarIcon className="w-4 h-4 shrink-0" style={{ color: textMuted }} />
           )}
@@ -545,7 +545,7 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
                   >
                     <div style={{ color: "inherit" }}>{cell.day}</div>
                     {cellIsToday && !cellIsSelected && (
-                      <span className="absolute bottom-1 w-1 h-0.5 rounded-full bg-emerald-400" />
+                      <span className="absolute bottom-1 w-1 h-0.5 rounded-full" style={{ backgroundColor: textPrimary }} />
                     )}
                   </button>
                 );
@@ -600,7 +600,7 @@ export default function DateTimePicker({ value, onChange, placeholder = "Sin lí
                 <Clock className="w-3.5 h-3.5" style={{ color: textMuted }} />
                 <span className="text-[10px] font-bold uppercase tracking-wider">Hora Límite (24H)</span>
               </div>
-              <span className="text-xs font-mono font-bold text-emerald-400">
+              <span className="text-xs font-mono font-bold" style={{ color: textPrimary }}>
                 {String(selectedHours).padStart(2, "0")}:{String(selectedMinutes).padStart(2, "0")}
               </span>
             </div>

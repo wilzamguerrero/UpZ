@@ -142,6 +142,7 @@ export default function App() {
   const [selectedProjectId, setSelectedProjectId] = useState(getCachedSelectedProjectId);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [customValues, setCustomValues] = useState<Record<string, string>>({});
+  const [comment, setComment] = useState("");
 
   // Submit engine states
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -479,6 +480,8 @@ export default function App() {
             .map((cf) => ({ id: cf.id, label: cf.label })),
           useDatabase: !!submitMeta?.useDatabase,
           databaseId: submitMeta?.databaseId || "",
+          // Mensaje opcional del remitente (el campo siempre está disponible).
+          comment,
           // Color del proyecto, para que el correo de comprobante use el mismo color.
           bgColor: submitMeta?.bgColor || "",
         }),
@@ -490,6 +493,7 @@ export default function App() {
         setSenderEmail("");
         setSelectedFiles([]);
         setCustomValues({});
+        setComment("");
       } else {
         setSubmitError(data.error || "Algo salió mal al sincronizar.");
       }
@@ -935,12 +939,15 @@ export default function App() {
                             });
 
                             return (
-                              <div className="border-2 border-dashed border-amber-400/40 rounded-2xl px-4 py-3 flex flex-col gap-1.5">
-                                <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest" style={{ color: 'var(--accent, #f5f011)', opacity: 0.8 }}>
+                              <div
+                                className="border-2 border-dashed rounded-2xl px-4 py-3 flex flex-col gap-1.5"
+                                style={{ borderColor: hasBgColor ? (bgColorIsLight ? 'rgba(0,0,0,0.30)' : 'rgba(255,255,255,0.30)') : 'rgba(245,240,17,0.4)' }}
+                              >
+                                <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest" style={{ color: adaptiveText || 'var(--accent, #f5f011)', opacity: 0.8 }}>
                                   <Clock className="w-3.5 h-3.5 shrink-0" />
-                                  <span>Disponible · {dateStr}</span>
+                                  <span>Disponible hasta · {dateStr}</span>
                                 </div>
-                                <div className="flex items-center gap-3 font-mono font-bold text-2xl tabular-nums" style={{ color: 'var(--accent, #f5f011)' }}>
+                                <div className="flex items-center gap-3 font-mono font-bold text-2xl tabular-nums" style={{ color: adaptiveText || 'var(--accent, #f5f011)' }}>
                                   {d > 0 && <span>{d}d</span>}
                                   <span>{pad(h)}h</span>
                                   <span className="opacity-40">:</span>
@@ -1034,18 +1041,6 @@ export default function App() {
                           <div className="w-full px-4 py-3 bg-white/5 border border-white/20 rounded-xl flex items-center justify-between select-none">
                             <div className="flex items-center gap-2.5">
                               <span className="text-sm font-bold text-white tracking-wide">{lockedProjectName}</span>
-                              {hasValidExpiration && (
-                                <span className="text-[10px] text-amber-300 font-medium px-1.5 py-0.5 bg-amber-950/30 border border-amber-900/30 rounded flex items-center gap-1">
-                                  <Clock className="w-2.5 h-2.5 shrink-0" />
-                                  {new Date(activeMeta!.expirationDate!).toLocaleDateString("es-ES", {
-                                    day: "numeric",
-                                    month: "short",
-                                    year: "numeric",
-                                    hour: activeMeta!.expirationDate!.includes("T") ? "2-digit" : undefined,
-                                    minute: activeMeta!.expirationDate!.includes("T") ? "2-digit" : undefined,
-                                  })}
-                                </span>
-                              )}
                             </div>
                             <Globe className="w-4 h-4 text-white/40" title="Enlace directo activo" />
                           </div>
@@ -1194,6 +1189,19 @@ export default function App() {
                         </div>
                       ) : (
                         <>
+                          {/* Optional submitter message (always available). */}
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-semibold text-white/40 uppercase tracking-wide">
+                              Comentarios <span className="text-white/25 normal-case font-normal">(opcional)</span>
+                            </label>
+                            <textarea
+                              rows={3}
+                              value={comment}
+                              onChange={(e) => setComment(e.target.value)}
+                              placeholder="Deja un mensaje para el destinatario..."
+                              className="w-full px-3.5 py-3 bg-white/5 border border-white/10 rounded-2xl text-sm text-white placeholder-white/30 focus:border-white/30 focus:outline-none transition-all resize-y"
+                            />
+                          </div>
                           <div className="space-y-1.5">
                             <label className="block text-xs font-semibold text-white/40 uppercase tracking-wide">
                               Archivos a adjuntar

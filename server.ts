@@ -15,7 +15,7 @@ import {
   type PreviewProject,
 } from "./functions/_shared/preview";
 import { sendGmailMessage, buildReceiptEmail, buildFeedbackEmail, hasGmailCredentials, type MailAttachment } from "./functions/_shared/gmail";
-import { collectSubmissions, collectProjectMetas, FEEDBACK_MARKER, FEEDBACK_DRAFT_MARKER } from "./functions/_shared/submissions";
+import { collectSubmissions, collectProjectMetas, FEEDBACK_MARKER, FEEDBACK_DRAFT_MARKER, SUBMISSION_COMMENT_MARKER } from "./functions/_shared/submissions";
 import { uploadFileToNotion, buildNotionFileBlocks } from "./functions/_shared/notion";
 
 /** Parse a Notion code(json) block's content, or null. */
@@ -2248,7 +2248,8 @@ app.post("/api/upload-part", upload.single("file"), async (req, res) => {
 
 // 8. Submit files (creates Toggle block inside specific project child page using pre-uploaded fileIDs)
 app.post("/api/submit", async (req, res) => {
-  const { senderName, senderEmail, projectId, projectName, fileRecords = [], bgColor = "" } = req.body;
+  const { senderName, senderEmail, projectId, projectName, fileRecords = [], bgColor = "", comment = "" } = req.body;
+  const trimmedComment = String(comment || "").trim();
 
   if (!senderName || !senderEmail || !projectId) {
     return res.status(400).json({ error: "Faltan campos obligatorios (nombre, correo o proyecto)." });
@@ -2290,7 +2291,7 @@ app.post("/api/submit", async (req, res) => {
           {
             type: "text",
             text: {
-              content: `Información de la entrega:\n• Remitente: ${senderName.trim()}\n• Correo: ${senderEmail.trim()}\n• Fecha de envío: ${dateStr}\n• Archivos totales: ${fileRecords.length}`,
+              content: `Información de la entrega:\n• Remitente: ${senderName.trim()}\n• Correo: ${senderEmail.trim()}\n• Fecha de envío: ${dateStr}\n• Archivos totales: ${fileRecords.length}${trimmedComment ? `\n• Comentario: ${trimmedComment}` : ""}`,
             },
           },
         ],
@@ -2301,6 +2302,19 @@ app.post("/api/submit", async (req, res) => {
         color: "blue_background",
       },
     });
+
+    // Machine-readable copy of the submitter's message so it can be read back
+    // from Notion (source of truth) and shown in the admin.
+    if (trimmedComment) {
+      blocks.push({
+        object: "block",
+        type: "code",
+        code: {
+          rich_text: [{ type: "text", text: { content: JSON.stringify({ [SUBMISSION_COMMENT_MARKER]: trimmedComment }, null, 2) } }],
+          language: "json",
+        },
+      });
+    }
 
     // 2. Headings for files list
     blocks.push({
@@ -2389,6 +2403,7 @@ app.post("/api/submit", async (req, res) => {
       timestamp: new Date().toISOString(),
       notionBlockId,
       dbPageId: "",
+      comment: trimmedComment,
       files: fileRecords.map((f: any) => ({
         name: f.name,
         size: f.size,

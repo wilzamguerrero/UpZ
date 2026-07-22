@@ -77,6 +77,9 @@ export interface ProjectMeta {
   bgColor?: string;
   /** Lucide icon name shown in the corner box of the landing card. */
   icon?: string;
+  /** When true, the landing shows an optional "Comentarios" message field the
+   *  submitter can fill in (besides name, email and files). */
+  allowComment?: boolean;
   /**
    * Forces the text/UI contrast instead of auto-deciding from the background
    * luminance. "auto" = decide by luminance, "white" = light text, "black" = dark text.
@@ -126,6 +129,8 @@ export interface Submission {
   senderEmail: string;
   timestamp: string;
   files: FileAttachment[];
+  /** Optional free-text message left by the submitter (when enabled per project). */
+  comment?: string;
   /** Values for the user-defined custom fields, keyed by field id. */
   customValues?: Record<string, string>;
   /** Values for control/grading columns, keyed by column id (nota, estado...). */

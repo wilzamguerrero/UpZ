@@ -333,8 +333,8 @@ const ProjectTreeItem: React.FC<ProjectTreeItemProps> = ({
           <button onClick={() => setAdding((v) => !v)} title="Crear dentro" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10"><Plus className="w-3.5 h-3.5" /></button>
           <button onClick={() => { setRenameName(node.name); setRenaming((v) => !v); }} title="Renombrar" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10"><PencilLine className="w-3.5 h-3.5" /></button>
           <button onClick={() => onToggleActive(node.id, isActive)} title={isActive ? "Desactivar" : "Activar"} className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10">{isActive ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}</button>
-          <button onClick={copyLink} title="Copiar enlace para compartir" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10">{copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Link className="w-3.5 h-3.5" />}</button>
-          <button onClick={copyQr} title="Copiar código QR" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10">{copiedQr ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <QrCode className="w-3.5 h-3.5" />}</button>
+          <button onClick={copyLink} title="Copiar enlace para compartir" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10">{copiedLink ? <Check className="w-3.5 h-3.5" /> : <Link className="w-3.5 h-3.5" />}</button>
+          <button onClick={copyQr} title="Copiar código QR" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10">{copiedQr ? <Check className="w-3.5 h-3.5" /> : <QrCode className="w-3.5 h-3.5" />}</button>
           <button onClick={() => onDelete(node.id, node.name)} disabled={isDeletingId === node.id} title="Eliminar" className="w-6 h-6 flex items-center justify-center rounded text-red-400/60 hover:text-red-400 hover:bg-red-950/20 disabled:opacity-40"><Trash2 className="w-3.5 h-3.5" /></button>
         </div>
       </div>
@@ -537,6 +537,7 @@ export default function AdminPanel({
   const [copyUseDatabase, setCopyUseDatabase] = useState(false);
   const [copyDatabaseId, setCopyDatabaseId] = useState("");
   const [copyDbColumns, setCopyDbColumns] = useState<DbColumn[]>([]);
+  const [copyAllowComment, setCopyAllowComment] = useState(false);
 
   const bgColorLuminance = (() => {
     if (!copyBgColor) return null;
@@ -999,6 +1000,7 @@ export default function AdminPanel({
     setCopyUseDatabase(!!active.useDatabase);
     setCopyDatabaseId(active.databaseId || "");
     setCopyDbColumns(Array.isArray(active.dbColumns) ? active.dbColumns : []);
+    setCopyAllowComment(!!active.allowComment);
     setCopyGroupId(active.groupId || "");
     setMetaMessage(null);
   };
@@ -1021,6 +1023,7 @@ export default function AdminPanel({
       useDatabase: !!meta.useDatabase,
       databaseId: meta.databaseId || "",
       dbColumns: Array.isArray(meta.dbColumns) ? meta.dbColumns : [],
+      allowComment: !!meta.allowComment,
       groupId: meta.groupId || "",
     });
   };
@@ -1094,6 +1097,7 @@ export default function AdminPanel({
     useDatabase: copyUseDatabase,
     databaseId: copyDatabaseId,
     dbColumns: copyDbColumns,
+    allowComment: copyAllowComment,
     groupId: copyGroupId,
     order: projectMeta[selectedMetaProjectId]?.order ?? 0,
     createdAt: projectMeta[selectedMetaProjectId]?.createdAt,
@@ -1103,9 +1107,9 @@ export default function AdminPanel({
    * Persist the project meta and apply it optimistically. Deliberately does NOT
    * refetch or refresh, so saving never bounces you out of the admin view.
    */
-  const persistProjectMeta = async (successText: string) => {
+  const persistProjectMeta = async (successText: string, overrides?: Partial<ProjectMeta>) => {
     if (!selectedMetaProjectId) return;
-    const nextMeta = buildProjectMeta();
+    const nextMeta = { ...buildProjectMeta(), ...(overrides || {}) };
     setIsSavingMeta(true);
     setMetaMessage(null);
     try {
@@ -1131,6 +1135,17 @@ export default function AdminPanel({
   const handleSaveMeta = (e: React.FormEvent) => {
     e.preventDefault();
     void persistProjectMeta("¡Textos guardados correctamente!");
+  };
+
+  /** Toggle whether the public link accepts submissions (persists immediately).
+   *  When blocked (isActive=false) the landing shows a "not available" notice. */
+  const toggleSubmissionsActive = () => {
+    const next = !copyIsActive;
+    setCopyIsActive(next);
+    void persistProjectMeta(
+      next ? "Envíos habilitados." : "Envíos bloqueados: el enlace mostrará un aviso.",
+      { isActive: next }
+    );
   };
 
   const handleSaveHomeAppearance = async (e?: React.FormEvent) => {
@@ -1749,6 +1764,22 @@ export default function AdminPanel({
                 title="Elegir icono del proyecto"
               />
 
+              {/* Lock / unlock submissions: even with the link shared, block sending. */}
+              <button
+                type="button"
+                onClick={toggleSubmissionsActive}
+                disabled={isSavingMeta}
+                title={copyIsActive
+                  ? "Envíos habilitados · clic para bloquear (el enlace mostrará un aviso)"
+                  : "Envíos bloqueados · clic para habilitar"}
+                className="w-10 h-10 flex items-center justify-center rounded-lg border transition-all shrink-0 disabled:opacity-50"
+                style={copyIsActive
+                  ? { borderColor: "rgba(255,255,255,0.15)", backgroundColor: "rgba(255,255,255,0.05)", color: "#ffffff" }
+                  : { borderColor: "rgba(248,113,113,0.45)", backgroundColor: "rgba(127,29,29,0.28)", color: "#fca5a5" }}
+              >
+                {copyIsActive ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+              </button>
+
               {/* Share: copy public link + QR + toggle info sidebar */}
               {(() => {
                 const proj = projects.find((p) => p.id === selectedMetaProjectId);
@@ -1788,7 +1819,7 @@ export default function AdminPanel({
                       title="Copiar enlace para compartir"
                       className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all"
                     >
-                      {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Link className="w-4 h-4" />}
+                      {copiedLink ? <Check className="w-4 h-4" /> : <Link className="w-4 h-4" />}
                     </button>
                     <button
                       type="button"
@@ -1796,7 +1827,7 @@ export default function AdminPanel({
                       title="Copiar código QR"
                       className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all"
                     >
-                      {copiedShareQr ? <Check className="w-4 h-4 text-emerald-400" /> : <QrCode className="w-4 h-4" />}
+                      {copiedShareQr ? <Check className="w-4 h-4" /> : <QrCode className="w-4 h-4" />}
                     </button>
                     <button
                       type="button"
@@ -1931,143 +1962,6 @@ export default function AdminPanel({
                 />
               </div>
 
-              {/* Database mode (point 8) */}
-              <div className="space-y-2 border-t border-white/5 pt-4">
-                <div
-                  className="flex items-center gap-2 p-1.5 rounded-xl"
-                  style={{
-                    backgroundColor: databaseSurface,
-                    border: `1px solid ${databaseBorder}`,
-                    color: databaseText,
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    id="use-database-checkbox"
-                    checked={copyUseDatabase}
-                    onChange={(e) => setCopyUseDatabase(e.target.checked)}
-                    className="w-4 h-4 rounded focus:ring-0 cursor-pointer"
-                    style={{ accentColor: databaseAccent }}
-                  />
-                  <label htmlFor="use-database-checkbox" className="text-[11px] font-bold cursor-pointer select-none" style={{ color: databaseText }}>
-                    Usar base de datos (tabla en Notion)
-                  </label>
-                </div>
-                <p className="text-[10px]" style={{ color: databaseMuted }}>
-                  Sin base de datos: cada envío crea un toggle por persona (modo actual). Con base de datos: cada envío se guarda como fila en una tabla de Notion y puedes calificar.
-                </p>
-
-                {copyUseDatabase && (
-                  <div
-                    className="space-y-2 rounded-xl p-3"
-                    style={{
-                      backgroundColor: databaseSurface,
-                      border: `1px solid ${databaseBorder}`,
-                      color: databaseText,
-                    }}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: databaseMuted }}>
-                        Columnas de control
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setCopyDbColumns((prev) => [...prev, { id: genColId(), name: "", type: "text" }])
-                        }
-                        className="text-[10px] font-semibold flex items-center gap-1 cursor-pointer"
-                        style={{ color: databaseAccent }}
-                      >
-                        <Plus className="w-3 h-3" /> Agregar columna
-                      </button>
-                    </div>
-
-                    {copyDbColumns.length === 0 ? (
-                      <p className="text-[10px] text-center py-1" style={{ color: databaseMuted }}>
-                        Ej: Nota, Estado, Comentarios. Nombre, Correo, Fecha y Archivos se añaden automáticamente.
-                      </p>
-                    ) : (
-                      copyDbColumns.map((col, idx) => (
-                        <div key={col.id} className="flex flex-wrap items-center gap-1.5">
-                          <input
-                            type="text"
-                            placeholder="Nombre (ej: Nota)"
-                            value={col.name}
-                            onChange={(e) =>
-                              setCopyDbColumns((prev) =>
-                                prev.map((c, i) => (i === idx ? { ...c, name: e.target.value } : c))
-                              )
-                            }
-                            className="min-w-[140px] flex-1 px-2.5 py-2 rounded-lg text-xs focus:outline-none"
-                            style={{
-                              backgroundColor: databaseSurface,
-                              border: `1px solid ${databaseBorder}`,
-                              color: databaseText,
-                            }}
-                          />
-                          <select
-                            value={col.type}
-                            onChange={(e) =>
-                              setCopyDbColumns((prev) =>
-                                prev.map((c, i) => (i === idx ? { ...c, type: e.target.value as DbColumn["type"] } : c))
-                              )
-                            }
-                            className="px-2 py-2 rounded-lg text-xs cursor-pointer"
-                            style={{
-                              backgroundColor: databaseSurface,
-                              border: `1px solid ${databaseBorder}`,
-                              color: databaseText,
-                            }}
-                          >
-                            <option value="text">Texto</option>
-                            <option value="number">Número</option>
-                            <option value="select">Selección</option>
-                            <option value="checkbox">Casilla</option>
-                            <option value="date">Fecha</option>
-                          </select>
-                          <button
-                            type="button"
-                            onClick={() => setCopyDbColumns((prev) => prev.filter((_, i) => i !== idx))}
-                            className="p-2 rounded-lg transition-all cursor-pointer shrink-0"
-                            style={{
-                              color: isBgColorLight ? "#b91c1c" : "#fecaca",
-                              backgroundColor: isBgColorLight ? "rgba(220, 38, 38, 0.08)" : "rgba(127, 29, 29, 0.18)",
-                              border: `1px solid ${databaseBorder}`,
-                            }}
-                            title="Eliminar columna"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))
-                    )}
-
-                    <div className="flex items-center justify-between gap-2 pt-1">
-                      {copyDatabaseId ? (
-                        <span className="text-[10px] font-mono truncate flex items-center gap-1" style={{ color: databaseAccent }}>
-                          <Check className="w-3 h-3 shrink-0" /> BD: {copyDatabaseId.slice(0, 8)}...
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-amber-400/80">Aún no se ha creado la base de datos.</span>
-                      )}
-                      <button
-                        type="button"
-                        onClick={handleCreateDatabase}
-                        disabled={isCreatingDb}
-                        className="text-[10px] font-semibold px-2.5 py-1.5 rounded-lg border transition-all disabled:opacity-50 cursor-pointer"
-                        style={{
-                          backgroundColor: databaseSurface,
-                          borderColor: databaseBorder,
-                          color: databaseText,
-                        }}
-                      >
-                        {isCreatingDb ? "Creando..." : copyDatabaseId ? "Recrear BD" : "Crear base de datos"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
               <div>
                 <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
                   Fecha y Hora de Vencimiento (Límite)
@@ -2084,7 +1978,7 @@ export default function AdminPanel({
 
               {metaMessage && (
                 <div className={`p-3 rounded-xl text-xs flex gap-2 items-center ${metaMessage.type === "success"
-                    ? "bg-emerald-950/30 text-emerald-300 border border-emerald-900/50"
+                    ? "bg-white/10 text-white/70 border border-white/15"
                     : "bg-red-950/30 text-red-300 border border-red-900/50"
                   }`}>
                   {metaMessage.type === "success" ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
@@ -2447,6 +2341,14 @@ export default function AdminPanel({
                                     </button>
                                   </div>
                                 </div>
+                                {sub.comment && sub.comment.trim() && (
+                                  <div className="mb-2 rounded-lg border border-white/10 bg-white/5 p-2.5">
+                                    <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest flex items-center gap-1.5 mb-1">
+                                      <MessageCircle className="w-3 h-3" /> Comentario del remitente
+                                    </div>
+                                    <p className="text-xs text-white/80 leading-relaxed whitespace-pre-wrap break-words">{sub.comment}</p>
+                                  </div>
+                                )}
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                                   {sub.files.map((file, fIdx) => {
                                     // Resolve files through a same-origin proxy that fetches the

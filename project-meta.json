@@ -248,8 +248,23 @@
   },
   "3a32640c-88f4-815b-a42d-e5f8df485ccf": {
     "title": "bbbbb",
-    "createdAt": "2026-07-20T23:54:59.449Z",
+    "description": "gggggggg",
+    "step1": "",
+    "step2": "",
+    "step3": "",
+    "expirationDate": "2026-07-22T23:59",
+    "backgroundImage": "",
+    "bgBlur": 0,
+    "bgColor": "#c72323",
     "icon": "PencilRuler",
-    "bgColor": "#c72323"
+    "isActive": true,
+    "customFields": [],
+    "useDatabase": false,
+    "databaseId": "",
+    "dbColumns": [],
+    "groupId": "",
+    "order": 0,
+    "textColor": "auto",
+    "createdAt": "2026-07-20T23:54:59.449Z"
   }
 }

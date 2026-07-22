@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Loader2, Save, RefreshCcw, Table as TableIcon, Check } from "lucide-react";
+import { Loader2, Save, RefreshCcw, Table as TableIcon, Check, Calculator } from "lucide-react";
 import { Project, ProjectMeta, Submission, DbColumn } from "../types";
 
 interface GradingTableProps {
@@ -28,6 +28,8 @@ export default function GradingTable({ project, meta, submissions, refreshSubmis
   const [savingKey, setSavingKey] = useState<string | null>(null);
   // Local edits for no-db mode: submissionId -> { colId: value }
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({});
+  // Whether the computed grades (latest feedback note per sender) are shown.
+  const [calculated, setCalculated] = useState(false);
 
   const projectSubs = submissions.filter((s) => s.projectId === project.id);
 
@@ -49,6 +51,7 @@ export default function GradingTable({ project, meta, submissions, refreshSubmis
       const latest = sorted[sorted.length - 1];
       return {
         rep: latest,
+        anchor: earliest, // feedback (history + draft) is stored on the earliest submission
         name: earliest.senderName,
         email: earliest.senderEmail,
         earliestTs: new Date(earliest.timestamp).getTime(),
@@ -58,6 +61,21 @@ export default function GradingTable({ project, meta, submissions, refreshSubmis
     rows.sort((a, b) => a.earliestTs - b.earliestTs);
     return rows.map((r, i) => ({ ...r, order: i + 1 }));
   })();
+
+  /** Resolve the latest feedback note for a sender and whether it was sent or
+   *  is still only saved as a draft. Prefers the most recent note available. */
+  const computeLatestNote = (anchor?: Submission): { note: string; status: "enviado" | "guardado" | null } => {
+    if (!anchor) return { note: "", status: null };
+    const draft = anchor.feedbackDraft;
+    const history = anchor.feedbackHistory || [];
+    const lastSent = history.length ? history[history.length - 1] : null;
+    // A draft is work-in-progress after the last send, so it's the latest note.
+    if (draft && (draft.note || "").trim()) return { note: (draft.note || "").trim(), status: "guardado" };
+    if (lastSent && (lastSent.note || "").trim()) return { note: (lastSent.note || "").trim(), status: "enviado" };
+    if (draft) return { note: "", status: "guardado" };
+    if (lastSent) return { note: "", status: "enviado" };
+    return { note: "", status: null };
+  };
 
   const loadDbRows = async () => {
     if (!useDb) return;
@@ -190,12 +208,22 @@ export default function GradingTable({ project, meta, submissions, refreshSubmis
     );
   }
 
-  // ---- No-database mode rendering (KV submissions) ----
+  // ---- Grading table: computes the latest feedback note per sender on demand ----
   return (
     <div className="space-y-3">
-      <span className="text-[10px] text-white/50 font-semibold flex items-center gap-1">
-        <TableIcon className="w-3 h-3" /> Tabla (modo sin base de datos)
-      </span>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] text-white/50 font-semibold flex items-center gap-1">
+          <TableIcon className="w-3 h-3" /> {groupedSubs.length} remitente{groupedSubs.length === 1 ? "" : "s"}
+        </span>
+        <button
+          type="button"
+          onClick={() => setCalculated((v) => !v)}
+          className="text-[10px] font-semibold flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all cursor-pointer"
+          title="Calcular las notas a partir de la última retroalimentación (enviada o guardada)"
+        >
+          <Calculator className="w-3 h-3" /> {calculated ? "Ocultar notas" : "Calcular notas"}
+        </button>
+      </div>
       {projectSubs.length === 0 ? (
         <p className="text-xs text-white/40 text-center py-4">Sin entregas todavía.</p>
       ) : (
@@ -207,16 +235,14 @@ export default function GradingTable({ project, meta, submissions, refreshSubmis
                 <th className="py-2 px-2 font-semibold">Nombre</th>
                 <th className="py-2 px-2 font-semibold">Correo</th>
                 <th className="py-2 px-2 font-semibold">Fecha</th>
-                {controlColumns.map((c) => (
-                  <th key={c.id} className="py-2 px-2 font-semibold text-emerald-400 whitespace-nowrap">{c.name}</th>
-                ))}
-                <th className="py-2 px-2"></th>
+                {calculated && <th className="py-2 px-2 font-semibold whitespace-nowrap">Nota</th>}
+                {calculated && <th className="py-2 px-2 font-semibold whitespace-nowrap">Estado</th>}
               </tr>
             </thead>
             <tbody>
               {groupedSubs.map((row) => {
                 const sub = row.rep;
-                const current = edits[sub.id] || sub.controlValues || {};
+                const { note, status } = computeLatestNote(row.anchor);
                 return (
                   <tr key={sub.id} className="border-b border-white/5 hover:bg-white/5">
                     <td className="py-1.5 px-2 text-white/40 font-mono">{row.order}</td>
@@ -225,43 +251,32 @@ export default function GradingTable({ project, meta, submissions, refreshSubmis
                     </td>
                     <td className="py-1.5 px-2 text-white/60">{row.email}</td>
                     <td className="py-1.5 px-2 text-white/50 whitespace-nowrap">{new Date(sub.timestamp).toLocaleDateString()}</td>
-                    {controlColumns.map((col) => (
-                      <td key={col.id} className="py-1.5 px-2">
-                        <ControlInput
-                          col={col}
-                          value={current[col.id]}
-                          saving={false}
-                          onCommit={(v) =>
-                            setEdits((prev) => ({
-                              ...prev,
-                              [sub.id]: { ...(prev[sub.id] || sub.controlValues || {}), [col.id]: String(v) },
-                            }))
-                          }
-                        />
+                    {calculated && (
+                      <td className="py-1.5 px-2 font-mono font-bold text-white whitespace-nowrap">
+                        {note || <span className="text-white/30 font-normal">—</span>}
                       </td>
-                    ))}
-                    <td className="py-1.5 px-2">
-                      <button
-                        type="button"
-                        onClick={() => saveSubmissionGrade(sub.id)}
-                        disabled={savingKey === sub.id}
-                        className="p-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-white/70 hover:text-white transition-all cursor-pointer disabled:opacity-50"
-                        title="Guardar"
-                      >
-                        {savingKey === sub.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                      </button>
-                    </td>
+                    )}
+                    {calculated && (
+                      <td className="py-1.5 px-2 whitespace-nowrap">
+                        {status === "enviado" ? (
+                          <span className="text-[10px] font-mono inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/15 text-white border border-white/25">
+                            <Check className="w-3 h-3" /> Enviado
+                          </span>
+                        ) : status === "guardado" ? (
+                          <span className="text-[10px] font-mono inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/5 text-white/60 border border-white/10">
+                            <Save className="w-3 h-3" /> Guardado
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-white/30 font-mono">Sin retro</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
-      )}
-      {controlColumns.length === 0 && (
-        <p className="text-[10px] text-amber-400/70 text-center">
-          Define columnas de control (Nota, Estado...) en “Personalizar Textos” para poder calificar.
-        </p>
       )}
     </div>
   );

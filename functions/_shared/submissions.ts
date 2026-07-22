@@ -37,6 +37,8 @@ export interface RebuiltSubmission {
   senderEmail: string;
   timestamp: string;
   files: RebuiltFile[];
+  /** Optional free-text message left by the submitter (when enabled per project). */
+  comment?: string;
   controlValues: Record<string, string>;
   feedbackHistory: RebuiltFeedback[];
   /** Draft feedback saved but not yet emailed (null/undefined when none). */
@@ -50,6 +52,9 @@ export const FEEDBACK_MARKER = "__envi_feedback__";
 
 /** Marker that identifies the saved-draft JSON code block inside a toggle. */
 export const FEEDBACK_DRAFT_MARKER = "__envi_feedback_draft__";
+
+/** Marker that identifies the submitter-comment JSON code block inside a toggle. */
+export const SUBMISSION_COMMENT_MARKER = "__envi_comment__";
 
 export type ListChildrenFn = (blockId: string) => Promise<any[]>;
 
@@ -143,6 +148,8 @@ export async function collectSubmissions(
               sub.feedbackHistory = parsed[FEEDBACK_MARKER];
             } else if (parsed[FEEDBACK_DRAFT_MARKER] && typeof parsed[FEEDBACK_DRAFT_MARKER] === "object") {
               sub.feedbackDraft = parsed[FEEDBACK_DRAFT_MARKER] as RebuiltDraft;
+            } else if (typeof parsed[SUBMISSION_COMMENT_MARKER] === "string") {
+              sub.comment = parsed[SUBMISSION_COMMENT_MARKER];
             } else {
               sub.controlValues = parsed as Record<string, string>;
             }

@@ -1,5 +1,6 @@
 import { json, appendChildren, notionFetch, cleanNotionId, type Env } from "../_shared/notion";
 import { sendGmailMessage, buildReceiptEmail, hasGmailCredentials } from "../_shared/gmail";
+import { SUBMISSION_COMMENT_MARKER } from "../_shared/submissions";
 
 async function getCredentials(env: Env): Promise<{ notionSecret: string }> {
   let notionSecret = env.NOTION_SECRET || "";
@@ -51,6 +52,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     useDatabase?: boolean;
     databaseId?: string;
     bgColor?: string;
+    comment?: string;
   };
   try {
     body = await context.request.json();
@@ -69,7 +71,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     useDatabase = false,
     databaseId = "",
     bgColor = "",
+    comment = "",
   } = body;
+  const trimmedComment = String(comment || "").trim();
 
   if (!senderName || !senderEmail || !projectId) {
     return json({ error: "Faltan campos obligatorios (nombre, correo o proyecto)." }, 400);
@@ -111,7 +115,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           {
             type: "text",
             text: {
-              content: `Informacion de la entrega:\n- Remitente: ${senderName}\n- Correo: ${senderEmail}\n- Fecha de envio: ${dateStr}\n- Archivos totales: ${fileRecords.length}${customLines}`,
+              content: `Informacion de la entrega:\n- Remitente: ${senderName}\n- Correo: ${senderEmail}\n- Fecha de envio: ${dateStr}\n- Archivos totales: ${fileRecords.length}${customLines}${trimmedComment ? `\n- Comentario: ${trimmedComment}` : ""}`,
             },
           },
         ],
@@ -119,6 +123,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         color: "blue_background",
       },
     },
+    // Machine-readable copy of the submitter's message so it can be read back
+    // from Notion (source of truth) and shown in the admin.
+    ...(trimmedComment
+      ? [{
+          object: "block",
+          type: "code",
+          code: {
+            rich_text: [{ type: "text", text: { content: JSON.stringify({ [SUBMISSION_COMMENT_MARKER]: trimmedComment }, null, 2) } }],
+            language: "json",
+          },
+        }]
+      : []),
     {
       object: "block",
       type: "heading_3",
@@ -195,6 +211,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       "Fecha de envío": { date: { start: new Date().toISOString() } },
       Archivos: { rich_text: [{ type: "text", text: { content: fileNames } }] },
     };
+    if (trimmedComment) {
+      dbProperties["Comentario"] = { rich_text: [{ type: "text", text: { content: trimmedComment } }] };
+    }
     // Map custom field values as rich_text columns (best-effort).
     for (const cf of customFields || []) {
       const val = customValues?.[cf.id];
@@ -229,6 +248,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       size: f.size,
       url: `(Subido a Notion: ${f.finalName})`,
     })),
+    comment: trimmedComment,
     customValues: customValues || {},
     controlValues: {},
   };
