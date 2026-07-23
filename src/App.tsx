@@ -1017,14 +1017,14 @@ export default function App() {
                       {isRegistrationView ? (
                         activeMeta?.isActive === false ? (
                           /* Registration closed by the lock button */
-                          <div className="p-6 border border-amber-900/40 bg-amber-950/20 rounded-2xl text-center space-y-4">
-                            <div className="w-12 h-12 bg-amber-950/40 text-amber-400 rounded-full flex items-center justify-center mx-auto border border-amber-900/40 animate-pulse">
+                          <div className="p-6 border border-white/10 bg-white/5 rounded-2xl text-center space-y-4">
+                            <div className="w-12 h-12 bg-white/10 text-white rounded-full flex items-center justify-center mx-auto border border-white/15 animate-pulse">
                               <EyeOff className="w-6 h-6" />
                             </div>
-                            <div className="space-y-1 bg-[#1c120c]/50 p-4 rounded-xl border border-amber-950">
+                            <div className="space-y-1 bg-white/5 p-4 rounded-xl border border-white/10">
                               <h3 className="text-sm font-bold text-white tracking-wide uppercase">Registro cerrado</h3>
                               <p className="text-xs text-white/60 leading-relaxed max-w-sm mx-auto mt-2">
-                                El registro de este grupo está <strong className="text-amber-300">deshabilitado temporalmente</strong> por el administrador.
+                                El registro de este grupo está <strong className="text-white font-semibold">deshabilitado temporalmente</strong> por el administrador.
                               </p>
                             </div>
                           </div>
@@ -1320,14 +1320,14 @@ export default function App() {
                             <span className="text-xs text-white/30">Sincronizando carpetas de Notion...</span>
                           </div>
                         ) : !config?.isConfigured ? (
-                          <div className="p-3 border border-amber-900/50 bg-amber-950/30 rounded-xl text-xs text-amber-300 flex items-start gap-2 leading-relaxed">
-                            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                          <div className="p-3 border border-white/10 bg-white/5 rounded-xl text-xs text-white/60 flex items-start gap-2 leading-relaxed">
+                            <AlertTriangle className="w-4 h-4 text-white/50 shrink-0 mt-0.5" />
                             <div>
                               <span>No se han configurado las credenciales de Notion.</span>
                               <button
                                 type="button"
                                 onClick={() => setActiveTab("admin")}
-                                className="block font-semibold underline text-amber-400 hover:text-amber-300 mt-1"
+                                className="block font-semibold underline text-white hover:text-white/80 mt-1"
                               >
                                 Configurar ahora en Administración
                               </button>
@@ -1418,14 +1418,14 @@ export default function App() {
 
                       {/* Dropzone visual module / Active / Inactive check or Expired state alert */}
                       {activeMeta?.isActive === false ? (
-                        <div className="p-6 border border-amber-900/40 bg-amber-950/20 rounded-2xl text-center space-y-4">
-                          <div className="w-12 h-12 bg-amber-950/40 text-amber-400 rounded-full flex items-center justify-center mx-auto border border-amber-900/40 animate-pulse">
+                        <div className="p-6 border border-white/10 bg-white/5 rounded-2xl text-center space-y-4">
+                          <div className="w-12 h-12 bg-white/10 text-white rounded-full flex items-center justify-center mx-auto border border-white/15 animate-pulse">
                             <EyeOff className="w-6 h-6" />
                           </div>
-                          <div className="space-y-1 bg-[#1c120c]/50 p-4 rounded-xl border border-amber-950">
+                          <div className="space-y-1 bg-white/5 p-4 rounded-xl border border-white/10">
                             <h3 className="text-sm font-bold text-white tracking-wide uppercase">Proyecto Inactivo</h3>
                             <p className="text-xs text-white/60 leading-relaxed max-w-sm mx-auto mt-2">
-                              Este proyecto ha sido <strong className="text-amber-300">desactivado/inhabilitado temporalmente</strong> por el administrador de Notion y no recibe nuevas entregas.
+                              Este proyecto ha sido <strong className="text-white font-semibold">desactivado/inhabilitado temporalmente</strong> por el administrador de Notion y no recibe nuevas entregas.
                             </p>
                           </div>
                           <p className="text-[10px] text-white/30">
@@ -1433,15 +1433,15 @@ export default function App() {
                           </p>
                         </div>
                       ) : isProjectExpired ? (
-                        <div className="p-6 border border-red-900/30 bg-red-950/20 rounded-2xl text-center space-y-4">
-                          <div className="w-12 h-12 bg-red-950/40 text-red-400 rounded-full flex items-center justify-center mx-auto border border-red-900/40 animate-pulse">
+                        <div className="p-6 border border-white/10 bg-white/5 rounded-2xl text-center space-y-4">
+                          <div className="w-12 h-12 bg-white/10 text-white rounded-full flex items-center justify-center mx-auto border border-white/15 animate-pulse">
                             <Clock className="w-6 h-6" />
                           </div>
-                          <div className="space-y-1 bg-[#150a0a]/50 p-4 rounded-xl border border-red-950">
+                          <div className="space-y-1 bg-white/5 p-4 rounded-xl border border-white/10">
                             <h3 className="text-sm font-bold text-white tracking-wide uppercase">Plazo de entrega vencido</h3>
                             <p className="text-xs text-white/55 leading-relaxed max-w-sm mx-auto mt-2">
                               La fecha límite para cargar archivos en esta carpeta expiró el{" "}
-                              <strong className="text-red-300">
+                              <strong className="text-white font-semibold">
                                 {new Date(activeMeta!.expirationDate!).toLocaleDateString('es-ES', {
                                   weekday: 'long',
                                   year: 'numeric',

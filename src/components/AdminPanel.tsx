@@ -2090,10 +2090,15 @@ export default function AdminPanel({
                     : "Activar modo registro · el enlace registrará personas y los hijos pedirán solo el documento"}
                   className="w-10 h-10 flex items-center justify-center rounded-lg border transition-all shrink-0 disabled:opacity-50"
                   style={copyRegistrationMode
-                    ? { borderColor: "rgba(255,255,255,0.55)", backgroundColor: "rgba(255,255,255,0.16)", color: "#ffffff" }
+                    ? {
+                        borderColor: "rgba(255,255,255,0.55)",
+                        backgroundColor: "rgba(255,255,255,0.10)",
+                        backgroundImage: "repeating-linear-gradient(119deg, rgba(255,255,255,0.45) 0px, rgba(255,255,255,0.45) 1px, transparent 1px, transparent 6px)",
+                        color: "#ffffff",
+                      }
                     : { borderColor: "rgba(255,255,255,0.15)", backgroundColor: "rgba(255,255,255,0.05)", color: "#ffffff" }}
                 >
-                  <ClipboardList className="w-4 h-4" />
+                  <ClipboardList className="w-4 h-4 relative" />
                 </button>
               )}
 

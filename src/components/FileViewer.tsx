@@ -126,7 +126,7 @@ const TextPreview: React.FC<{ url: string }> = ({ url }) => {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-white/50 gap-2 text-sm">
-        <AlertCircle className="w-6 h-6 text-amber-400" />
+        <AlertCircle className="w-6 h-6 text-white/50" />
         No se pudo mostrar el contenido de texto.
       </div>
     );

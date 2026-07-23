@@ -236,7 +236,7 @@
     "bgBlur": 0,
     "bgColor": "#c72323",
     "icon": "Layers",
-    "isActive": true,
+    "isActive": false,
     "customFields": [],
     "useDatabase": false,
     "databaseId": "",
