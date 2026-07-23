@@ -72,6 +72,8 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
               useDatabase: !!data.useDatabase,
               databaseId: data.databaseId || "",
               dbColumns: Array.isArray(data.dbColumns) ? data.dbColumns : [],
+              allowComment: !!data.allowComment,
+              registrationMode: !!data.registrationMode,
               textColor: data.textColor === "white" || data.textColor === "black" ? data.textColor : "auto",
               createdAt: typeof data.createdAt === "string" ? data.createdAt : undefined,
             },
@@ -162,6 +164,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     projectId, title, description, step1, step2, step3,
     customFields, expirationDate, backgroundImage, isActive,
     groupId, order, useDatabase, databaseId, dbColumns, bgBlur, bgColor, icon, textColor, createdAt,
+    allowComment, registrationMode,
   } = body;
 
   if (!projectId) {
@@ -215,6 +218,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     useDatabase: !!useDatabase,
     databaseId: (databaseId || "").trim(),
     dbColumns: cleanDbColumns,
+    allowComment: !!allowComment,
+    registrationMode: !!registrationMode,
     bgBlur: typeof bgBlur === "number" ? bgBlur : 0,
     bgColor: (bgColor || "").trim(),
     icon: (icon || "").trim(),

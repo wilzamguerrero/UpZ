@@ -39,6 +39,8 @@ export interface RebuiltSubmission {
   files: RebuiltFile[];
   /** Optional free-text message left by the submitter (when enabled per project). */
   comment?: string;
+  /** Identity document (when the parent is in registration mode). */
+  document?: string;
   controlValues: Record<string, string>;
   feedbackHistory: RebuiltFeedback[];
   /** Draft feedback saved but not yet emailed (null/undefined when none). */
@@ -55,6 +57,9 @@ export const FEEDBACK_DRAFT_MARKER = "__envi_feedback_draft__";
 
 /** Marker that identifies the submitter-comment JSON code block inside a toggle. */
 export const SUBMISSION_COMMENT_MARKER = "__envi_comment__";
+
+/** Marker that identifies the submitter-document JSON code block inside a toggle. */
+export const SUBMISSION_DOCUMENT_MARKER = "__envi_document__";
 
 export type ListChildrenFn = (blockId: string) => Promise<any[]>;
 
@@ -150,6 +155,8 @@ export async function collectSubmissions(
               sub.feedbackDraft = parsed[FEEDBACK_DRAFT_MARKER] as RebuiltDraft;
             } else if (typeof parsed[SUBMISSION_COMMENT_MARKER] === "string") {
               sub.comment = parsed[SUBMISSION_COMMENT_MARKER];
+            } else if (typeof parsed[SUBMISSION_DOCUMENT_MARKER] === "string") {
+              sub.document = parsed[SUBMISSION_DOCUMENT_MARKER];
             } else {
               sub.controlValues = parsed as Record<string, string>;
             }
@@ -230,8 +237,8 @@ export async function collectProjectMetas(
           codeBlock.code.rich_text.map((rt: any) => rt.plain_text).join("").trim()
         );
         if (!parsed || typeof parsed !== "object") continue;
-        // Skip our own data blocks (grades/feedback) so they aren't read as meta.
-        if (parsed["__envi_grades__"] || parsed[FEEDBACK_MARKER] || parsed[FEEDBACK_DRAFT_MARKER] || parsed[SUBMISSION_COMMENT_MARKER]) continue;
+        // Skip our own data blocks (grades/registry/feedback/comment/document) so they aren't read as meta.
+        if (parsed["__envi_grades__"] || parsed["__envi_registry__"] || parsed[FEEDBACK_MARKER] || parsed[FEEDBACK_DRAFT_MARKER] || parsed[SUBMISSION_COMMENT_MARKER] || parsed[SUBMISSION_DOCUMENT_MARKER]) continue;
         return parsed;
       } catch {
         // Try the next JSON block.

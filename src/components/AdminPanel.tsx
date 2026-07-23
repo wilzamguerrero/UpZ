@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
-  Key, FolderPlus, Eye, EyeOff, Check, Save,
+  Key, FolderPlus, Eye, EyeOff, Check, Save, ClipboardList,
   AlertCircle, Plus, Search, Mail, Calendar, ExternalLink, ArrowRight, ArrowLeft, Trash2,
   ChevronDown, ChevronRight, X, RefreshCw, PanelLeftClose, PanelLeftOpen,
   Link, QrCode, Copy, GripVertical, Database, Table,
@@ -552,6 +552,7 @@ export default function AdminPanel({
   const [copyDatabaseId, setCopyDatabaseId] = useState("");
   const [copyDbColumns, setCopyDbColumns] = useState<DbColumn[]>([]);
   const [copyAllowComment, setCopyAllowComment] = useState(false);
+  const [copyRegistrationMode, setCopyRegistrationMode] = useState(false);
 
   const bgColorLuminance = (() => {
     if (!copyBgColor) return null;
@@ -684,6 +685,28 @@ export default function AdminPanel({
   // Last grades signature persisted to Notion per project, to avoid redundant writes.
   const gradesSigRef = useRef<Record<string, string>>({});
 
+  // Consolidated registry summary (registration-mode parent): people × activities.
+  const [regSummary, setRegSummary] = useState<{
+    people: { document?: string; name?: string; email?: string; phone?: string }[];
+    activities: { projectId: string; projectName: string }[];
+    notes: Record<string, Record<string, { note: string; status: string }>>;
+  } | null>(null);
+  const [loadingSummary, setLoadingSummary] = useState(false);
+
+  const loadRegistrySummary = async (parentId: string) => {
+    if (!parentId) return;
+    setLoadingSummary(true);
+    try {
+      const res = await fetch(`/api/registry-summary?parentId=${encodeURIComponent(parentId)}`);
+      const data = await res.json();
+      setRegSummary(data.success ? { people: data.people || [], activities: data.activities || [], notes: data.notes || {} } : null);
+    } catch {
+      setRegSummary(null);
+    } finally {
+      setLoadingSummary(false);
+    }
+  };
+
   const getFeedback = (email: string) =>
     feedback[email] || { comment: "", note: "", files: [], sending: false };
   const setFeedbackFor = (email: string, patch: Partial<{ comment: string; note: string; files: File[]; sending: boolean; savingDraft: boolean; msg?: { type: "success" | "error"; text: string } }>) =>
@@ -723,9 +746,12 @@ export default function AdminPanel({
       const earliest = sorted[0];
       const latest = sorted[sorted.length - 1];
       const { note, status } = latestFeedbackNote(earliest);
+      // Prefer any submission that carries a document (registration mode).
+      const document = group.map((s) => s.document).find((d) => d && d.trim()) || "";
       return {
         name: earliest.senderName,
         email: earliest.senderEmail,
+        document,
         note,
         status: status || "sin_retro",
         submissions: group.length,
@@ -738,6 +764,7 @@ export default function AdminPanel({
       order: i + 1,
       name: r.name,
       email: r.email,
+      document: r.document,
       note: r.note,
       status: r.status,
     }));
@@ -780,6 +807,18 @@ export default function AdminPanel({
     void persistProjectGrades(pid, submissions);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submissions, selectedMetaProjectId, loadingSubmissions]);
+
+  // Load the consolidated registry summary when a registration-mode parent is open.
+  useEffect(() => {
+    const isRegistrationParent = adminView === "detail" && copyRegistrationMode
+      && !!selectedMetaProjectId && projects.some((p) => (p.parentId || "") === selectedMetaProjectId);
+    if (isRegistrationParent) {
+      void loadRegistrySummary(selectedMetaProjectId);
+    } else {
+      setRegSummary(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMetaProjectId, copyRegistrationMode, adminView, projects]);
 
   /** Send feedback (comment + optional note + attachments) to a sender by email.
    *  `submissionId` is the sender's anchor toggle where the history is stored. */
@@ -1088,6 +1127,7 @@ export default function AdminPanel({
     setCopyDatabaseId(active.databaseId || "");
     setCopyDbColumns(Array.isArray(active.dbColumns) ? active.dbColumns : []);
     setCopyAllowComment(!!active.allowComment);
+    setCopyRegistrationMode(!!active.registrationMode);
     setCopyGroupId(active.groupId || "");
     setMetaMessage(null);
   };
@@ -1111,6 +1151,7 @@ export default function AdminPanel({
       databaseId: meta.databaseId || "",
       dbColumns: Array.isArray(meta.dbColumns) ? meta.dbColumns : [],
       allowComment: !!meta.allowComment,
+      registrationMode: !!meta.registrationMode,
       groupId: meta.groupId || "",
     });
   };
@@ -1185,6 +1226,7 @@ export default function AdminPanel({
     databaseId: copyDatabaseId,
     dbColumns: copyDbColumns,
     allowComment: copyAllowComment,
+    registrationMode: copyRegistrationMode,
     groupId: copyGroupId,
     order: projectMeta[selectedMetaProjectId]?.order ?? 0,
     createdAt: projectMeta[selectedMetaProjectId]?.createdAt,
@@ -1232,6 +1274,19 @@ export default function AdminPanel({
     void persistProjectMeta(
       next ? "Envíos habilitados." : "Envíos bloqueados: el enlace mostrará un aviso.",
       { isActive: next }
+    );
+  };
+
+  /** Toggle registration mode on a PARENT project (persists immediately). When on,
+   *  the parent link registers people and its children autofill by document. */
+  const toggleRegistrationMode = () => {
+    const next = !copyRegistrationMode;
+    setCopyRegistrationMode(next);
+    void persistProjectMeta(
+      next
+        ? "Modo registro activado: el enlace registra personas y los hijos piden solo el documento."
+        : "Modo registro desactivado: los hijos vuelven a pedir nombre y correo.",
+      { registrationMode: next }
     );
   };
 
@@ -1867,6 +1922,26 @@ export default function AdminPanel({
                 {copyIsActive ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
               </button>
 
+              {/* Registration mode — only for PARENT projects (those with children).
+                  When on, the parent link registers people (name/document/email/phone)
+                  and its children ask only for the document + autofill. */}
+              {projects.some((p) => (p.parentId || "") === selectedMetaProjectId) && (
+                <button
+                  type="button"
+                  onClick={toggleRegistrationMode}
+                  disabled={isSavingMeta}
+                  title={copyRegistrationMode
+                    ? "Modo registro ACTIVO · clic para desactivar (los hijos volverán a pedir nombre y correo)"
+                    : "Activar modo registro · el enlace registrará personas y los hijos pedirán solo el documento"}
+                  className="w-10 h-10 flex items-center justify-center rounded-lg border transition-all shrink-0 disabled:opacity-50"
+                  style={copyRegistrationMode
+                    ? { borderColor: "rgba(255,255,255,0.55)", backgroundColor: "rgba(255,255,255,0.16)", color: "#ffffff" }
+                    : { borderColor: "rgba(255,255,255,0.15)", backgroundColor: "rgba(255,255,255,0.05)", color: "#ffffff" }}
+                >
+                  <ClipboardList className="w-4 h-4" />
+                </button>
+              )}
+
               {/* Share: copy public link + QR + toggle info sidebar */}
               {(() => {
                 const proj = projects.find((p) => p.id === selectedMetaProjectId);
@@ -2229,6 +2304,113 @@ export default function AdminPanel({
 
         {adminView === "detail" && (
         <>
+
+        {/* Consolidated registry table — only for a registration-mode PARENT.
+            Rows = registered people, columns = child activities, cell = note. */}
+        {copyRegistrationMode && projects.some((p) => (p.parentId || "") === selectedMetaProjectId) && (
+          <div className={`${panelClass} order-0`} style={panelStyle}>
+            <div className="flex items-center justify-between gap-3 mb-6">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-2.5 bg-white/5 text-white rounded-xl shrink-0">
+                  <ClipboardList className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-base font-semibold text-white">Registro y notas consolidadas</h2>
+                  <p className="text-xs text-white/40 truncate">Personas registradas y su nota en cada actividad de este grupo</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void loadRegistrySummary(selectedMetaProjectId)}
+                disabled={loadingSummary}
+                className="text-[10px] font-semibold flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all cursor-pointer disabled:opacity-50 shrink-0"
+                title="Actualizar la tabla consolidada"
+              >
+                <RefreshCw className={`w-3 h-3 ${loadingSummary ? "animate-spin" : ""}`} /> Actualizar
+              </button>
+            </div>
+
+            {loadingSummary ? (
+              <p className="text-sm text-white/40 text-center py-8">Cargando registro...</p>
+            ) : !regSummary || regSummary.people.length === 0 ? (
+              <p className="text-sm text-white/40 text-center py-8">
+                Aún no hay personas registradas. Comparte el enlace de este grupo para que se registren.
+              </p>
+            ) : (
+              (() => {
+                const childCols = projects
+                  .filter((p) => (p.parentId || "") === selectedMetaProjectId && p.isActive !== false)
+                  .sort((a, b) => a.name.localeCompare(b.name));
+                const parseNum = (v: string) => {
+                  const n = parseFloat(String(v).replace(",", ".").trim());
+                  return isNaN(n) ? null : n;
+                };
+                return (
+                  <div className="w-full overflow-x-auto">
+                    <table className="w-full text-xs border-collapse">
+                      <thead>
+                        <tr className="text-left text-white/40 border-b border-white/10">
+                          <th className="py-2 px-2 font-semibold">#</th>
+                          <th className="py-2 px-2 font-semibold">Persona</th>
+                          <th className="py-2 px-2 font-semibold whitespace-nowrap">Documento</th>
+                          <th className="py-2 px-2 font-semibold">Correo</th>
+                          {childCols.map((c) => (
+                            <th key={c.id} className="py-2 px-2 font-semibold whitespace-nowrap text-center">{c.name}</th>
+                          ))}
+                          <th className="py-2 px-2 font-semibold whitespace-nowrap text-center">Promedio</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {regSummary.people.map((person, i) => {
+                          const doc = String(person.document || "").trim();
+                          const perDoc = regSummary.notes[doc] || {};
+                          const nums: number[] = [];
+                          childCols.forEach((c) => {
+                            const n = parseNum(perDoc[c.id]?.note || "");
+                            if (n !== null) nums.push(n);
+                          });
+                          const avg = nums.length ? (nums.reduce((a, b) => a + b, 0) / nums.length) : null;
+                          return (
+                            <tr key={doc || i} className="border-b border-white/5 hover:bg-white/5">
+                              <td className="py-1.5 px-2 text-white/40 font-mono">{i + 1}</td>
+                              <td className="py-1.5 px-2 text-white/80 font-medium whitespace-nowrap">{person.name || "—"}</td>
+                              <td className="py-1.5 px-2 text-white/60 font-mono whitespace-nowrap">{doc || "—"}</td>
+                              <td className="py-1.5 px-2 text-white/50 max-w-[180px] truncate">{person.email || "—"}</td>
+                              {childCols.map((c) => {
+                                const cell = perDoc[c.id];
+                                return (
+                                  <td key={c.id} className="py-1.5 px-2 text-center whitespace-nowrap">
+                                    {cell && cell.note ? (
+                                      <span
+                                        className={`font-mono font-bold ${cell.status === "guardado" ? "text-white/50 italic" : "text-white"}`}
+                                        title={cell.status === "guardado" ? "Nota guardada (borrador, sin enviar)" : cell.status === "enviado" ? "Nota enviada" : undefined}
+                                      >
+                                        {cell.note}
+                                      </span>
+                                    ) : (
+                                      <span className="text-white/20">—</span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                              <td className="py-1.5 px-2 text-center whitespace-nowrap">
+                                {avg !== null ? (
+                                  <span className="font-mono font-bold text-white text-sm">{avg.toFixed(2)}</span>
+                                ) : (
+                                  <span className="text-white/20">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()
+            )}
+          </div>
+        )}
 
         {/* Remitentes — collapsible, contained in a bounded box. The grade (latest
             feedback note) is shown here per sender, so no separate grading table. */}

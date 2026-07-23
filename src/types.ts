@@ -81,6 +81,14 @@ export interface ProjectMeta {
    *  submitter can fill in (besides name, email and files). */
   allowComment?: boolean;
   /**
+   * Registration mode — only meaningful on a PARENT project (one with children).
+   * When true: the parent's public link becomes a people-registry form (name,
+   * document, email, phone), its children ask only for the document (and autofill
+   * from the registry), and the parent shows a consolidated grades table across
+   * all its child activities. When false/absent, everything behaves as normal.
+   */
+  registrationMode?: boolean;
+  /**
    * Forces the text/UI contrast instead of auto-deciding from the background
    * luminance. "auto" = decide by luminance, "white" = light text, "black" = dark text.
    */
@@ -131,6 +139,8 @@ export interface Submission {
   files: FileAttachment[];
   /** Optional free-text message left by the submitter (when enabled per project). */
   comment?: string;
+  /** Identity document of the submitter (when the parent is in registration mode). */
+  document?: string;
   /** Values for the user-defined custom fields, keyed by field id. */
   customValues?: Record<string, string>;
   /** Values for control/grading columns, keyed by column id (nota, estado...). */

@@ -15,7 +15,7 @@ import {
   type PreviewProject,
 } from "./functions/_shared/preview";
 import { sendGmailMessage, buildReceiptEmail, buildFeedbackEmail, hasGmailCredentials, type MailAttachment } from "./functions/_shared/gmail";
-import { collectSubmissions, collectProjectMetas, FEEDBACK_MARKER, FEEDBACK_DRAFT_MARKER, SUBMISSION_COMMENT_MARKER } from "./functions/_shared/submissions";
+import { collectSubmissions, collectProjectMetas, FEEDBACK_MARKER, FEEDBACK_DRAFT_MARKER, SUBMISSION_COMMENT_MARKER, SUBMISSION_DOCUMENT_MARKER } from "./functions/_shared/submissions";
 import { uploadFileToNotion, buildNotionFileBlocks } from "./functions/_shared/notion";
 
 /** Parse a Notion code(json) block's content, or null. */
@@ -970,6 +970,8 @@ app.get("/api/project-meta", async (req, res) => {
               useDatabase: !!data.useDatabase,
               databaseId: data.databaseId || "",
               dbColumns: Array.isArray(data.dbColumns) ? data.dbColumns : [],
+              allowComment: !!data.allowComment,
+              registrationMode: !!data.registrationMode,
               groupId: data.groupId || "",
               order: typeof data.order === "number" ? data.order : 0,
               textColor: data.textColor === "white" || data.textColor === "black" ? data.textColor : "auto",
@@ -1044,7 +1046,9 @@ app.post("/api/project-meta", async (req, res) => {
     groupId,
     order,
     textColor,
-    createdAt
+    createdAt,
+    allowComment,
+    registrationMode
   } = req.body;
   if (!projectId) {
     return res.status(400).json({ error: "El ID del proyecto es obligatorio." });
@@ -1078,6 +1082,8 @@ app.post("/api/project-meta", async (req, res) => {
         useDatabase: !!useDatabase,
         databaseId: (databaseId || "").trim(),
         dbColumns: Array.isArray(dbColumns) ? dbColumns : [],
+        allowComment: !!allowComment,
+        registrationMode: !!registrationMode,
         groupId: (groupId || "").trim(),
         order: typeof order === "number" ? order : 0,
         textColor: textColor === "white" || textColor === "black" ? textColor : "auto",
@@ -2134,6 +2140,172 @@ app.get("/api/project-grades", async (req, res) => {
   }
 });
 
+// 6.7. People registry (padrón) stored inside a PARENT project. Enables the
+// registration mode: people register once (name/document/email/phone) and child
+// activities identify them by document.
+const REGISTRY_MARKER = "__envi_registry__";
+
+async function listAllChildrenServer(notion: any, blockId: string): Promise<any[]> {
+  const out: any[] = [];
+  let cursor: string | undefined;
+  do {
+    const data: any = await notion.blocks.children.list({ block_id: blockId, start_cursor: cursor, page_size: 100 });
+    for (const b of data.results || []) out.push(b);
+    cursor = data.has_more ? data.next_cursor : undefined;
+  } while (cursor);
+  return out;
+}
+
+function findRegistryBlockServer(children: any[]): any | null {
+  return children.find((b: any) => {
+    if (b.type !== "code" || b.code?.language !== "json") return false;
+    const parsed = parseJsonCodeBlock(b);
+    return parsed && parsed[REGISTRY_MARKER] && typeof parsed[REGISTRY_MARKER] === "object";
+  }) || null;
+}
+
+function isRegistrationOnServer(children: any[]): boolean {
+  return children.some((b: any) => {
+    if (b.type !== "code" || b.code?.language !== "json") return false;
+    const parsed = parseJsonCodeBlock(b);
+    return parsed && parsed.registrationMode === true;
+  });
+}
+
+function readPeopleServer(block: any): any[] {
+  const data = block ? parseJsonCodeBlock(block)?.[REGISTRY_MARKER] : null;
+  return data && Array.isArray(data.people) ? data.people : [];
+}
+
+app.post("/api/registry", async (req, res) => {
+  const parentId = String(req.body?.parentId || "").trim();
+  const parentName = String(req.body?.parentName || "Registro").trim();
+  const person = {
+    document: String(req.body?.document || "").trim(),
+    name: String(req.body?.name || "").trim(),
+    email: String(req.body?.email || "").trim(),
+    phone: String(req.body?.phone || "").trim(),
+  };
+  if (!parentId) return res.status(400).json({ error: "Falta el proyecto padre." });
+  if (!person.document) return res.status(400).json({ error: "El documento es obligatorio." });
+  if (!person.name) return res.status(400).json({ error: "El nombre es obligatorio." });
+  if (!person.email) return res.status(400).json({ error: "El correo es obligatorio." });
+
+  const config = loadConfig();
+  if (!config.notionSecret) return res.status(400).json({ error: "Notion no está configurado." });
+
+  try {
+    const notion = new Client({ auth: config.notionSecret });
+    const children = await listAllChildrenServer(notion, parentId);
+    if (!isRegistrationOnServer(children)) {
+      return res.status(400).json({ error: "Este proyecto no está en modo registro." });
+    }
+
+    const block = findRegistryBlockServer(children);
+    const people = readPeopleServer(block);
+    const key = person.document.toLowerCase();
+    const idx = people.findIndex((p: any) => String(p.document || "").trim().toLowerCase() === key);
+    let saved: any;
+    if (idx >= 0) {
+      saved = { ...people[idx], ...person, registeredAt: people[idx].registeredAt || new Date().toISOString() };
+      people[idx] = saved;
+    } else {
+      saved = { ...person, registeredAt: new Date().toISOString() };
+      people.push(saved);
+    }
+
+    const payload = { [REGISTRY_MARKER]: { parentId, parentName, updatedAt: new Date().toISOString(), people } };
+    const content = JSON.stringify(payload, null, 2);
+    const chunks: any[] = [];
+    for (let i = 0; i < content.length; i += 2000) chunks.push({ type: "text", text: { content: content.slice(i, i + 2000) } });
+    const codeBody = {
+      code: {
+        rich_text: chunks.length ? chunks : [{ type: "text", text: { content: "" } }],
+        language: "json",
+        caption: [{ type: "text", text: { content: `${parentName} registro` } }],
+      },
+    };
+    if (block) {
+      await notion.blocks.update({ block_id: block.id, ...(codeBody as any) });
+    } else {
+      await notion.blocks.children.append({ block_id: parentId, children: [{ object: "block", type: "code", ...codeBody }] as any });
+    }
+    res.json({ success: true, person: saved, updated: idx >= 0 });
+  } catch (err: any) {
+    res.status(500).json({ error: `No se pudo registrar: ${err.message || "error desconocido"}.` });
+  }
+});
+
+app.get("/api/registry", async (req, res) => {
+  const parentId = String(req.query.parentId || "").trim();
+  const document = String(req.query.document || "").trim();
+  if (!parentId) return res.status(400).json({ error: "Falta el proyecto padre." });
+  const config = loadConfig();
+  if (!config.notionSecret) return res.status(400).json({ error: "Notion no está configurado." });
+  try {
+    const notion = new Client({ auth: config.notionSecret });
+    const children = await listAllChildrenServer(notion, parentId);
+    const people = readPeopleServer(findRegistryBlockServer(children));
+    if (document) {
+      const key = document.toLowerCase();
+      const person = people.find((p: any) => String(p.document || "").trim().toLowerCase() === key) || null;
+      return res.json({ success: true, person });
+    }
+    res.json({ success: true, people });
+  } catch (err: any) {
+    res.status(500).json({ error: `No se pudo leer el registro: ${err.message || "error desconocido"}.` });
+  }
+});
+
+// 6.8. Consolidated registry summary: roster + note per person per child activity
+// (joined by document). Reads the parent once (registry + child grades blocks).
+app.get("/api/registry-summary", async (req, res) => {
+  const parentId = String(req.query.parentId || "").trim();
+  if (!parentId) return res.status(400).json({ error: "Falta el proyecto padre." });
+  const config = loadConfig();
+  if (!config.notionSecret) return res.status(400).json({ error: "Notion no está configurado." });
+  try {
+    const notion = new Client({ auth: config.notionSecret });
+    const children = await listAllChildrenServer(notion, parentId);
+
+    let people: any[] = [];
+    let parentName = "Registro";
+    for (const b of children) {
+      if (b.type !== "code" || b.code?.language !== "json") continue;
+      const parsed = parseJsonCodeBlock(b);
+      if (parsed && parsed[REGISTRY_MARKER]) {
+        const reg = parsed[REGISTRY_MARKER];
+        people = Array.isArray(reg.people) ? reg.people : [];
+        parentName = reg.parentName || parentName;
+        break;
+      }
+    }
+
+    const emailToDoc: Record<string, string> = {};
+    for (const p of people) {
+      if (p?.email) emailToDoc[String(p.email).toLowerCase()] = String(p.document || "").trim();
+    }
+
+    const activities: { projectId: string; projectName: string }[] = [];
+    const notes: Record<string, Record<string, { note: string; status: string }>> = {};
+    for (const b of children) {
+      if (b.type !== "code" || b.code?.language !== "json") continue;
+      const g = parseJsonCodeBlock(b)?.[GRADES_MARKER];
+      if (!g || !g.projectId) continue;
+      activities.push({ projectId: g.projectId, projectName: g.projectName || "Actividad" });
+      for (const row of Array.isArray(g.rows) ? g.rows : []) {
+        const doc = String(row.document || "").trim() || emailToDoc[String(row.email || "").toLowerCase()] || "";
+        if (!doc) continue;
+        (notes[doc] = notes[doc] || {})[g.projectId] = { note: String(row.note || ""), status: String(row.status || "") };
+      }
+    }
+
+    res.json({ success: true, parentName, people, activities, notes });
+  } catch (err: any) {
+    res.status(500).json({ error: `No se pudo leer el resumen: ${err.message || "error desconocido"}.` });
+  }
+});
+
 // Endpoint to receive files forwarded/uploaded from functions edge for larger files or error fallbacks
 app.post("/api/fallback-upload", upload.single("file"), (req, res) => {
   if (!req.file) {
@@ -2360,8 +2532,9 @@ app.post("/api/upload-part", upload.single("file"), async (req, res) => {
 
 // 8. Submit files (creates Toggle block inside specific project child page using pre-uploaded fileIDs)
 app.post("/api/submit", async (req, res) => {
-  const { senderName, senderEmail, projectId, projectName, fileRecords = [], bgColor = "", comment = "" } = req.body;
+  const { senderName, senderEmail, projectId, projectName, fileRecords = [], bgColor = "", comment = "", document = "" } = req.body;
   const trimmedComment = String(comment || "").trim();
+  const trimmedDocument = String(document || "").trim();
 
   if (!senderName || !senderEmail || !projectId) {
     return res.status(400).json({ error: "Faltan campos obligatorios (nombre, correo o proyecto)." });
@@ -2403,7 +2576,7 @@ app.post("/api/submit", async (req, res) => {
           {
             type: "text",
             text: {
-              content: `Información de la entrega:\n• Remitente: ${senderName.trim()}\n• Correo: ${senderEmail.trim()}\n• Fecha de envío: ${dateStr}\n• Archivos totales: ${fileRecords.length}${trimmedComment ? `\n• Comentario: ${trimmedComment}` : ""}`,
+              content: `Información de la entrega:\n• Remitente: ${senderName.trim()}\n• Correo: ${senderEmail.trim()}${trimmedDocument ? `\n• Documento: ${trimmedDocument}` : ""}\n• Fecha de envío: ${dateStr}\n• Archivos totales: ${fileRecords.length}${trimmedComment ? `\n• Comentario: ${trimmedComment}` : ""}`,
             },
           },
         ],
@@ -2414,6 +2587,18 @@ app.post("/api/submit", async (req, res) => {
         color: "blue_background",
       },
     });
+
+    // Machine-readable document (read back for the registration/consolidated table).
+    if (trimmedDocument) {
+      blocks.push({
+        object: "block",
+        type: "code",
+        code: {
+          rich_text: [{ type: "text", text: { content: JSON.stringify({ [SUBMISSION_DOCUMENT_MARKER]: trimmedDocument }, null, 2) } }],
+          language: "json",
+        },
+      });
+    }
 
     // Machine-readable copy of the submitter's message so it can be read back
     // from Notion (source of truth) and shown in the admin.
@@ -2516,6 +2701,7 @@ app.post("/api/submit", async (req, res) => {
       notionBlockId,
       dbPageId: "",
       comment: trimmedComment,
+      document: trimmedDocument,
       files: fileRecords.map((f: any) => ({
         name: f.name,
         size: f.size,

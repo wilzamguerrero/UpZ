@@ -144,6 +144,21 @@ export default function App() {
   const [customValues, setCustomValues] = useState<Record<string, string>>({});
   const [comment, setComment] = useState("");
 
+  // Registration-mode form (parent link): registers a person into the roster.
+  const [regName, setRegName] = useState("");
+  const [regDocument, setRegDocument] = useState("");
+  const [regEmail, setRegEmail] = useState("");
+  const [regPhone, setRegPhone] = useState("");
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [regError, setRegError] = useState<string | null>(null);
+  const [regSuccess, setRegSuccess] = useState<{ name: string; document: string } | null>(null);
+
+  // Child submission in registration mode: identify the submitter by document.
+  const [childDocument, setChildDocument] = useState("");
+  const [isLoadingDoc, setIsLoadingDoc] = useState(false);
+  const [docError, setDocError] = useState<string | null>(null);
+  const [loadedPerson, setLoadedPerson] = useState<{ name: string; email: string; document: string } | null>(null);
+
   // Submit engine states
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStep, setSubmitStep] = useState<string>("");
@@ -418,8 +433,74 @@ export default function App() {
   // subida de archivos en paralelo, manejo de throttling y reintentos).
   const [uploadProgress, setUploadProgress] = useState<{ fileName: string; percent: number } | null>(null);
 
+  /** Register a person into a parent's roster (registration mode). */
+  const handleRegister = async (parentId: string) => {
+    if (!regName.trim() || !regDocument.trim() || !regEmail.trim()) {
+      setRegError("Completa nombre, documento y correo.");
+      return;
+    }
+    setIsRegistering(true);
+    setRegError(null);
+    try {
+      const parentName = projects.find((p) => p.id === parentId)?.name || "Registro";
+      const res = await fetch("/api/registry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parentId,
+          parentName,
+          name: regName.trim(),
+          document: regDocument.trim(),
+          email: regEmail.trim(),
+          phone: regPhone.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setRegSuccess({ name: data.person?.name || regName.trim(), document: data.person?.document || regDocument.trim() });
+        setRegName(""); setRegDocument(""); setRegEmail(""); setRegPhone("");
+      } else {
+        setRegError(data.error || "No se pudo completar el registro.");
+      }
+    } catch {
+      setRegError("Error de red al registrar.");
+    } finally {
+      setIsRegistering(false);
+    }
+  };
+
+  /** Look up a registered person by document (child form, registration mode). */
+  const handleLoadByDocument = async (parentId: string) => {
+    const doc = childDocument.trim();
+    if (!doc) { setDocError("Ingresa tu documento."); return; }
+    setIsLoadingDoc(true);
+    setDocError(null);
+    try {
+      const res = await fetch(`/api/registry?parentId=${encodeURIComponent(parentId)}&document=${encodeURIComponent(doc)}`);
+      const data = await res.json();
+      if (data.success && data.person) {
+        setLoadedPerson({ name: data.person.name, email: data.person.email, document: data.person.document });
+        setSenderName(data.person.name);
+        setSenderEmail(data.person.email);
+        setDocError(null);
+      } else {
+        setLoadedPerson(null);
+        setSenderName("");
+        setSenderEmail("");
+        setDocError("No encontramos ese documento. Regístrate primero en el enlace de registro del grupo.");
+      }
+    } catch {
+      setDocError("Error de red al cargar tus datos.");
+    } finally {
+      setIsLoadingDoc(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // In registration mode the parent link only registers people (no upload here).
+    const regScope = folderScopeId || (isProjectLocked ? selectedProjectId : "");
+    if (regScope && projectMeta[regScope]?.registrationMode) return;
     if (!senderName || !senderEmail || !selectedProjectId || selectedFiles.length === 0) {
       setSubmitError("Por favor completa todos los campos y añade al menos un archivo.");
       return;
@@ -482,6 +563,8 @@ export default function App() {
           databaseId: submitMeta?.databaseId || "",
           // Mensaje opcional del remitente (el campo siempre está disponible).
           comment,
+          // Documento de identidad (cuando el proyecto padre está en modo registro).
+          document: loadedPerson?.document || "",
           // Color del proyecto, para que el correo de comprobante use el mismo color.
           bgColor: submitMeta?.bgColor || "",
         }),
@@ -494,6 +577,8 @@ export default function App() {
         setSelectedFiles([]);
         setCustomValues({});
         setComment("");
+        setChildDocument("");
+        setLoadedPerson(null);
       } else {
         setSubmitError(data.error || "Algo salió mal al sincronizar.");
       }
@@ -544,10 +629,23 @@ export default function App() {
     return text;
   };
 
-  // Resolve active meta: if on admin tab, default to the adminPreview's projectId if present
+  // Registration view: the visited link is a PARENT project in registration mode.
+  // (folder link → folderScopeId; single locked project → selectedProjectId.)
+  const registrationScopeId = folderScopeId || (isProjectLocked ? selectedProjectId : "");
+  const isRegistrationView = activeTab !== "admin" && !!registrationScopeId && !!projectMeta[registrationScopeId]?.registrationMode;
+  const registrationParentId = isRegistrationView ? registrationScopeId : "";
+
+  // Child submission in registration mode: the selected child's PARENT has it on.
+  const childSubmitParentId = !isRegistrationView && selectedProjectId
+    ? (projects.find((p) => p.id === selectedProjectId)?.parentId || "")
+    : "";
+  const childRegistrationMode = activeTab !== "admin" && !!childSubmitParentId && !!projectMeta[childSubmitParentId]?.registrationMode;
+
+  // Resolve active meta: if on admin tab, default to the adminPreview's projectId if present.
+  // In registration view, the header/theme reflect the PARENT project.
   const activeProjectId = activeTab === "admin"
     ? (adminPreview?.projectId || selectedProjectId)
-    : selectedProjectId;
+    : (isRegistrationView ? registrationParentId : selectedProjectId);
 
   const isHomeUploadView = activeTab === "upload" && isRootLandingPath && !selectedProjectId && !isProjectLocked;
   const isRootExperience = isRootLandingPath && !selectedProjectId;
@@ -906,6 +1004,100 @@ export default function App() {
 
                       <hr className="border-white/5" />
 
+                      {isRegistrationView ? (
+                        /* Registration form (parent link in registration mode) */
+                        <div className="space-y-4">
+                          {regSuccess ? (
+                            <div className="p-5 border border-white/10 bg-white/5 rounded-2xl text-center space-y-3">
+                              <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto border border-white/15 bg-white/5">
+                                <CheckCircle2 className="w-6 h-6 text-white" />
+                              </div>
+                              <div>
+                                <h3 className="text-sm font-bold text-white">¡Registro completado!</h3>
+                                <p className="text-xs text-white/50 mt-1 leading-relaxed">
+                                  <strong className="text-white/80">{regSuccess.name}</strong> quedó registrado con el documento{" "}
+                                  <strong className="text-white/80">{regSuccess.document}</strong>. En cada actividad de este grupo solo tendrás que ingresar tu documento para cargar tus datos.
+                                </p>
+                              </div>
+                              <button type="button" onClick={() => setRegSuccess(null)} className="text-xs font-semibold text-white/70 hover:text-white underline">
+                                Registrar otra persona
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-xs text-white/40 leading-relaxed">
+                                Regístrate una sola vez. Luego, en cada actividad de este grupo, solo necesitarás tu documento para identificarte.
+                              </p>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                  <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">Nombre completo</label>
+                                  <div className="relative">
+                                    <User className="absolute left-3 top-3 text-white/30 w-4 h-4" />
+                                    <input type="text" value={regName} onChange={(e) => setRegName(e.target.value)} className="w-full pl-10 pr-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none text-white" />
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">Documento de identidad</label>
+                                  <div className="relative">
+                                    <CreditCard className="absolute left-3 top-3 text-white/30 w-4 h-4" />
+                                    <input type="text" value={regDocument} onChange={(e) => setRegDocument(e.target.value)} className="w-full pl-10 pr-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none text-white" />
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">Correo</label>
+                                  <div className="relative">
+                                    <Mail className="absolute left-3 top-3 text-white/30 w-4 h-4" />
+                                    <input type="email" value={regEmail} onChange={(e) => setRegEmail(e.target.value)} className="w-full pl-10 pr-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none text-white" />
+                                  </div>
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
+                                    Teléfono <span className="text-white/25 normal-case font-normal">(opcional)</span>
+                                  </label>
+                                  <div className="relative">
+                                    <Phone className="absolute left-3 top-3 text-white/30 w-4 h-4" />
+                                    <input type="tel" value={regPhone} onChange={(e) => setRegPhone(e.target.value)} className="w-full pl-10 pr-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none text-white" />
+                                  </div>
+                                </div>
+                              </div>
+
+                              {regError && (
+                                <div className="p-3 border border-red-900/50 bg-red-950/30 text-red-300 text-xs rounded-xl flex items-center gap-1.5">
+                                  <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                                  <span>{regError}</span>
+                                </div>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => handleRegister(registrationParentId)}
+                                disabled={isRegistering}
+                                className="w-full h-[56px] font-mono tracking-widest text-sm uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden disabled:opacity-60"
+                                style={{ '--btn-color': hasBgColor ? currentBgColor : "var(--accent, #f5f011)" } as React.CSSProperties}
+                              >
+                                <div className="absolute inset-0 bg-[#000000] border border-black group-hover:bg-transparent group-hover:border-transparent transition-all duration-300 rounded-[4px] pointer-events-none" />
+                                <div className="absolute inset-[1px] bg-[#000000] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px] stripes-overlay" style={{ backgroundImage: `repeating-linear-gradient(119deg, currentColor 0px, currentColor 1px, transparent 1px, transparent 10px)` }} />
+                                <span className="btn-motion-corner btn-motion-corner-tl" />
+                                <span className="btn-motion-corner btn-motion-corner-tr" />
+                                <span className="btn-motion-corner btn-motion-corner-bl" />
+                                <span className="btn-motion-corner btn-motion-corner-br" />
+                                <div className="relative z-10 flex items-center justify-center transition-colors duration-300">
+                                  {isRegistering ? (
+                                    <span className="text-white font-semibold font-sans normal-case text-base">Registrando...</span>
+                                  ) : (
+                                    <div className="flex items-center justify-center gap-2.5 font-mono hover-text-adaptive">
+                                      <User className="w-4 h-4 btn-text-content" />
+                                      <span className="btn-text-content text-sm">Registrarme</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                      <>
+
                       <div className="space-y-4">
                         {hasValidExpiration && !isProjectExpired && activeMeta?.isActive !== false && (() => {
                           // Inline countdown — re-renders every second via state in parent is too heavy,
@@ -962,7 +1154,59 @@ export default function App() {
                         })()}
                       </div>
 
-                      {/* Client parameters input fields */}
+                      {/* Identity: document lookup (registration mode) or name + email. */}
+                      {childRegistrationMode && (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">Documento de identidad</label>
+                            <div className="flex gap-2">
+                              <div className="relative flex-1">
+                                <CreditCard className="absolute left-3 top-3 text-white/30 w-4 h-4" />
+                                <input
+                                  type="text"
+                                  value={childDocument}
+                                  onChange={(e) => { setChildDocument(e.target.value); if (loadedPerson) { setLoadedPerson(null); setSenderName(""); setSenderEmail(""); } }}
+                                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void handleLoadByDocument(childSubmitParentId); } }}
+                                  placeholder="Ingresa tu documento"
+                                  className="w-full pl-10 pr-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm focus:border-white/30 focus:outline-none text-white"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void handleLoadByDocument(childSubmitParentId)}
+                                disabled={isLoadingDoc || !childDocument.trim()}
+                                className="px-4 rounded-xl border border-white/20 bg-white/10 hover:bg-white/15 text-white text-xs font-semibold uppercase tracking-wide transition-all disabled:opacity-50 shrink-0 flex items-center gap-1.5"
+                              >
+                                {isLoadingDoc ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                                Cargar mis datos
+                              </button>
+                            </div>
+                          </div>
+                          {docError && (
+                            <div className="p-3 border border-red-900/50 bg-red-950/30 text-red-300 text-xs rounded-xl flex items-center gap-1.5">
+                              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                              <span>{docError}</span>
+                            </div>
+                          )}
+                          {loadedPerson && (
+                            <div className="p-3 border border-white/10 bg-white/5 rounded-xl flex items-center gap-2.5">
+                              <CheckCircle2 className="w-5 h-5 text-white shrink-0" />
+                              <div className="min-w-0">
+                                <div className="text-sm font-semibold text-white truncate">{loadedPerson.name}</div>
+                                <div className="text-xs text-white/50 truncate">{loadedPerson.email}</div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => { setLoadedPerson(null); setSenderName(""); setSenderEmail(""); setChildDocument(""); }}
+                                className="ml-auto text-[11px] font-semibold text-white/60 hover:text-white underline shrink-0"
+                              >
+                                Cambiar
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {!childRegistrationMode && (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
@@ -998,6 +1242,7 @@ export default function App() {
                           </div>
                         </div>
                       </div>
+                      )}
 
                       {/* Submitter-filled custom fields (point 5C) */}
                       {askFields.length > 0 && (
@@ -1222,7 +1467,7 @@ export default function App() {
 
                           <button
                             type="submit"
-                            disabled={isSubmitting || selectedFiles.length === 0 || !selectedProjectId}
+                            disabled={isSubmitting || selectedFiles.length === 0 || !selectedProjectId || (childRegistrationMode && !loadedPerson)}
                             className="w-full h-[56px] font-mono tracking-widest text-sm uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden"
                             style={{
                               '--btn-color': hasBgColor ? currentBgColor : "var(--accent, #f5f011)"
@@ -1262,6 +1507,9 @@ export default function App() {
                             <span className="text-[10px] text-white/30 font-mono tracking-wide">Dev by WilZamGuerrero</span>
                           </div>
                         </>
+                      )}
+
+                      </>
                       )}
 
                     </form>

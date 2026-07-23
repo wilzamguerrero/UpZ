@@ -241,6 +241,8 @@
     "useDatabase": false,
     "databaseId": "",
     "dbColumns": [],
+    "allowComment": false,
+    "registrationMode": true,
     "groupId": "",
     "order": 0,
     "textColor": "auto",
