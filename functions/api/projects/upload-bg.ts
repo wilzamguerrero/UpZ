@@ -23,7 +23,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return json({ error: "No se pudo leer el formulario de carga." }, 400);
   }
 
-  const file = formData.get("bgImage") as File | null;
+  const file = formData.get("bgImage") as unknown as File | null;
   if (!file || typeof file === "string") {
     return json({ error: "No se seleccionó o cargó ninguna imagen." }, 400);
   }

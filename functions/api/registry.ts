@@ -135,6 +135,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const parentId = String(body.parentId || "").trim();
   const parentName = String(body.parentName || "Registro").trim();
   const person = normalizePerson(body);
+  // When editing, the original document lets us handle a document change (rename).
+  const originalDocument = String(body.originalDocument || "").trim();
 
   if (!parentId) return json({ error: "Falta el proyecto padre." }, 400);
   if (!person.document) return json({ error: "El documento es obligatorio." }, 400);
@@ -152,6 +154,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     const block = findRegistryBlock(children);
     const people = readPeople(block);
+
+    // Editing with a changed document → remove the old entry first (rename).
+    if (originalDocument && originalDocument.toLowerCase() !== person.document.toLowerCase()) {
+      const oi = people.findIndex((p) => (p.document || "").trim().toLowerCase() === originalDocument.toLowerCase());
+      if (oi >= 0) people.splice(oi, 1);
+    }
 
     const key = person.document.toLowerCase();
     const idx = people.findIndex((p) => (p.document || "").trim().toLowerCase() === key);
@@ -197,5 +205,33 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     return json({ success: true, people });
   } catch (err: any) {
     return json({ error: `No se pudo leer el registro: ${err.message || "error desconocido"}.` }, 500);
+  }
+};
+
+/**
+ * DELETE /api/registry?parentId=<id>&document=<doc>
+ * Removes a person from the roster (admin action).
+ */
+export const onRequestDelete: PagesFunction<Env> = async (context) => {
+  const url = new URL(context.request.url);
+  const parentId = (url.searchParams.get("parentId") || "").trim();
+  const document = (url.searchParams.get("document") || "").trim();
+  if (!parentId || !document) return json({ error: "Parámetros inválidos." }, 400);
+
+  const { notionSecret } = await getConfig(context.env);
+  if (!notionSecret) return json({ error: "Notion no está configurado." }, 400);
+
+  try {
+    const children = await listAllChildren(parentId, notionSecret);
+    const block = findRegistryBlock(children);
+    if (!block) return json({ success: true });
+    const people = readPeople(block);
+    const key = document.toLowerCase();
+    const filtered = people.filter((p) => (p.document || "").trim().toLowerCase() !== key);
+    const parentName = parseJsonBlock(block)?.[REGISTRY_MARKER]?.parentName || "Registro";
+    await writeRegistry(parentId, parentName, filtered, block, notionSecret);
+    return json({ success: true });
+  } catch (err: any) {
+    return json({ error: `No se pudo eliminar: ${err.message || "error desconocido"}.` }, 500);
   }
 };

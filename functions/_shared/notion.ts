@@ -39,7 +39,7 @@ export async function notionFetch(
     (init as any).body = JSON.stringify(body);
   }
   const res = await fetch(`${NOTION_BASE}${path}`, init);
-  const data = await res.json();
+  const data = (await res.json()) as any;
   if (!res.ok) {
     const msg = data?.message || data?.code || `HTTP ${res.status}`;
     throw new Error(`Notion API error (${res.status}): ${msg}`);

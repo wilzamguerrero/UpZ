@@ -692,6 +692,10 @@ export default function AdminPanel({
     notes: Record<string, Record<string, { note: string; status: string }>>;
   } | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
+  // Add/edit a registered person directly from the admin.
+  const [personEditor, setPersonEditor] = useState<{ mode: "add" | "edit"; original?: string; name: string; document: string; email: string; phone: string } | null>(null);
+  const [personEditorError, setPersonEditorError] = useState<string | null>(null);
+  const [savingPerson, setSavingPerson] = useState(false);
 
   const loadRegistrySummary = async (parentId: string) => {
     if (!parentId) return;
@@ -705,6 +709,66 @@ export default function AdminPanel({
     } finally {
       setLoadingSummary(false);
     }
+  };
+
+  /** Add or edit a person in the registry (admin), then refresh the summary. */
+  const savePersonEditor = async () => {
+    if (!personEditor || !selectedMetaProjectId) return;
+    if (!personEditor.name.trim() || !personEditor.document.trim() || !personEditor.email.trim()) {
+      setPersonEditorError("Completa nombre, documento y correo.");
+      return;
+    }
+    setSavingPerson(true);
+    setPersonEditorError(null);
+    try {
+      const parentName = projects.find((p) => p.id === selectedMetaProjectId)?.name || "Registro";
+      const res = await fetch("/api/registry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parentId: selectedMetaProjectId,
+          parentName,
+          name: personEditor.name.trim(),
+          document: personEditor.document.trim(),
+          email: personEditor.email.trim(),
+          phone: personEditor.phone.trim(),
+          originalDocument: personEditor.mode === "edit" ? (personEditor.original || "") : "",
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPersonEditor(null);
+        await loadRegistrySummary(selectedMetaProjectId);
+      } else {
+        setPersonEditorError(data.error || "No se pudo guardar.");
+      }
+    } catch {
+      setPersonEditorError("Error de red al guardar.");
+    } finally {
+      setSavingPerson(false);
+    }
+  };
+
+  /** Remove a person from the registry (admin), after confirmation. */
+  const deletePerson = (document: string, name: string) => {
+    const parentId = selectedMetaProjectId;
+    setConfirmDialog({
+      title: "Eliminar del registro",
+      message: (
+        <>
+          ¿Eliminar a <span className="text-white font-semibold">{name || document}</span> del registro? Esta acción no se puede deshacer.
+        </>
+      ),
+      confirmLabel: "Eliminar",
+      onConfirm: async () => {
+        try {
+          await fetch(`/api/registry?parentId=${encodeURIComponent(parentId)}&document=${encodeURIComponent(document)}`, { method: "DELETE" });
+        } catch {
+          // Ignore network errors; refresh below reflects the real state.
+        }
+        await loadRegistrySummary(parentId);
+      },
+    });
   };
 
   const getFeedback = (email: string) =>
@@ -1845,6 +1909,97 @@ export default function AdminPanel({
         document.body
       )}
 
+      {/* Add/edit a registered person (registration mode). */}
+      {personEditor && createPortal(
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md p-4"
+          onClick={() => { if (!savingPerson) setPersonEditor(null); }}
+        >
+          <div className="w-full max-w-md bg-[#111111] border border-white/10 rounded-2xl p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-white/10 text-white flex items-center justify-center shrink-0">
+                <ClipboardList className="w-5 h-5" />
+              </div>
+              <h3 className="text-base font-semibold text-white">
+                {personEditor.mode === "add" ? "Agregar persona" : "Editar persona"}
+              </h3>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-white/40 mb-1 uppercase tracking-wide">Nombre completo</label>
+                <input type="text" value={personEditor.name} onChange={(e) => setPersonEditor((p) => p && { ...p, name: e.target.value })}
+                  className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm text-white focus:border-white/30 focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-white/40 mb-1 uppercase tracking-wide">Documento de identidad</label>
+                <input type="text" value={personEditor.document} onChange={(e) => setPersonEditor((p) => p && { ...p, document: e.target.value })}
+                  className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm text-white focus:border-white/30 focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-white/40 mb-1 uppercase tracking-wide">Correo</label>
+                <input type="email" value={personEditor.email} onChange={(e) => setPersonEditor((p) => p && { ...p, email: e.target.value })}
+                  className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm text-white focus:border-white/30 focus:outline-none" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-white/40 mb-1 uppercase tracking-wide">Teléfono <span className="text-white/25 normal-case font-normal">(opcional)</span></label>
+                <input type="tel" value={personEditor.phone} onChange={(e) => setPersonEditor((p) => p && { ...p, phone: e.target.value })}
+                  className="w-full px-3 py-2.5 bg-[#0d0d0d] border border-white/10 rounded-xl text-sm text-white focus:border-white/30 focus:outline-none" />
+              </div>
+              {personEditorError && (
+                <div className="p-2.5 border border-red-900/50 bg-red-950/30 text-red-300 text-xs rounded-lg flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 shrink-0" /> <span>{personEditorError}</span>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button type="button" disabled={savingPerson} onClick={() => setPersonEditor(null)}
+                className="h-11 px-4 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white text-sm font-medium transition-all disabled:opacity-50">
+                Cancelar
+              </button>
+              {(() => {
+                const accent = copyBgColor || "#c72323";
+                const stripe = isBgColorLight ? "rgba(0,0,0,0.22)" : "rgba(255,255,255,0.22)";
+                return (
+                  <button
+                    type="button"
+                    disabled={savingPerson}
+                    onClick={() => void savePersonEditor()}
+                    className="h-11 px-6 font-mono tracking-widest text-xs uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro btn-accent-border group overflow-hidden disabled:opacity-60"
+                    style={{ '--btn-color': (copyBgColor && isBgColorLight) ? '#111111' : '#ffffff' } as React.CSSProperties}
+                  >
+                    <div className="absolute inset-0 opacity-100 group-hover:opacity-0 transition-opacity duration-300 rounded-[4px] pointer-events-none" style={{ backgroundColor: accent }} />
+                    <div
+                      className="absolute inset-[1px] opacity-100 group-hover:opacity-0 transition-opacity duration-300 pointer-events-none rounded-[3px]"
+                      style={{ backgroundColor: accent, backgroundImage: `repeating-linear-gradient(119deg, ${stripe} 0px, ${stripe} 1px, transparent 1px, transparent 10px)` }}
+                    />
+                    <span className="btn-motion-corner btn-motion-corner-tl" />
+                    <span className="btn-motion-corner btn-motion-corner-tr" />
+                    <span className="btn-motion-corner btn-motion-corner-bl" />
+                    <span className="btn-motion-corner btn-motion-corner-br" />
+                    <span className="relative z-10 flex items-center justify-center gap-2 font-extrabold transition-colors duration-300 font-mono hover-text-adaptive btn-text-content">
+                      {savingPerson ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      {personEditor.mode === "add" ? "Agregar" : "Guardar"}
+                    </span>
+                  </button>
+                );
+              })()}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Registration-mode indicator: a diagonal-lines strip on the left edge. */}
+      {copyRegistrationMode && projects.some((p) => (p.parentId || "") === selectedMetaProjectId) && createPortal(
+        <div
+          className="fixed left-0 top-0 bottom-0 w-[34px] pointer-events-none z-[45]"
+          style={{
+            backgroundImage: `repeating-linear-gradient(119deg, ${isBgColorLight ? '#000000' : '#ffffff'} 0px, ${isBgColorLight ? '#000000' : '#ffffff'} 1px, transparent 1px, transparent 9px)`,
+          }}
+        />,
+        document.body
+      )}
+
       {/* Detail view keeps a back arrow; browse view has no header. */}
       {adminView === "detail" && (
         <div className="flex items-center gap-3">
@@ -2124,6 +2279,8 @@ export default function AdminPanel({
                 />
               </div>
 
+              {/* Expiration date — hidden in registration mode (not applicable). */}
+              {!copyRegistrationMode && (
               <div>
                 <label className="block text-xs font-semibold text-white/40 mb-1.5 uppercase tracking-wide">
                   Fecha y Hora de Vencimiento (Límite)
@@ -2137,6 +2294,7 @@ export default function AdminPanel({
                   Establece el día y la hora límite. Pasado este momento, se inhabilitará la zona de carga para este proyecto.
                 </p>
               </div>
+              )}
 
               {metaMessage && (
                 <div className={`p-3 rounded-xl text-xs flex gap-2 items-center ${metaMessage.type === "success"
@@ -2319,15 +2477,25 @@ export default function AdminPanel({
                   <p className="text-xs text-white/40 truncate">Personas registradas y su nota en cada actividad de este grupo</p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => void loadRegistrySummary(selectedMetaProjectId)}
-                disabled={loadingSummary}
-                className="text-[10px] font-semibold flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all cursor-pointer disabled:opacity-50 shrink-0"
-                title="Actualizar la tabla consolidada"
-              >
-                <RefreshCw className={`w-3 h-3 ${loadingSummary ? "animate-spin" : ""}`} /> Actualizar
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => { setPersonEditorError(null); setPersonEditor({ mode: "add", name: "", document: "", email: "", phone: "" }); }}
+                  className="text-[10px] font-semibold flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all cursor-pointer"
+                  title="Agregar una persona manualmente"
+                >
+                  <Plus className="w-3 h-3" /> Agregar persona
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void loadRegistrySummary(selectedMetaProjectId)}
+                  disabled={loadingSummary}
+                  className="text-[10px] font-semibold flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all cursor-pointer disabled:opacity-50"
+                  title="Actualizar la tabla consolidada"
+                >
+                  <RefreshCw className={`w-3 h-3 ${loadingSummary ? "animate-spin" : ""}`} /> Actualizar
+                </button>
+              </div>
             </div>
 
             {loadingSummary ? (
@@ -2358,6 +2526,7 @@ export default function AdminPanel({
                             <th key={c.id} className="py-2 px-2 font-semibold whitespace-nowrap text-center">{c.name}</th>
                           ))}
                           <th className="py-2 px-2 font-semibold whitespace-nowrap text-center">Promedio</th>
+                          <th className="py-2 px-2"></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2400,6 +2569,26 @@ export default function AdminPanel({
                                   <span className="text-white/20">—</span>
                                 )}
                               </td>
+                              <td className="py-1.5 px-2 whitespace-nowrap">
+                                <div className="flex items-center gap-1 justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => { setPersonEditorError(null); setPersonEditor({ mode: "edit", original: doc, name: person.name || "", document: doc, email: person.email || "", phone: person.phone || "" }); }}
+                                    className="p-1 text-white/40 hover:text-white hover:bg-white/10 border border-white/5 hover:border-white/15 rounded-md transition-all cursor-pointer"
+                                    title="Editar datos de la persona"
+                                  >
+                                    <PencilLine className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => deletePerson(doc, person.name || "")}
+                                    className="p-1 text-red-400/60 hover:text-red-400 hover:bg-red-950/20 border border-white/5 hover:border-red-900/20 rounded-md transition-all cursor-pointer"
+                                    title="Eliminar del registro"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </td>
                             </tr>
                           );
                         })}
@@ -2412,8 +2601,9 @@ export default function AdminPanel({
           </div>
         )}
 
-        {/* Remitentes — collapsible, contained in a bounded box. The grade (latest
-            feedback note) is shown here per sender, so no separate grading table. */}
+        {/* Remitentes — hidden when the project is a registration-mode parent
+            (that view uses the consolidated registry table instead). */}
+        {!(copyRegistrationMode && projects.some((p) => (p.parentId || "") === selectedMetaProjectId)) && (
         <div className={`${panelClass} order-1`} style={panelStyle}>
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <button
@@ -2877,6 +3067,7 @@ export default function AdminPanel({
             })()
           ))}
         </div>
+        )}
 
         </>
         )}

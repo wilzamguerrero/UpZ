@@ -41,7 +41,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return json({ error: "No se pudo leer el formulario." }, 400);
   }
 
-  const file = formData.get("file") as File | null;
+  const file = formData.get("file") as unknown as File | null;
   if (!file) {
     return json({ error: "No se proporcionó ningún archivo." }, 400);
   }

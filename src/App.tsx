@@ -793,6 +793,16 @@ export default function App() {
           );
         })()}
 
+        {/* Registration-mode indicator: a diagonal-lines strip on the left edge. */}
+        {isRegistrationView && (
+          <div
+            className="fixed left-0 top-0 bottom-0 w-[34px] pointer-events-none z-[45]"
+            style={{
+              backgroundImage: `repeating-linear-gradient(119deg, ${bgColorIsLight ? '#000000' : '#ffffff'} 0px, ${bgColorIsLight ? '#000000' : '#ffffff'} 1px, transparent 1px, transparent 9px)`,
+            }}
+          />
+        )}
+
         {/* Dynamic Header Nav Bar — only visible on root, hidden on shared project URLs */}
         {isRootLandingPath && (
           <div className="fixed top-4 right-4 z-50 flex gap-1.5">
@@ -1005,6 +1015,20 @@ export default function App() {
                       <hr className="border-white/5" />
 
                       {isRegistrationView ? (
+                        activeMeta?.isActive === false ? (
+                          /* Registration closed by the lock button */
+                          <div className="p-6 border border-amber-900/40 bg-amber-950/20 rounded-2xl text-center space-y-4">
+                            <div className="w-12 h-12 bg-amber-950/40 text-amber-400 rounded-full flex items-center justify-center mx-auto border border-amber-900/40 animate-pulse">
+                              <EyeOff className="w-6 h-6" />
+                            </div>
+                            <div className="space-y-1 bg-[#1c120c]/50 p-4 rounded-xl border border-amber-950">
+                              <h3 className="text-sm font-bold text-white tracking-wide uppercase">Registro cerrado</h3>
+                              <p className="text-xs text-white/60 leading-relaxed max-w-sm mx-auto mt-2">
+                                El registro de este grupo está <strong className="text-amber-300">deshabilitado temporalmente</strong> por el administrador.
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
                         /* Registration form (parent link in registration mode) */
                         <div className="space-y-4">
                           {regSuccess ? (
@@ -1095,6 +1119,7 @@ export default function App() {
                             </>
                           )}
                         </div>
+                        )
                       ) : (
                       <>
 

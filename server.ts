@@ -2203,6 +2203,12 @@ app.post("/api/registry", async (req, res) => {
 
     const block = findRegistryBlockServer(children);
     const people = readPeopleServer(block);
+    // Editing with a changed document → remove the old entry first (rename).
+    const originalDocument = String(req.body?.originalDocument || "").trim();
+    if (originalDocument && originalDocument.toLowerCase() !== person.document.toLowerCase()) {
+      const oi = people.findIndex((p: any) => String(p.document || "").trim().toLowerCase() === originalDocument.toLowerCase());
+      if (oi >= 0) people.splice(oi, 1);
+    }
     const key = person.document.toLowerCase();
     const idx = people.findIndex((p: any) => String(p.document || "").trim().toLowerCase() === key);
     let saved: any;
@@ -2254,6 +2260,39 @@ app.get("/api/registry", async (req, res) => {
     res.json({ success: true, people });
   } catch (err: any) {
     res.status(500).json({ error: `No se pudo leer el registro: ${err.message || "error desconocido"}.` });
+  }
+});
+
+app.delete("/api/registry", async (req, res) => {
+  const parentId = String(req.query.parentId || "").trim();
+  const documentQ = String(req.query.document || "").trim();
+  if (!parentId || !documentQ) return res.status(400).json({ error: "Parámetros inválidos." });
+  const config = loadConfig();
+  if (!config.notionSecret) return res.status(400).json({ error: "Notion no está configurado." });
+  try {
+    const notion = new Client({ auth: config.notionSecret });
+    const children = await listAllChildrenServer(notion, parentId);
+    const block = findRegistryBlockServer(children);
+    if (!block) return res.json({ success: true });
+    const people = readPeopleServer(block);
+    const key = documentQ.toLowerCase();
+    const filtered = people.filter((p: any) => String(p.document || "").trim().toLowerCase() !== key);
+    const parentName = parseJsonCodeBlock(block)?.[REGISTRY_MARKER]?.parentName || "Registro";
+    const payload = { [REGISTRY_MARKER]: { parentId, parentName, updatedAt: new Date().toISOString(), people: filtered } };
+    const content = JSON.stringify(payload, null, 2);
+    const chunks: any[] = [];
+    for (let i = 0; i < content.length; i += 2000) chunks.push({ type: "text", text: { content: content.slice(i, i + 2000) } });
+    await notion.blocks.update({
+      block_id: block.id,
+      code: {
+        rich_text: chunks.length ? chunks : [{ type: "text", text: { content: "" } }],
+        language: "json",
+        caption: [{ type: "text", text: { content: `${parentName} registro` } }],
+      },
+    } as any);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: `No se pudo eliminar: ${err.message || "error desconocido"}.` });
   }
 });
 
