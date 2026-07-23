@@ -2022,6 +2022,118 @@ app.delete("/api/feedback-draft", async (req, res) => {
   }
 });
 
+// 6.6. Project grades: store the computed grading table as a JSON code block placed
+// OUTSIDE the submission toggles (a direct child of the project page), with a
+// caption "<projectName> data". Upserts (replaces) it on every calculation.
+const GRADES_MARKER = "__envi_grades__";
+
+/** Reads the parent container id of a block (the project's parent page/toggle). */
+async function getParentIdServer(notion: any, blockId: string): Promise<string> {
+  try {
+    const block: any = await notion.blocks.retrieve({ block_id: blockId });
+    const p = block?.parent;
+    if (!p) return "";
+    if (p.type === "page_id") return p.page_id || "";
+    if (p.type === "block_id") return p.block_id || "";
+    if (p.type === "database_id") return p.database_id || "";
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+/** Finds this project's grades block among a container's children (matched by projectId, paginated). */
+async function findGradesBlockServer(notion: any, containerId: string, projectId: string): Promise<any | null> {
+  let cursor: string | undefined;
+  do {
+    const data: any = await notion.blocks.children.list({ block_id: containerId, start_cursor: cursor, page_size: 100 });
+    const match = (data.results || []).find((b: any) => {
+      if (b.type !== "code" || b.code?.language !== "json") return false;
+      const parsed = parseJsonCodeBlock(b);
+      return parsed && parsed[GRADES_MARKER] && parsed[GRADES_MARKER].projectId === projectId;
+    });
+    if (match) return match;
+    cursor = data.has_more ? data.next_cursor : undefined;
+  } while (cursor);
+  return null;
+}
+
+app.post("/api/project-grades", async (req, res) => {
+  const projectId = String(req.body?.projectId || "").trim();
+  const projectName = String(req.body?.projectName || "Proyecto").trim();
+  const parentIdHint = String(req.body?.parentId || "").trim();
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (!projectId) return res.status(400).json({ error: "Falta el identificador del proyecto." });
+
+  const config = loadConfig();
+  if (!config.notionSecret) return res.status(400).json({ error: "Notion no está configurado." });
+
+  const payload = { [GRADES_MARKER]: { projectId, projectName, updatedAt: new Date().toISOString(), rows } };
+  const gradesContent = JSON.stringify(payload, null, 2);
+  // Notion caps each rich_text item at 2000 chars, so split long JSON into chunks.
+  const gradesChunks: any[] = [];
+  for (let i = 0; i < gradesContent.length; i += 2000) {
+    gradesChunks.push({ type: "text", text: { content: gradesContent.slice(i, i + 2000) } });
+  }
+  const codeBody = {
+    code: {
+      rich_text: gradesChunks.length ? gradesChunks : [{ type: "text", text: { content: "" } }],
+      language: "json",
+      caption: [{ type: "text", text: { content: `${projectName} data` } }],
+    },
+  };
+
+  try {
+    const notion = new Client({ auth: config.notionSecret });
+    // Save in the project's parent container: prefer the logical parent from the
+    // app tree, then the Notion parent, then the project itself as a last resort.
+    const containerId = parentIdHint || (await getParentIdServer(notion, projectId)) || projectId;
+    const existing = await findGradesBlockServer(notion, containerId, projectId);
+    let keptId = "";
+    if (existing) {
+      await notion.blocks.update({ block_id: existing.id, ...(codeBody as any) });
+      keptId = existing.id;
+    } else {
+      const appendRes: any = await notion.blocks.children.append({
+        block_id: containerId,
+        children: [{ object: "block", type: "code", ...codeBody }] as any,
+      });
+      keptId = appendRes?.results?.[0]?.id || "";
+    }
+
+    // Clean up stale blocks left by earlier versions (root page / inside the project).
+    const staleContainers = [config.parentPageId, projectId].filter((c) => c && c !== containerId);
+    for (const c of staleContainers) {
+      try {
+        const stale = await findGradesBlockServer(notion, c, projectId);
+        if (stale && stale.id !== keptId) await notion.blocks.delete({ block_id: stale.id });
+      } catch {
+        // Ignore cleanup failures.
+      }
+    }
+
+    res.json({ success: true, blockId: keptId, updated: !!existing });
+  } catch (err: any) {
+    res.status(500).json({ error: `No se pudo guardar la tabla: ${err.message || "error desconocido"}.` });
+  }
+});
+
+app.get("/api/project-grades", async (req, res) => {
+  const projectId = String(req.query.projectId || "").trim();
+  if (!projectId) return res.status(400).json({ error: "Falta el identificador del proyecto." });
+  const config = loadConfig();
+  if (!config.notionSecret) return res.status(400).json({ error: "Notion no está configurado." });
+  try {
+    const notion = new Client({ auth: config.notionSecret });
+    const containerId = (await getParentIdServer(notion, projectId)) || projectId;
+    const existing = await findGradesBlockServer(notion, containerId, projectId);
+    const parsed = existing ? parseJsonCodeBlock(existing)?.[GRADES_MARKER] : null;
+    res.json({ success: true, data: parsed || null, blockId: existing?.id || null });
+  } catch (err: any) {
+    res.status(500).json({ error: `No se pudo leer la tabla: ${err.message || "error desconocido"}.` });
+  }
+});
+
 // Endpoint to receive files forwarded/uploaded from functions edge for larger files or error fallbacks
 app.post("/api/fallback-upload", upload.single("file"), (req, res) => {
   if (!req.file) {

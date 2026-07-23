@@ -221,18 +221,23 @@ export async function collectProjectMetas(
   const metas: Record<string, any> = {};
 
   const readMetaBlock = (children: any[]): any | null => {
-    const codeBlock = children.find(
-      (c: any) => c.type === "code" && c.code?.language === "json"
+    const codeBlocks = children.filter(
+      (c: any) => c.type === "code" && c.code?.language === "json" && c.code?.rich_text
     );
-    if (!codeBlock?.code?.rich_text) return null;
-    try {
-      const parsed = JSON.parse(
-        codeBlock.code.rich_text.map((rt: any) => rt.plain_text).join("").trim()
-      );
-      return parsed && typeof parsed === "object" ? parsed : null;
-    } catch {
-      return null;
+    for (const codeBlock of codeBlocks) {
+      try {
+        const parsed = JSON.parse(
+          codeBlock.code.rich_text.map((rt: any) => rt.plain_text).join("").trim()
+        );
+        if (!parsed || typeof parsed !== "object") continue;
+        // Skip our own data blocks (grades/feedback) so they aren't read as meta.
+        if (parsed["__envi_grades__"] || parsed[FEEDBACK_MARKER] || parsed[FEEDBACK_DRAFT_MARKER] || parsed[SUBMISSION_COMMENT_MARKER]) continue;
+        return parsed;
+      } catch {
+        // Try the next JSON block.
+      }
     }
+    return null;
   };
 
   const processProject = async (projId: string, depth: number) => {

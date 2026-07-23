@@ -23,7 +23,6 @@ import {
 import { Project, Submission, NotionConfig, ProjectMeta, CustomField, DbColumn, FeedbackDraft } from "../types";
 import { ICON_OPTIONS, ICON_BY_KEY, ICON_CATEGORIES } from "../icons";
 import DateTimePicker from "./DateTimePicker";
-import GradingTable from "./GradingTable";
 import FileViewer, { ViewableFile, InlineFilePreview } from "./FileViewer";
 import { useTheme } from "../ThemeContext";
 
@@ -445,6 +444,21 @@ function safeRetroColor(bgColor?: string | null): string {
   return lum <= 0.5 ? "#ffffff" : bgColor;
 }
 
+/** Latest feedback note for a sender's anchor submission, plus whether that note
+ *  has been emailed (enviado) or is only saved as a draft (guardado). Prefers the
+ *  most recent note available. */
+function latestFeedbackNote(anchor?: Submission): { note: string; status: "enviado" | "guardado" | null } {
+  if (!anchor) return { note: "", status: null };
+  const draft = anchor.feedbackDraft;
+  const history = anchor.feedbackHistory || [];
+  const lastSent = history.length ? history[history.length - 1] : null;
+  if (draft && (draft.note || "").trim()) return { note: (draft.note || "").trim(), status: "guardado" };
+  if (lastSent && (lastSent.note || "").trim()) return { note: (lastSent.note || "").trim(), status: "enviado" };
+  if (draft) return { note: "", status: "guardado" };
+  if (lastSent) return { note: "", status: "enviado" };
+  return { note: "", status: null };
+}
+
 /** True when a #rgb / #rrggbb color is light (needs dark text/stripes on top). */
 function isHexLight(hex?: string | null): boolean {
   if (!hex) return false;
@@ -667,6 +681,8 @@ export default function AdminPanel({
   // Remembers which draft version (savedAt) we've already loaded into the compose
   // form per sender, so refreshes don't overwrite the admin's in-progress edits.
   const draftSeededRef = useRef<Record<string, string>>({});
+  // Last grades signature persisted to Notion per project, to avoid redundant writes.
+  const gradesSigRef = useRef<Record<string, string>>({});
 
   const getFeedback = (email: string) =>
     feedback[email] || { comment: "", note: "", files: [], sending: false };
@@ -693,6 +709,77 @@ export default function AdminPanel({
     }
     return out;
   };
+
+  /** Build the grade rows (one per sender) for a set of submissions, ordered by
+   *  entry order, using the latest feedback note + its status. */
+  const buildGradesRows = (subs: Submission[]) => {
+    const groups: Record<string, Submission[]> = {};
+    for (const s of subs) {
+      const em = s.senderEmail.toLowerCase();
+      (groups[em] = groups[em] || []).push(s);
+    }
+    const rows = Object.values(groups).map((group) => {
+      const sorted = [...group].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      const earliest = sorted[0];
+      const latest = sorted[sorted.length - 1];
+      const { note, status } = latestFeedbackNote(earliest);
+      return {
+        name: earliest.senderName,
+        email: earliest.senderEmail,
+        note,
+        status: status || "sin_retro",
+        submissions: group.length,
+        submittedAt: latest.timestamp,
+        _ts: new Date(earliest.timestamp).getTime(),
+      };
+    });
+    rows.sort((a, b) => a._ts - b._ts);
+    return rows.map((r, i) => ({
+      order: i + 1,
+      name: r.name,
+      email: r.email,
+      note: r.note,
+      status: r.status,
+    }));
+  };
+
+  /** Persist the grades table (latest notes per sender) to Notion as a JSON block
+   *  outside the submission toggles, so it can be read/aggregated externally. */
+  const persistProjectGrades = async (projectId: string, subs: Submission[]) => {
+    if (!projectId) return;
+    const proj = projects.find((p) => p.id === projectId);
+    const projectName = proj?.name || projectMeta[projectId]?.title || "Proyecto";
+    // Logical parent (the folder/toggle that contains this project in the tree).
+    const parentId = proj?.parentId || "";
+    const rows = buildGradesRows(subs.filter((s) => s.projectId === projectId));
+    try {
+      await fetch("/api/project-grades", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, projectName, parentId, rows }),
+      });
+    } catch {
+      // Non-critical: the notes are still shown in the UI.
+    }
+  };
+
+  // Keep the summary grades JSON in Notion in sync with what's shown: generate it
+  // when the project's submissions are loaded and re-save whenever a note changes.
+  // A signature check avoids redundant writes; a hydration check avoids saving the
+  // light (files-less) list before the project's feedback data has loaded.
+  useEffect(() => {
+    const pid = selectedMetaProjectId;
+    if (!pid || loadingSubmissions) return;
+    const subs = submissions.filter((s) => s.projectId === pid);
+    // Not hydrated yet (submissions exist but files/feedback not loaded) → wait.
+    if (subs.length > 0 && !subs.some((s) => (s.files?.length || 0) > 0)) return;
+    const rows = buildGradesRows(subs);
+    const sig = JSON.stringify(rows);
+    if (gradesSigRef.current[pid] === sig) return;
+    gradesSigRef.current[pid] = sig;
+    void persistProjectGrades(pid, submissions);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submissions, selectedMetaProjectId, loadingSubmissions]);
 
   /** Send feedback (comment + optional note + attachments) to a sender by email.
    *  `submissionId` is the sender's anchor toggle where the history is stored. */
@@ -2143,40 +2230,8 @@ export default function AdminPanel({
         {adminView === "detail" && (
         <>
 
-        {/* Grading table per project — shown AFTER Remitentes (order-2), collapsible */}
-        {selectedMetaProjectId && projects.find((p) => p.id === selectedMetaProjectId) && (
-          <div className={`${panelClass} order-2`} style={panelStyle}>
-            <button
-              type="button"
-              onClick={() => setGradingCollapsed((v) => !v)}
-              className="flex items-center gap-3 mb-6 text-left w-full min-w-0"
-              title={gradingCollapsed ? "Expandir tabla" : "Contraer tabla"}
-            >
-              <div className="p-2.5 bg-white/5 text-white rounded-xl shrink-0">
-                <Table className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <h2 className="text-base font-semibold text-white flex items-center gap-2">
-                  Tabla de Calificaciones
-                  <ChevronDown className={`w-4 h-4 text-white/40 transition-transform ${gradingCollapsed ? "-rotate-90" : ""}`} />
-                </h2>
-                <p className="text-xs text-white/40 truncate">
-                  {projects.find((p) => p.id === selectedMetaProjectId)?.name}
-                </p>
-              </div>
-            </button>
-            {!gradingCollapsed && (
-            <GradingTable
-              project={projects.find((p) => p.id === selectedMetaProjectId)!}
-              meta={projectMeta[selectedMetaProjectId]}
-              submissions={submissions}
-              refreshSubmissions={fetchSubmissions}
-            />
-            )}
-          </div>
-        )}
-
-        {/* Remitentes — shown FIRST (order-1), collapsible, contained in a bounded box */}
+        {/* Remitentes — collapsible, contained in a bounded box. The grade (latest
+            feedback note) is shown here per sender, so no separate grading table. */}
         <div className={`${panelClass} order-1`} style={panelStyle}>
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <button
@@ -2268,6 +2323,7 @@ export default function AdminPanel({
                     )[0];
                     const fbCount = fbAnchor?.feedbackHistory?.length || 0;
                     const hasDraft = !!fbAnchor?.feedbackDraft;
+                    const { note: gradeNote, status: gradeStatus } = latestFeedbackNote(fbAnchor);
                     return (
                       <div key={person.email} className="border border-white/5 rounded-xl overflow-hidden">
                         <button
@@ -2314,6 +2370,17 @@ export default function AdminPanel({
                             <span className="text-[10px] text-white/50 font-mono bg-white/5 px-2 py-1 rounded-md border border-white/5 whitespace-nowrap">
                               {totalFiles} arch{totalFiles === 1 ? 'ivo' : 'ivos'}
                             </span>
+                            {gradeStatus && (
+                              <span
+                                className="flex items-center gap-1.5 pl-3 ml-1 border-l border-white/15 whitespace-nowrap"
+                                title={gradeStatus === "enviado" ? "Nota enviada por correo" : "Nota guardada (borrador)"}
+                              >
+                                <span className="text-[9px] uppercase tracking-wider text-white/40 font-mono">Nota</span>
+                                <span className="text-xl font-bold font-mono text-white leading-none">
+                                  {gradeNote || "—"}
+                                </span>
+                              </span>
+                            )}
                           </div>
                         </button>
 
@@ -2369,6 +2436,36 @@ export default function AdminPanel({
                                 </div>
                               </div>
                             ))}
+
+                            {/* Nota actual del remitente — mostrada tras los archivos. */}
+                            {(() => {
+                              const anchorSub = [...person.submissions].sort(
+                                (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+                              )[0];
+                              const { note, status } = latestFeedbackNote(anchorSub);
+                              if (!status) return null;
+                              return (
+                                <div className="px-3 pb-3">
+                                  <div className="rounded-lg border border-white/10 bg-white/5 p-3 flex items-center justify-between gap-3">
+                                    <div className="min-w-0">
+                                      <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest">Nota</div>
+                                      {status === "enviado" ? (
+                                        <span className="text-[10px] font-mono inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md bg-white/15 text-white border border-white/25">
+                                          <Check className="w-3 h-3" /> Enviada
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] font-mono inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md bg-white/5 text-white/60 border border-white/10">
+                                          <Save className="w-3 h-3" /> Guardada (sin enviar)
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="text-4xl font-bold font-mono text-white leading-none shrink-0">
+                                      {note || "—"}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })()}
 
                             {/* Feedback: comentario + adjuntos + nota opcional + enviar */}
                             {(() => {

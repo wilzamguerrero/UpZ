@@ -30,6 +30,7 @@ export default function GradingTable({ project, meta, submissions, refreshSubmis
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({});
   // Whether the computed grades (latest feedback note per sender) are shown.
   const [calculated, setCalculated] = useState(false);
+  const [savingGrades, setSavingGrades] = useState(false);
 
   const projectSubs = submissions.filter((s) => s.projectId === project.id);
 
@@ -75,6 +76,40 @@ export default function GradingTable({ project, meta, submissions, refreshSubmis
     if (draft) return { note: "", status: "guardado" };
     if (lastSent) return { note: "", status: "enviado" };
     return { note: "", status: null };
+  };
+
+  /** Toggle the computed grades. When showing, recompute from the latest feedback
+   *  and persist them to Notion (a "<project> data" JSON block outside the toggles). */
+  const handleCalculate = async () => {
+    const next = !calculated;
+    setCalculated(next);
+    if (!next) return; // hiding — nothing to save
+
+    const rows = groupedSubs.map((row) => {
+      const { note, status } = computeLatestNote(row.anchor);
+      return {
+        order: row.order,
+        name: row.name,
+        email: row.email,
+        note,
+        status: status || "sin_retro",
+        submittedAt: row.rep.timestamp,
+        submissions: row.count,
+      };
+    });
+
+    setSavingGrades(true);
+    try {
+      await fetch("/api/project-grades", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId: project.id, projectName: project.name, rows }),
+      });
+    } catch {
+      // Non-critical: the table is still shown even if saving fails.
+    } finally {
+      setSavingGrades(false);
+    }
   };
 
   const loadDbRows = async () => {
@@ -217,11 +252,14 @@ export default function GradingTable({ project, meta, submissions, refreshSubmis
         </span>
         <button
           type="button"
-          onClick={() => setCalculated((v) => !v)}
-          className="text-[10px] font-semibold flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all cursor-pointer"
-          title="Calcular las notas a partir de la última retroalimentación (enviada o guardada)"
+          onClick={() => void handleCalculate()}
+          disabled={savingGrades}
+          className="text-[10px] font-semibold flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all cursor-pointer disabled:opacity-50"
+          title="Calcular las notas a partir de la última retroalimentación (enviada o guardada) y guardarlas en Notion"
         >
-          <Calculator className="w-3 h-3" /> {calculated ? "Ocultar notas" : "Calcular notas"}
+          {savingGrades
+            ? <><Loader2 className="w-3 h-3 animate-spin" /> Guardando...</>
+            : <><Calculator className="w-3 h-3" /> {calculated ? "Ocultar notas" : "Calcular notas"}</>}
         </button>
       </div>
       {projectSubs.length === 0 ? (
