@@ -773,10 +773,17 @@ export default function AdminPanel({
     });
   };
 
+  // Compose/draft state is keyed by PROJECT + sender email, not email alone.
+  // The same person (same email/document) can appear in several projects
+  // (registration mode), so an email-only key would leak one project's note into
+  // the others' compose forms. `projectId` defaults to the open project.
+  const fbKey = (email: string, projectId?: string) =>
+    `${projectId ?? selectedMetaProjectId ?? ""}::${(email || "").toLowerCase()}`;
+
   const getFeedback = (email: string) =>
-    feedback[email] || { comment: "", note: "", files: [], sending: false };
+    feedback[fbKey(email)] || { comment: "", note: "", files: [], sending: false };
   const setFeedbackFor = (email: string, patch: Partial<{ comment: string; note: string; files: File[]; sending: boolean; savingDraft: boolean; msg?: { type: "success" | "error"; text: string } }>) =>
-    setFeedback((prev) => ({ ...prev, [email]: { ...getFeedback(email), ...patch } }));
+    setFeedback((prev) => ({ ...prev, [fbKey(email)]: { ...getFeedback(email), ...patch } }));
 
   /** Rebuilds File objects from a draft's Notion-stored files so the compose form
    *  is fully restored (and sending re-uploads/emails them as usual). */
@@ -924,7 +931,7 @@ export default function AdminPanel({
         // Optimistically append to the anchor submission's history so it shows now,
         // and clear any saved draft (sending supersedes it).
         if (submissionId) {
-          draftSeededRef.current[email] = "__sent__";
+          draftSeededRef.current[fbKey(email)] = "__sent__";
           setSubmissions((prev) =>
             prev.map((s) =>
               s.id === submissionId
@@ -936,7 +943,7 @@ export default function AdminPanel({
         // Clear the form and jump the viewer to the newest entry.
         setFeedback((prev) => ({
           ...prev,
-          [email]: { comment: "", note: "", files: [], sending: false, msg: { type: "success", text: "¡Retroalimentación enviada al correo!" } },
+          [fbKey(email)]: { comment: "", note: "", files: [], sending: false, msg: { type: "success", text: "¡Retroalimentación enviada al correo!" } },
         }));
         setFeedbackView((v) => ({ ...v, [email]: Number.MAX_SAFE_INTEGER }));
       } else {
@@ -977,7 +984,7 @@ export default function AdminPanel({
           savedAt: new Date().toISOString(),
         };
         // Remember this version so the seeding effect won't overwrite the form.
-        draftSeededRef.current[email] = draft.savedAt || "1";
+        draftSeededRef.current[fbKey(email)] = draft.savedAt || "1";
         setSubmissions((prev) =>
           prev.map((s) => (s.id === submissionId ? { ...s, feedbackDraft: draft } : s))
         );
@@ -1000,8 +1007,8 @@ export default function AdminPanel({
     if (!hasDraft && !hasContent) return;
 
     const clearAll = () => {
-      draftSeededRef.current[email] = "__cancelled__";
-      setFeedback((prev) => ({ ...prev, [email]: { comment: "", note: "", files: [], sending: false, savingDraft: false } }));
+      draftSeededRef.current[fbKey(email)] = "__cancelled__";
+      setFeedback((prev) => ({ ...prev, [fbKey(email)]: { comment: "", note: "", files: [], sending: false, savingDraft: false } }));
     };
 
     // Nothing saved in Notion yet: just clear the form instantly (non-destructive).
@@ -1123,18 +1130,21 @@ export default function AdminPanel({
       const draft = s.feedbackDraft;
       const email = s.senderEmail;
       if (!draft || !email) return;
+      // Key by the submission's OWN project, so a draft in one project never
+      // seeds the same sender's compose form in a different project.
+      const key = fbKey(email, s.projectId);
       const version = draft.savedAt || "1";
-      if (draftSeededRef.current[email] === version) return;
-      draftSeededRef.current[email] = version;
+      if (draftSeededRef.current[key] === version) return;
+      draftSeededRef.current[key] = version;
       setFeedback((prev) => {
-        const cur = prev[email] || { comment: "", note: "", files: [], sending: false };
-        return { ...prev, [email]: { ...cur, comment: draft.comment || "", note: draft.note || "", savingDraft: false } };
+        const cur = prev[key] || { comment: "", note: "", files: [], sending: false };
+        return { ...prev, [key]: { ...cur, comment: draft.comment || "", note: draft.note || "", savingDraft: false } };
       });
       void reconstructDraftFiles(draft).then((fileObjs) => {
         if (!fileObjs.length) return;
         setFeedback((prev) => {
-          const cur = prev[email] || { comment: "", note: "", files: [], sending: false };
-          return { ...prev, [email]: { ...cur, files: fileObjs } };
+          const cur = prev[key] || { comment: "", note: "", files: [], sending: false };
+          return { ...prev, [key]: { ...cur, files: fileObjs } };
         });
       });
     });
@@ -2682,15 +2692,29 @@ export default function AdminPanel({
             </button>
 
             {!remitentesCollapsed && (
-            <div className="relative">
-              <Search className="w-4 h-4 text-white/30 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Buscar remitente, correo, archivo..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 pr-3 py-1.5 bg-[#0d0d0d] border border-white/10 text-white rounded-xl text-xs w-full min-w-[240px] focus:outline-none focus:border-white/20 placeholder-white/20 transition-all"
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-white/30 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Buscar remitente, correo, archivo..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 pr-3 py-1.5 bg-[#0d0d0d] border border-white/10 text-white rounded-xl text-xs w-full min-w-[240px] focus:outline-none focus:border-white/20 placeholder-white/20 transition-all"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  void fetchSubmissions();
+                  if (selectedMetaProjectId) void loadProjectSubmissions(selectedMetaProjectId);
+                }}
+                disabled={loadingSubmissions}
+                title="Actualizar remitentes"
+                className="shrink-0 w-9 h-9 flex items-center justify-center rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-all disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${loadingSubmissions ? "animate-spin" : ""}`} />
+              </button>
             </div>
             )}
           </div>
@@ -2870,7 +2894,7 @@ export default function AdminPanel({
                               const { note, status } = latestFeedbackNote(anchorSub);
                               if (!status) return null;
                               return (
-                                <div className="px-3 pb-3">
+                                <div className="px-3 pt-3 pb-3">
                                   <div className="rounded-lg border border-white/10 bg-white/5 p-3 flex items-center justify-between gap-3">
                                     <div className="min-w-0">
                                       <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest">Nota</div>
