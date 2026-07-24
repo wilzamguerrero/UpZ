@@ -1462,6 +1462,18 @@ app.delete("/api/projects/:projectId", async (req, res) => {
 
   try {
     const notion = new Client({ auth: config.notionSecret });
+
+    // Clean up this project's "<name> data" grades block in its parent first.
+    try {
+      const parentId = await getParentIdServer(notion, projectId);
+      if (parentId) {
+        const gradesBlock = await findGradesBlockServer(notion, parentId, projectId);
+        if (gradesBlock) await notion.blocks.delete({ block_id: gradesBlock.id });
+      }
+    } catch {
+      // Non-critical cleanup.
+    }
+
     await notion.blocks.delete({ block_id: projectId });
 
     // Also remove from local project meta cache if it exists
@@ -2578,8 +2590,9 @@ app.post("/api/submit", async (req, res) => {
   if (!senderName || !senderEmail || !projectId) {
     return res.status(400).json({ error: "Faltan campos obligatorios (nombre, correo o proyecto)." });
   }
-  if (fileRecords.length === 0) {
-    return res.status(400).json({ error: "No se han subido archivos." });
+  // Allow sending only a comment/link (no attachments) as long as there's a comment.
+  if (fileRecords.length === 0 && !trimmedComment) {
+    return res.status(400).json({ error: "Adjunta al menos un archivo o escribe un comentario." });
   }
 
   const config = loadConfig();
@@ -2652,21 +2665,23 @@ app.post("/api/submit", async (req, res) => {
       });
     }
 
-    // 2. Headings for files list
-    blocks.push({
-      object: "block",
-      type: "heading_3",
-      heading_3: {
-        rich_text: [
-          {
-            type: "text",
-            text: {
-              content: "Archivos adjuntos",
+    // 2. Headings for files list (only when there are attachments)
+    if (fileRecords.length > 0) {
+      blocks.push({
+        object: "block",
+        type: "heading_3",
+        heading_3: {
+          rich_text: [
+            {
+              type: "text",
+              text: {
+                content: "Archivos adjuntos",
+              },
             },
-          },
-        ],
-      },
-    });
+          ],
+        },
+      });
+    }
 
     const IMAGE_TYPES = new Set([
       "image/png", "image/jpeg", "image/jpg", "image/gif",

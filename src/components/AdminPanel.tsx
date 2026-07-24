@@ -696,6 +696,8 @@ export default function AdminPanel({
   const [personEditor, setPersonEditor] = useState<{ mode: "add" | "edit"; original?: string; name: string; document: string; email: string; phone: string } | null>(null);
   const [personEditorError, setPersonEditorError] = useState<string | null>(null);
   const [savingPerson, setSavingPerson] = useState(false);
+  const [copiedActLink, setCopiedActLink] = useState(false);
+  const [copiedActQr, setCopiedActQr] = useState(false);
 
   const loadRegistrySummary = async (parentId: string) => {
     if (!parentId) return;
@@ -1476,11 +1478,19 @@ export default function AdminPanel({
       const data = await res.json();
       if (data.success) {
         setSubmissions((prev) => {
-          // Keep any already-loaded full (with-files) entries; add the rest.
-          const withFiles = prev.filter((s) => Array.isArray(s.files) && s.files.length > 0);
-          const withFilesIds = new Set(withFiles.map((s) => s.id));
-          const incoming = (data.submissions as Submission[]).filter((s) => !withFilesIds.has(s.id));
-          return [...withFiles, ...incoming];
+          // Keep any already-hydrated entry (files, comment, document or feedback),
+          // not just ones with files — otherwise the light list wipes comment-only
+          // submissions (which have no files). Add the rest from the light list.
+          const isHydrated = (s: Submission) =>
+            (Array.isArray(s.files) && s.files.length > 0) ||
+            (typeof s.comment === "string" && s.comment.trim().length > 0) ||
+            (typeof s.document === "string" && s.document.trim().length > 0) ||
+            (Array.isArray(s.feedbackHistory) && s.feedbackHistory.length > 0) ||
+            !!s.feedbackDraft;
+          const hydrated = prev.filter(isHydrated);
+          const hydratedIds = new Set(hydrated.map((s) => s.id));
+          const incoming = (data.submissions as Submission[]).filter((s) => !hydratedIds.has(s.id));
+          return [...hydrated, ...incoming];
         });
       }
     } catch (e) {
@@ -1989,8 +1999,9 @@ export default function AdminPanel({
         document.body
       )}
 
-      {/* Registration-mode indicator: a diagonal-lines strip on the left edge. */}
-      {copyRegistrationMode && projects.some((p) => (p.parentId || "") === selectedMetaProjectId) && createPortal(
+      {/* Registration-mode indicator: a diagonal-lines strip on the left edge.
+          Only while actually viewing the registration parent's detail. */}
+      {adminView === "detail" && copyRegistrationMode && projects.some((p) => (p.parentId || "") === selectedMetaProjectId) && createPortal(
         <div
           className="fixed left-0 top-0 bottom-0 w-[34px] pointer-events-none z-[45]"
           style={{
@@ -2502,6 +2513,43 @@ export default function AdminPanel({
                 </button>
               </div>
             </div>
+
+            {/* Shareable link for submitting to any activity by document. */}
+            {(() => {
+              const proj = projects.find((p) => p.id === selectedMetaProjectId);
+              if (!proj) return null;
+              const actUrl = `${window.location.origin}/${normalizeString(proj.name)}?entregar=1`;
+              const actQr = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(actUrl)}`;
+              const copyActLink = async () => {
+                try { await navigator.clipboard.writeText(actUrl); setCopiedActLink(true); setTimeout(() => setCopiedActLink(false), 1500); }
+                catch { window.prompt("Copia el enlace de entregas:", actUrl); }
+              };
+              const copyActQr = async () => {
+                try {
+                  const resp = await fetch(actQr);
+                  const blob = await resp.blob();
+                  const ClipItem = (window as any).ClipboardItem;
+                  if (navigator.clipboard && ClipItem) { await navigator.clipboard.write([new ClipItem({ [blob.type || "image/png"]: blob })]); setCopiedActQr(true); setTimeout(() => setCopiedActQr(false), 1500); }
+                  else window.open(actQr, "_blank");
+                } catch { window.open(actQr, "_blank"); }
+              };
+              return (
+                <div className="mb-5 rounded-lg border border-white/10 bg-white/5 p-3 flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest">Enlace de entregas</div>
+                    <div className="text-[11px] text-white/55 leading-relaxed">Los registrados ingresan su documento y eligen la actividad a subir — un solo enlace para todas.</div>
+                  </div>
+                  <button type="button" onClick={copyActLink} title="Copiar enlace de entregas"
+                    className="w-9 h-9 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all shrink-0">
+                    {copiedActLink ? <Check className="w-4 h-4" /> : <Link className="w-4 h-4" />}
+                  </button>
+                  <button type="button" onClick={copyActQr} title="Copiar QR de entregas"
+                    className="w-9 h-9 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all shrink-0">
+                    {copiedActQr ? <Check className="w-4 h-4" /> : <QrCode className="w-4 h-4" />}
+                  </button>
+                </div>
+              );
+            })()}
 
             {loadingSummary ? (
               <p className="text-sm text-white/40 text-center py-8">Cargando registro...</p>

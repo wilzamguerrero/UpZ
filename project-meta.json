@@ -236,7 +236,7 @@
     "bgBlur": 0,
     "bgColor": "#c72323",
     "icon": "Layers",
-    "isActive": false,
+    "isActive": true,
     "customFields": [],
     "useDatabase": false,
     "databaseId": "",
@@ -248,46 +248,39 @@
     "textColor": "auto",
     "createdAt": "2026-07-20T23:54:12.073Z"
   },
-  "3a32640c-88f4-815b-a42d-e5f8df485ccf": {
-    "title": "bbbbb",
-    "description": "gggggggg",
+  "3a62640c-88f4-8150-9062-f33c1bb636cc": {
+    "title": "materia1",
+    "createdAt": "2026-07-23T10:01:22.403Z",
+    "icon": "PaintBucket",
+    "bgColor": "#c72323"
+  },
+  "3a62640c-88f4-8101-bed9-e346ded2c67b": {
+    "title": "materia2",
+    "description": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
     "step1": "",
     "step2": "",
     "step3": "",
-    "expirationDate": "2026-07-22T23:59",
+    "expirationDate": "2026-07-24T23:59",
     "backgroundImage": "",
     "bgBlur": 0,
     "bgColor": "#c72323",
-    "icon": "PencilRuler",
+    "icon": "Hammer",
     "isActive": true,
     "customFields": [],
     "useDatabase": false,
     "databaseId": "",
     "dbColumns": [],
+    "allowComment": false,
+    "registrationMode": false,
     "groupId": "",
     "order": 0,
     "textColor": "auto",
-    "createdAt": "2026-07-20T23:54:59.449Z"
+    "createdAt": "2026-07-23T10:01:37.785Z"
   },
-  "3a62640c-88f4-8130-86af-d6d269348a18": {
-    "title": "harold",
-    "description": "asdadadadssada",
-    "step1": "",
-    "step2": "",
-    "step3": "",
-    "expirationDate": "2026-07-23T23:59",
-    "backgroundImage": "",
-    "bgBlur": 0,
-    "bgColor": "#18b46b",
-    "icon": "DollarSign",
-    "isActive": true,
-    "customFields": [],
-    "useDatabase": false,
-    "databaseId": "",
-    "dbColumns": [],
-    "groupId": "",
-    "order": 0,
-    "textColor": "auto",
-    "createdAt": "2026-07-23T00:44:47.577Z"
+  "3a62640c-88f4-816b-a6d8-f220a8c03e13": {
+    "title": "materia3",
+    "createdAt": "2026-07-23T10:01:47.289Z",
+    "icon": "Save",
+    "bgColor": "#c72323"
   }
 }

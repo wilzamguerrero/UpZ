@@ -498,11 +498,20 @@ export default function App() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // In registration mode the parent link only registers people (no upload here).
+    // The parent link in registration mode only registers people (no upload here),
+    // EXCEPT the "?entregar" variant, which is precisely the upload flow.
     const regScope = folderScopeId || (isProjectLocked ? selectedProjectId : "");
-    if (regScope && projectMeta[regScope]?.registrationMode) return;
-    if (!senderName || !senderEmail || !selectedProjectId || selectedFiles.length === 0) {
-      setSubmitError("Por favor completa todos los campos y añade al menos un archivo.");
+    const wantsAct = (() => {
+      try { return new URLSearchParams(window.location.search).has("entregar"); } catch { return false; }
+    })();
+    if (regScope && projectMeta[regScope]?.registrationMode && !wantsAct) return;
+    if (!senderName || !senderEmail || !selectedProjectId) {
+      setSubmitError("Por favor completa tu nombre, correo y selecciona un proyecto.");
+      return;
+    }
+    // Se puede enviar con archivos o solo con un comentario/enlace (al menos uno).
+    if (selectedFiles.length === 0 && !comment.trim()) {
+      setSubmitError("Adjunta al menos un archivo o escribe un comentario / enlace.");
       return;
     }
 
@@ -525,21 +534,24 @@ export default function App() {
     const chosenProj = projects.find(p => p.id === selectedProjectId);
     const projectName = chosenProj ? chosenProj.name : "";
 
-    // Step 1: Upload files in parallel (adaptive semaphore + throttling handling)
+    // Step 1: Upload files in parallel (adaptive semaphore + throttling handling).
+    // Skipped entirely when sending only a comment/link with no attachments.
     let fileRecords: UploadRecord[] = [];
 
-    try {
-      fileRecords = await uploadFiles(selectedFiles, {
-        onStep: (step) => setSubmitStep(step),
-        onProgress: (percent) =>
-          setUploadProgress({ fileName: `${selectedFiles.length} archivo(s)`, percent }),
-      });
-    } catch (err: any) {
-      setSubmitError(err.message || "Error al subir archivos.");
-      setIsSubmitting(false);
-      setSubmitStep("");
-      setUploadProgress(null);
-      return;
+    if (selectedFiles.length > 0) {
+      try {
+        fileRecords = await uploadFiles(selectedFiles, {
+          onStep: (step) => setSubmitStep(step),
+          onProgress: (percent) =>
+            setUploadProgress({ fileName: `${selectedFiles.length} archivo(s)`, percent }),
+        });
+      } catch (err: any) {
+        setSubmitError(err.message || "Error al subir archivos.");
+        setIsSubmitting(false);
+        setSubmitStep("");
+        setUploadProgress(null);
+        return;
+      }
     }
 
     // Step 2: POST metadata + upload IDs to create the Notion toggle block
@@ -631,8 +643,14 @@ export default function App() {
 
   // Registration view: the visited link is a PARENT project in registration mode.
   // (folder link → folderScopeId; single locked project → selectedProjectId.)
+  // The "?entregar" variant of the same link skips the registration form and instead
+  // lets the person load by document and pick which activity (child) to submit to.
+  const wantsActivities = (() => {
+    try { return new URLSearchParams(window.location.search).has("entregar"); } catch { return false; }
+  })();
   const registrationScopeId = folderScopeId || (isProjectLocked ? selectedProjectId : "");
-  const isRegistrationView = activeTab !== "admin" && !!registrationScopeId && !!projectMeta[registrationScopeId]?.registrationMode;
+  const isRegistrationParentLink = activeTab !== "admin" && !!registrationScopeId && !!projectMeta[registrationScopeId]?.registrationMode;
+  const isRegistrationView = isRegistrationParentLink && !wantsActivities;
   const registrationParentId = isRegistrationView ? registrationScopeId : "";
 
   // Child submission in registration mode: the selected child's PARENT has it on.
@@ -1492,7 +1510,7 @@ export default function App() {
 
                           <button
                             type="submit"
-                            disabled={isSubmitting || selectedFiles.length === 0 || !selectedProjectId || (childRegistrationMode && !loadedPerson)}
+                            disabled={isSubmitting || !selectedProjectId || (childRegistrationMode && !loadedPerson) || (selectedFiles.length === 0 && !comment.trim())}
                             className="w-full h-[56px] font-mono tracking-widest text-sm uppercase cursor-pointer select-none relative transition-all duration-300 btn-motion-retro group overflow-hidden"
                             style={{
                               '--btn-color': hasBgColor ? currentBgColor : "var(--accent, #f5f011)"

@@ -81,8 +81,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (!senderName || !senderEmail || !projectId) {
     return json({ error: "Faltan campos obligatorios (nombre, correo o proyecto)." }, 400);
   }
-  if (fileRecords.length === 0) {
-    return json({ error: "No se han subido archivos." }, 400);
+  // Allow sending only a comment/link (no attachments) as long as there's a comment.
+  if (fileRecords.length === 0 && !trimmedComment) {
+    return json({ error: "Adjunta al menos un archivo o escribe un comentario." }, 400);
   }
   if (!notionSecret) {
     return json({ error: "Notion no esta configurado en el servidor." }, 400);
@@ -149,13 +150,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           },
         }]
       : []),
-    {
-      object: "block",
-      type: "heading_3",
-      heading_3: {
-        rich_text: [{ type: "text", text: { content: "Archivos adjuntos" } }],
-      },
-    },
+    ...(fileRecords.length > 0
+      ? [{
+          object: "block",
+          type: "heading_3",
+          heading_3: { rich_text: [{ type: "text", text: { content: "Archivos adjuntos" } }] },
+        }]
+      : []),
     ...fileRecords.map((f: FileRecord) => {
       const isImage = IMAGE_TYPES.has(f.mimeType);
       const sizeLabel = (f.size / (1024 * 1024)).toFixed(2) + " MB";
