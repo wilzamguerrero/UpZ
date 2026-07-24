@@ -96,11 +96,22 @@ const NotificationCenter: React.FC<Props> = ({ light, onOpenDelivery }) => {
     const body = fresh.length === 1
       ? `${n0.senderName || n0.senderEmail || "Remitente"} · ${n0.projectName}`
       : `${fresh.length} entregas nuevas`;
-    const data = fresh.length === 1
+    const data: { projectId?: string; email?: string; document?: string } = fresh.length === 1
       ? { projectId: n0.projectId, email: n0.senderEmail, document: n0.document }
       : {};
     const opts: NotificationOptions = { body, icon: "/icon.svg", badge: "/icon.svg", tag: fresh.length === 1 ? n0.id : "envi-multi", data } as NotificationOptions;
-    const viaPage = () => { try { new Notification(title, opts); } catch { /* ignore */ } };
+    // Page-level notification (no SW, e.g. local dev): must wire its own onclick,
+    // since the SW's notificationclick handler only applies to SW notifications.
+    const viaPage = () => {
+      try {
+        const n = new Notification(title, opts);
+        n.onclick = () => {
+          try { window.focus(); } catch { /* ignore */ }
+          if (data.projectId) onOpenDelivery(data.projectId, data.email || "", data.document || "");
+          n.close();
+        };
+      } catch { /* ignore */ }
+    };
     // getRegistration() resolves immediately (undefined when none) — unlike .ready
     // which hangs forever if no SW is registered (as in local dev).
     if ("serviceWorker" in navigator) {
@@ -110,7 +121,7 @@ const NotificationCenter: React.FC<Props> = ({ light, onOpenDelivery }) => {
     } else {
       viaPage();
     }
-  }, []);
+  }, [onOpenDelivery]);
 
   // Poll the light submissions list and merge new ones into the history.
   useEffect(() => {
