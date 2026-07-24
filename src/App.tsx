@@ -949,7 +949,7 @@ export default function App() {
                 <Send className="w-4 h-4" />
               </button>
             )}
-            {activeTab === "admin" && (
+            {activeTab === "admin" && isAdminAuthenticated && (
               <NotificationCenter
                 light={hasBgColor && bgColorIsLight}
                 onOpenDelivery={handleOpenDelivery}
