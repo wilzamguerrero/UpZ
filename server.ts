@@ -2338,7 +2338,7 @@ app.get("/api/registry-summary", async (req, res) => {
     }
 
     const activities: { projectId: string; projectName: string }[] = [];
-    const notes: Record<string, Record<string, { note: string; status: string }>> = {};
+    const notes: Record<string, Record<string, { note: string; status: string; pending: boolean }>> = {};
     for (const b of children) {
       if (b.type !== "code" || b.code?.language !== "json") continue;
       const g = parseJsonCodeBlock(b)?.[GRADES_MARKER];
@@ -2347,7 +2347,7 @@ app.get("/api/registry-summary", async (req, res) => {
       for (const row of Array.isArray(g.rows) ? g.rows : []) {
         const doc = String(row.document || "").trim() || emailToDoc[String(row.email || "").toLowerCase()] || "";
         if (!doc) continue;
-        (notes[doc] = notes[doc] || {})[g.projectId] = { note: String(row.note || ""), status: String(row.status || "") };
+        (notes[doc] = notes[doc] || {})[g.projectId] = { note: String(row.note || ""), status: String(row.status || ""), pending: !!row.pending };
       }
     }
 
@@ -2583,7 +2583,7 @@ app.post("/api/upload-part", upload.single("file"), async (req, res) => {
 
 // 8. Submit files (creates Toggle block inside specific project child page using pre-uploaded fileIDs)
 app.post("/api/submit", async (req, res) => {
-  const { senderName, senderEmail, projectId, projectName, fileRecords = [], bgColor = "", comment = "", document = "" } = req.body;
+  const { senderName, senderEmail, projectId, projectName, fileRecords = [], bgColor = "", comment = "", document = "", iconPng = "" } = req.body;
   const trimmedComment = String(comment || "").trim();
   const trimmedDocument = String(document || "").trim();
 
@@ -2774,6 +2774,21 @@ app.post("/api/submit", async (req, res) => {
       senderName: process.env.MAIL_FROM_NAME || "ENVI",
     };
     if (hasGmailCredentials(gmailCreds)) {
+      // Inline header icon (PNG rasterized on the client from the activity's icon).
+      let iconCid: string | undefined;
+      const attachments: MailAttachment[] = [];
+      try {
+        const src = String(iconPng || "");
+        if (src) {
+          const comma = src.indexOf(",");
+          const b64 = comma >= 0 ? src.slice(comma + 1) : src;
+          const bytes = new Uint8Array(Buffer.from(b64, "base64"));
+          if (bytes.byteLength > 0 && bytes.byteLength <= 512 * 1024) {
+            iconCid = "projicon";
+            attachments.push({ filename: "icono.png", contentType: "image/png", content: bytes, contentId: iconCid, inline: true });
+          }
+        }
+      } catch { /* icon is decorative; ignore */ }
       const { subject, html, text } = buildReceiptEmail({
         senderName: submissionRecord.senderName,
         senderEmail: submissionRecord.senderEmail,
@@ -2781,6 +2796,7 @@ app.post("/api/submit", async (req, res) => {
         timestamp: submissionRecord.timestamp,
         files: submissionRecord.files.map((f: any) => ({ name: f.name, size: f.size })),
         accentColor: bgColor,
+        iconCid,
       });
       sendGmailMessage(gmailCreds, {
         to: submissionRecord.senderEmail,
@@ -2788,6 +2804,7 @@ app.post("/api/submit", async (req, res) => {
         subject,
         html,
         text,
+        attachments,
       }).catch((err) => console.error("No se pudo enviar el comprobante por correo:", err));
     }
 

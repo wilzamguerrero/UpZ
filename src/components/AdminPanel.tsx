@@ -498,6 +498,9 @@ interface AdminPanelProps {
     textColor?: "auto" | "white" | "black";
     icon?: string;
   }) => void;
+  /** Set (with a changing nonce) when a notification is clicked, to open that
+   *  delivery's activity and focus the person. */
+  focusDelivery?: { projectId: string; email: string; document: string; nonce: number } | null;
 }
 
 /** Returns a --btn-color value that is always legible on the black btn-motion-retro background.
@@ -589,7 +592,8 @@ export default function AdminPanel({
   refreshProjectMeta,
   applyProjectMetaUpdate,
   applyProjectMetaUpdates,
-  onAdminPreviewChange
+  onAdminPreviewChange,
+  focusDelivery
 }: AdminPanelProps) {
   const { appearance, saveAppearance } = useTheme();
 
@@ -765,7 +769,7 @@ export default function AdminPanel({
   const [regSummary, setRegSummary] = useState<{
     people: { document?: string; name?: string; email?: string; phone?: string }[];
     activities: { projectId: string; projectName: string }[];
-    notes: Record<string, Record<string, { note: string; status: string }>>;
+    notes: Record<string, Record<string, { note: string; status: string; pending?: boolean }>>;
   } | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
   // Add/edit a registered person directly from the admin.
@@ -790,6 +794,9 @@ export default function AdminPanel({
   // When navigating to a child activity from the consolidated table, remember which
   // person to auto-open there so the admin lands right on their submission.
   const [pendingSenderFocus, setPendingSenderFocus] = useState<{ projectId: string; email: string; document: string } | null>(null);
+
+  // New-delivery notifications now live in the app-level <NotificationCenter/>.
+  // The admin only needs to react to a clicked notification via `focusDelivery`.
 
   useEffect(() => {
     try { localStorage.setItem("envi_registry_cols", JSON.stringify(regCols)); } catch { /* ignore */ }
@@ -917,12 +924,20 @@ export default function AdminPanel({
       const { note, status } = latestFeedbackNote(earliest);
       // Prefer any submission that carries a document (registration mode).
       const document = group.map((s) => s.document).find((d) => d && d.trim()) || "";
+      // "Pending" = the person delivered something that still needs (re)grading:
+      // either no feedback has been SENT yet, or their latest submission is newer
+      // than the last sent feedback (they re-sent after being graded).
+      const hist = earliest.feedbackHistory || [];
+      const lastSentTs = hist.length ? new Date(hist[hist.length - 1].sentAt || 0).getTime() : 0;
+      const latestSubTs = new Date(latest.timestamp).getTime();
+      const pending = lastSentTs === 0 ? true : latestSubTs > lastSentTs;
       return {
         name: earliest.senderName,
         email: earliest.senderEmail,
         document,
         note,
         status: status || "sin_retro",
+        pending,
         submissions: group.length,
         submittedAt: latest.timestamp,
         _ts: new Date(earliest.timestamp).getTime(),
@@ -936,6 +951,7 @@ export default function AdminPanel({
       document: r.document,
       note: r.note,
       status: r.status,
+      pending: r.pending,
     }));
   };
 
@@ -1198,6 +1214,8 @@ export default function AdminPanel({
     openProject(projId);
   };
 
+
+
   // Once the focused activity's submissions have loaded, expand that person's panel
   // and scroll to it, then clear the pending focus.
   useEffect(() => {
@@ -1240,6 +1258,15 @@ export default function AdminPanel({
     }
     fetchSubmissions();
   }, [config]);
+
+  // Open a delivery when a notification (app-level) is clicked. The nonce changes
+  // on every click so the same target can be reopened.
+  useEffect(() => {
+    if (focusDelivery && focusDelivery.projectId) {
+      openActivityForPerson(focusDelivery.projectId, focusDelivery.email, focusDelivery.document);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusDelivery?.nonce]);
 
   // Handle copywriting selection initialization and auto-healing
   useEffect(() => {
@@ -2803,13 +2830,14 @@ export default function AdminPanel({
                               {childCols.map((c) => {
                                 const cell = perDoc[c.id];
                                 const statusTxt = cell?.status === "guardado" ? " · nota guardada (sin enviar)" : cell?.status === "enviado" ? " · nota enviada" : "";
+                                const pendingTxt = cell?.pending ? " · entrega sin evaluar o reenviada" : "";
                                 return (
                                   <td key={c.id} className="py-1.5 px-2 text-center whitespace-nowrap">
                                     <button
                                       type="button"
                                       onClick={() => openActivityForPerson(c.id, person.email || "", doc)}
-                                      className="w-full inline-flex items-center justify-center min-h-[1.25rem] px-1 rounded hover:bg-white/10 transition-colors cursor-pointer"
-                                      title={`Abrir "${c.name}" en la entrega de ${person.name || doc || "esta persona"}${statusTxt}`}
+                                      className="w-full inline-flex items-center justify-center gap-1 min-h-[1.25rem] px-1 rounded hover:bg-white/10 transition-colors cursor-pointer"
+                                      title={`Abrir "${c.name}" en la entrega de ${person.name || doc || "esta persona"}${statusTxt}${pendingTxt}`}
                                     >
                                       {cell && cell.note ? (
                                         <span className={`font-mono font-bold ${cell.status === "guardado" ? "text-white/50 italic" : "text-white"}`}>
@@ -2817,6 +2845,12 @@ export default function AdminPanel({
                                         </span>
                                       ) : (
                                         <span className="text-white/20">—</span>
+                                      )}
+                                      {cell?.pending && (
+                                        <UploadCloud
+                                          className="w-3 h-3 text-white shrink-0"
+                                          aria-label="Entrega sin evaluar o reenviada"
+                                        />
                                       )}
                                     </button>
                                   </td>

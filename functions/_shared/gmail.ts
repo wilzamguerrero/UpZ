@@ -249,6 +249,8 @@ export function buildReceiptEmail(data: {
   files: { name: string; size: number }[];
   /** Color de fondo del proyecto (hex). Se usa en la cabecera. */
   accentColor?: string;
+  /** Content-ID of an inline PNG icon to show next to "ENVI" in the header. */
+  iconCid?: string;
 }): { subject: string; html: string; text: string } {
   const dateObj = data.timestamp ? new Date(data.timestamp) : new Date();
   const dateLabel = isNaN(dateObj.getTime())
@@ -262,6 +264,12 @@ export function buildReceiptEmail(data: {
       });
 
   const subject = `Comprobante de envío · ${data.projectName}`;
+
+  // Icono del proyecto embebido (CID) al lado de "ENVI", igual que en el correo de
+  // retroalimentación, para que ambos correos muestren el icono de la actividad.
+  const iconImg = data.iconCid
+    ? `<img src="cid:${data.iconCid}" width="40" height="40" alt="" style="display:inline-block;vertical-align:middle;margin-right:12px;border:0;outline:none;" />`
+    : "";
 
   // Color de la cabecera = color del proyecto (o un rojo ENVI por defecto).
   const headerBg = normalizeHex(data.accentColor) || "#d21f28";
@@ -308,7 +316,7 @@ export function buildReceiptEmail(data: {
         <!-- Cabecera con el color del proyecto -->
         <tr>
           <td style="background-color:${headerBg};padding:30px 24px;text-align:center;border-radius:0;">
-            <div style="font-size:30px;font-weight:800;color:${headerText};letter-spacing:3px;font-family:${fontStack};">ENVI</div>
+            <div style="font-size:30px;font-weight:800;color:${headerText};letter-spacing:3px;font-family:${fontStack};white-space:nowrap;">${iconImg}<span style="vertical-align:middle;">ENVI</span></div>
             <div style="font-size:11px;color:${headerSub};margin-top:8px;letter-spacing:2px;text-transform:uppercase;font-family:${monoStack};">Comprobante de envío</div>
             <div style="font-size:10px;color:${headerSub};margin-top:6px;letter-spacing:1px;font-family:${monoStack};">Dev by WilZamGuerrero</div>
           </td>

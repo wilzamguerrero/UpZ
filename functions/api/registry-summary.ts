@@ -82,7 +82,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     // Notes matrix: { [document]: { [projectId]: { note, status } } } from the
     // per-child grades blocks (each is a direct child of the parent).
     const activities: { projectId: string; projectName: string }[] = [];
-    const notes: Record<string, Record<string, { note: string; status: string }>> = {};
+    const notes: Record<string, Record<string, { note: string; status: string; pending: boolean }>> = {};
     for (const b of children) {
       if (b.type !== "code" || b.code?.language !== "json") continue;
       const g = parseJsonBlock(b)?.[GRADES_MARKER];
@@ -91,7 +91,7 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
       for (const row of Array.isArray(g.rows) ? g.rows : []) {
         const doc = String(row.document || "").trim() || emailToDoc[String(row.email || "").toLowerCase()] || "";
         if (!doc) continue;
-        (notes[doc] = notes[doc] || {})[g.projectId] = { note: String(row.note || ""), status: String(row.status || "") };
+        (notes[doc] = notes[doc] || {})[g.projectId] = { note: String(row.note || ""), status: String(row.status || ""), pending: !!row.pending };
       }
     }
 

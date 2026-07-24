@@ -25,6 +25,7 @@ const ICON_MAP: Record<string, LucideIcon> = ICON_BY_KEY;
 import { Project, ProjectMeta } from "./types";
 import Dropzone from "./components/Dropzone";
 import AdminPanel from "./components/AdminPanel";
+import NotificationCenter from "./components/NotificationCenter";
 import AppLoader from "./components/AppLoader";
 import { ScrambleReveal } from "./components/ScrambleText";
 import { motion, AnimatePresence } from "motion/react";
@@ -54,6 +55,49 @@ const projectSlug = (id: string, name: string) => {
  *  "-e" suffix (e.g. "3a3264-materia-e") instead of "?entregar=1". */
 const hasEntregasSuffix = (slug: string) => /-e$/i.test(slug || "");
 const stripEntregasSuffix = (slug: string) => (slug || "").replace(/-e$/i, "");
+
+/** True when a #rgb/#rrggbb color is light (needs a dark icon/text on top). */
+const isHexLight = (hex?: string | null): boolean => {
+  if (!hex) return false;
+  const h = hex.replace("#", "").trim();
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  if (full.length !== 6 || !/^[0-9a-fA-F]{6}$/.test(full)) return false;
+  const r = parseInt(full.slice(0, 2), 16) / 255;
+  const g = parseInt(full.slice(2, 4), 16) / 255;
+  const b = parseInt(full.slice(4, 6), 16) / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6;
+};
+
+/** Rasterizes a Lucide icon to a base64 PNG data URL so it can be embedded in the
+ *  receipt email (Gmail strips inline SVG). Returns "" on any failure. */
+async function rasterizeIconDataUrl(iconKey: string, color: string, size = 128): Promise<string> {
+  try {
+    const Icon = ICON_MAP[iconKey] || UploadCloud;
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    let svg = renderToStaticMarkup(
+      React.createElement(Icon as LucideIcon, { color, size, strokeWidth: 2.5 } as any)
+    );
+    if (!/xmlns=/.test(svg)) svg = svg.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"');
+    const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    const img = new window.Image();
+    const loaded = await new Promise<boolean>((resolve) => {
+      img.onload = () => resolve(true);
+      img.onerror = () => resolve(false);
+      img.src = svgUrl;
+    });
+    if (!loaded) return "";
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return "";
+    ctx.clearRect(0, 0, size, size);
+    ctx.drawImage(img, 0, 0, size, size);
+    return canvas.toDataURL("image/png");
+  } catch {
+    return "";
+  }
+}
 
 const getCachedProjectMeta = (): Record<string, ProjectMeta> => {
   try {
@@ -199,6 +243,28 @@ export default function App() {
     textColor?: "auto" | "white" | "black";
     icon?: string;
   } | null>(null);
+
+  // When a notification is clicked, ask the admin panel to open that delivery.
+  // The changing `nonce` re-triggers the navigation even for the same target.
+  const [focusDelivery, setFocusDelivery] = useState<{ projectId: string; email: string; document: string; nonce: number } | null>(null);
+  const handleOpenDelivery = (projectId: string, email: string, document: string) => {
+    setActiveTab("admin");
+    setFocusDelivery({ projectId, email, document, nonce: Date.now() });
+  };
+
+  // Clicking a native OS notification (handled by the service worker) posts a
+  // message here so the app opens that delivery even from the upload tab.
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const handler = (e: MessageEvent) => {
+      const d = e.data;
+      if (d && d.type === "OPEN_DELIVERY" && d.projectId) {
+        handleOpenDelivery(d.projectId, d.email || "", d.document || "");
+      }
+    };
+    navigator.serviceWorker.addEventListener("message", handler);
+    return () => navigator.serviceWorker.removeEventListener("message", handler);
+  }, []);
 
   // Persist the active tab and admin auth for the session, so a reload keeps you
   // exactly where you were (the selected project + view are already persisted).
@@ -597,6 +663,13 @@ export default function App() {
     setUploadProgress({ fileName: fileRecords[0]?.name || "", percent: 100 });
     try {
       const submitMeta = projectMeta[selectedProjectId];
+      // Rasterize the ACTIVITY's own icon so the receipt email shows it next to
+      // "ENVI" (works for individual deliveries and per-activity in registration mode).
+      let iconPng = "";
+      if (submitMeta?.icon) {
+        const iconColor = submitMeta.bgColor && isHexLight(submitMeta.bgColor) ? "#111111" : "#ffffff";
+        iconPng = await rasterizeIconDataUrl(submitMeta.icon, iconColor, 128);
+      }
       const res = await fetch("/api/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -618,6 +691,8 @@ export default function App() {
           document: loadedPerson?.document || "",
           // Color del proyecto, para que el correo de comprobante use el mismo color.
           bgColor: submitMeta?.bgColor || "",
+          // Icono del proyecto (PNG base64) para la cabecera del correo.
+          iconPng,
         }),
       });
       const data = await res.json();
@@ -873,6 +948,12 @@ export default function App() {
               >
                 <Send className="w-4 h-4" />
               </button>
+            )}
+            {activeTab === "admin" && (
+              <NotificationCenter
+                light={hasBgColor && bgColorIsLight}
+                onOpenDelivery={handleOpenDelivery}
+              />
             )}
             <button
               id="tab-btn-admin"
@@ -1728,6 +1809,7 @@ export default function App() {
                     refreshProjectMeta={fetchProjectMeta}
                     applyProjectMetaUpdate={applyProjectMetaUpdate}
                     onAdminPreviewChange={setAdminPreview}
+                    focusDelivery={focusDelivery}
                   />
                 )}
               </motion.div>

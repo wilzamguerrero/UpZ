@@ -1,5 +1,21 @@
 import { json, appendChildren, notionFetch, cleanNotionId, type Env } from "../_shared/notion";
-import { sendGmailMessage, buildReceiptEmail, hasGmailCredentials } from "../_shared/gmail";
+import { sendGmailMessage, buildReceiptEmail, hasGmailCredentials, type MailAttachment } from "../_shared/gmail";
+
+/** Decodes a base64 (or data URL) string into raw bytes. Works in Workers & Node. */
+function dataUrlToBytes(dataUrl: string): Uint8Array | null {
+  try {
+    const comma = dataUrl.indexOf(",");
+    const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+    const g = globalThis as any;
+    if (typeof g.Buffer !== "undefined") return new Uint8Array(g.Buffer.from(b64, "base64"));
+    const bin = g.atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  } catch {
+    return null;
+  }
+}
 import { SUBMISSION_COMMENT_MARKER, SUBMISSION_DOCUMENT_MARKER } from "../_shared/submissions";
 
 async function getCredentials(env: Env): Promise<{ notionSecret: string }> {
@@ -54,6 +70,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     bgColor?: string;
     comment?: string;
     document?: string;
+    iconPng?: string;
   };
   try {
     body = await context.request.json();
@@ -74,6 +91,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     bgColor = "",
     comment = "",
     document = "",
+    iconPng = "",
   } = body;
   const trimmedComment = String(comment || "").trim();
   const trimmedDocument = String(document || "").trim();
@@ -301,6 +319,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     senderName: context.env.MAIL_FROM_NAME || "ENVI",
   };
   if (hasGmailCredentials(gmailCreds)) {
+    // Inline header icon (PNG rasterized on the client from the activity's icon).
+    let iconCid: string | undefined;
+    const attachments: MailAttachment[] = [];
+    const iconBytes = iconPng ? dataUrlToBytes(iconPng) : null;
+    if (iconBytes && iconBytes.byteLength > 0 && iconBytes.byteLength <= 512 * 1024) {
+      iconCid = "projicon";
+      attachments.push({ filename: "icono.png", contentType: "image/png", content: iconBytes, contentId: iconCid, inline: true });
+    }
     const { subject, html, text } = buildReceiptEmail({
       senderName,
       senderEmail,
@@ -308,9 +334,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       timestamp: submissionRecord.timestamp,
       files: submissionRecord.files.map((f) => ({ name: f.name, size: f.size })),
       accentColor: bgColor,
+      iconCid,
     });
     context.waitUntil(
-      sendGmailMessage(gmailCreds, { to: senderEmail, toName: senderName, subject, html, text }).catch(
+      sendGmailMessage(gmailCreds, { to: senderEmail, toName: senderName, subject, html, text, attachments }).catch(
         (err) => console.error("No se pudo enviar el comprobante por correo:", err)
       )
     );
