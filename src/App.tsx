@@ -40,6 +40,21 @@ const normalizeString = (s: string) => {
     .replace(/^-|-$/g, "");
 };
 
+/** First 6 hex chars of a Notion block id — a stable, unique short id used to
+ *  disambiguate same-named projects in their public link. */
+const shortProjectId = (id: string) => (id || "").replace(/-/g, "").slice(0, 6).toLowerCase();
+/** Id-prefixed public slug: "<shortId>-<name-slug>". */
+const projectSlug = (id: string, name: string) => {
+  const base = normalizeString(name);
+  const sid = shortProjectId(id);
+  return sid ? `${sid}-${base}` : base;
+};
+
+/** The "entregas" variant of a registration link is the same slug with a short
+ *  "-e" suffix (e.g. "3a3264-materia-e") instead of "?entregar=1". */
+const hasEntregasSuffix = (slug: string) => /-e$/i.test(slug || "");
+const stripEntregasSuffix = (slug: string) => (slug || "").replace(/-e$/i, "");
+
 const getCachedProjectMeta = (): Record<string, ProjectMeta> => {
   try {
     const cached = localStorage.getItem("cached_project_meta");
@@ -100,6 +115,9 @@ export default function App() {
   // When a FOLDER link is visited, its child projects become selectable from one link.
   const [folderScopeId, setFolderScopeId] = useState("");
   const [folderScopeName, setFolderScopeName] = useState("");
+  // True when the visited path is the "entregas" variant of a registration link
+  // ("<slug>-e"): show the activity picker instead of the registration form.
+  const [pathEntregas, setPathEntregas] = useState(false);
 
   // App Config Info
   const [config, setConfig] = useState<{
@@ -353,11 +371,31 @@ export default function App() {
         // Resolve path url matching
         const cleanPath = getCurrentPathSlug();
         if (cleanPath && cleanPath.toLowerCase() !== "admin") {
-          const match = data.projects.find((p: Project) => {
-            const matchesId = p.id.toLowerCase() === cleanPath.toLowerCase() || p.id.replace(/-/g, "").toLowerCase() === cleanPath.toLowerCase();
-            const matchesSlug = normalizeString(p.name) === normalizeString(decodeURIComponent(cleanPath));
-            return matchesId || matchesSlug;
-          });
+          const matchBy = (slug: string): Project | null => {
+            const norm = normalizeString(decodeURIComponent(slug));
+            return (
+              data.projects.find((p: Project) => {
+                const matchesId = p.id.toLowerCase() === slug.toLowerCase() || p.id.replace(/-/g, "").toLowerCase() === slug.toLowerCase();
+                // New id-prefixed slug ("<shortId>-<name>") — resolves a single project
+                // even when several share the same name.
+                const matchesShortSlug = projectSlug(p.id, p.name) === norm;
+                // Legacy plain-name slug (kept so old links keep working).
+                const matchesSlug = normalizeString(p.name) === norm;
+                return matchesId || matchesShortSlug || matchesSlug;
+              }) || null
+            );
+          };
+
+          // Try the path as-is first (regular link, or a project whose slug ends in
+          // "-e"). Only if that fails and the path ends with "-e" treat it as the
+          // entregas variant of a registration link.
+          let match = matchBy(cleanPath);
+          let entregas = false;
+          if (!match && hasEntregasSuffix(cleanPath)) {
+            match = matchBy(stripEntregasSuffix(cleanPath));
+            entregas = !!match;
+          }
+          setPathEntregas(entregas);
 
           if (match) {
             // If the matched project is a FOLDER (has active child projects), don't
@@ -390,6 +428,7 @@ export default function App() {
           return;
         }
 
+        setPathEntregas(false);
         setFolderScopeId("");
         setFolderScopeName("");
         setSelectedProjectId("");
@@ -501,7 +540,7 @@ export default function App() {
     // The parent link in registration mode only registers people (no upload here),
     // EXCEPT the "?entregar" variant, which is precisely the upload flow.
     const regScope = folderScopeId || (isProjectLocked ? selectedProjectId : "");
-    const wantsAct = (() => {
+    const wantsAct = pathEntregas || (() => {
       try { return new URLSearchParams(window.location.search).has("entregar"); } catch { return false; }
     })();
     if (regScope && projectMeta[regScope]?.registrationMode && !wantsAct) return;
@@ -645,7 +684,7 @@ export default function App() {
   // (folder link → folderScopeId; single locked project → selectedProjectId.)
   // The "?entregar" variant of the same link skips the registration form and instead
   // lets the person load by document and pick which activity (child) to submit to.
-  const wantsActivities = (() => {
+  const wantsActivities = pathEntregas || (() => {
     try { return new URLSearchParams(window.location.search).has("entregar"); } catch { return false; }
   })();
   const registrationScopeId = folderScopeId || (isProjectLocked ? selectedProjectId : "");

@@ -195,20 +195,44 @@ export function normalizeAppearance(appearance?: PreviewAppearance | null) {
   };
 }
 
+/** First 6 hex chars of a Notion block id — a stable, unique short id used to
+ *  disambiguate same-named projects in their public link. */
+export function shortProjectId(id: string) {
+  return (id || "").replace(/-/g, "").slice(0, 6).toLowerCase();
+}
+
+/** Id-prefixed public slug: "<shortId>-<name-slug>". */
+export function projectSlug(id: string, name: string) {
+  const base = normalizeString(name);
+  const sid = shortProjectId(id);
+  return sid ? `${sid}-${base}` : base;
+}
+
+function matchBySlug(slug: string, projects: PreviewProject[]) {
+  const normPath = normalizeString(decodeURIComponent(slug));
+  return (
+    projects.find((project) => {
+      const matchesId = project.id.toLowerCase() === slug.toLowerCase()
+        || project.id.replace(/-/g, "").toLowerCase() === slug.toLowerCase();
+      // New id-prefixed slug resolves same-named projects uniquely.
+      const matchesShortSlug = projectSlug(project.id, project.name) === normPath;
+      // Legacy plain-name slug kept for backward compatibility.
+      const matchesSlug = normalizeString(project.name) === normPath;
+      return matchesId || matchesShortSlug || matchesSlug;
+    }) || null
+  );
+}
+
 export function matchProjectForPath(pathname: string, projects: PreviewProject[]) {
   const cleanPath = normalizePathSlug(pathname);
   if (!cleanPath || cleanPath.toLowerCase() === "admin") return null;
 
-  const decodedPath = decodeURIComponent(cleanPath);
-
-  return (
-    projects.find((project) => {
-      const matchesId = project.id.toLowerCase() === cleanPath.toLowerCase()
-        || project.id.replace(/-/g, "").toLowerCase() === cleanPath.toLowerCase();
-      const matchesSlug = normalizeString(project.name) === normalizeString(decodedPath);
-      return matchesId || matchesSlug;
-    }) || null
-  );
+  // Try the path as-is; then, if it ends with the "-e" entregas suffix and didn't
+  // match, resolve the base slug (both variants point to the same project).
+  const direct = matchBySlug(cleanPath, projects);
+  if (direct) return direct;
+  if (/-e$/i.test(cleanPath)) return matchBySlug(cleanPath.replace(/-e$/i, ""), projects);
+  return null;
 }
 
 export function resolvePreview(
@@ -251,7 +275,7 @@ export function resolvePreview(
     description: cleanText(meta.description, fallbackDescription, [LEGACY_PROJECT_DESCRIPTION, LEGACY_HOME_MESSAGE]),
     bgColor: normalizeColor(meta.bgColor, appearance.homeBgColor),
     icon: cleanText(meta.icon, DEFAULT_PROJECT_ICON),
-    canonicalPath: `/${normalizeString(project.name)}`,
+    canonicalPath: `/${projectSlug(project.id, project.name)}`,
     projectName: project.name,
   };
 }

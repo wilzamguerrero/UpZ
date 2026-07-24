@@ -170,6 +170,18 @@ const normalizeString = (s: string) => {
     .replace(/^-|-$/g, "");
 };
 
+/** First 6 hex chars of a Notion block id: a stable, unique-enough short id so
+ *  two projects with the SAME name still get distinct public links. Derived from
+ *  the id itself, so it needs no storage and works for existing projects too. */
+const shortProjectId = (id: string) => (id || "").replace(/-/g, "").slice(0, 6).toLowerCase();
+/** Public slug for a project: "<shortId>-<name-slug>" (e.g. "a1b2c3-materia1").
+ *  Falls back to just the name slug if the id is missing. */
+const projectSlug = (id: string, name: string) => {
+  const base = normalizeString(name);
+  const sid = shortProjectId(id);
+  return sid ? `${sid}-${base}` : base;
+};
+
 
 
 interface ProjectTreeItemProps {
@@ -208,10 +220,18 @@ const ProjectTreeItem: React.FC<ProjectTreeItemProps> = ({
   const [savingRename, setSavingRename] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedQr, setCopiedQr] = useState(false);
+  const [copiedActLink, setCopiedActLink] = useState(false);
+  const [copiedActQr, setCopiedActQr] = useState(false);
 
   // Public share link for this project (what you send to other people).
-  const shareUrl = `${window.location.origin}/${normalizeString(node.name)}`;
+  // Uses an id-prefixed slug so same-named projects never collide.
+  const shareUrl = `${window.location.origin}/${projectSlug(node.id, node.name)}`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(shareUrl)}`;
+  // Registration mode adds a second "entregas" link (?entregar=1): one URL where
+  // registered people load by document and pick which activity to submit to.
+  const isRegistrationParent = !!meta?.registrationMode;
+  const actUrl = `${shareUrl}-e`;
+  const actQrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(actUrl)}`;
 
   const copyLink = async () => {
     try {
@@ -237,6 +257,33 @@ const ProjectTreeItem: React.FC<ProjectTreeItemProps> = ({
       }
     } catch {
       window.open(qrUrl, "_blank");
+    }
+  };
+
+  const copyActLink = async () => {
+    try {
+      await navigator.clipboard.writeText(actUrl);
+      setCopiedActLink(true);
+      setTimeout(() => setCopiedActLink(false), 1500);
+    } catch {
+      window.prompt("Copia el enlace de entregas:", actUrl);
+    }
+  };
+
+  const copyActQr = async () => {
+    try {
+      const resp = await fetch(actQrUrl);
+      const blob = await resp.blob();
+      const ClipItem = (window as any).ClipboardItem;
+      if (navigator.clipboard && ClipItem) {
+        await navigator.clipboard.write([new ClipItem({ [blob.type || "image/png"]: blob })]);
+        setCopiedActQr(true);
+        setTimeout(() => setCopiedActQr(false), 1500);
+      } else {
+        window.open(actQrUrl, "_blank");
+      }
+    } catch {
+      window.open(actQrUrl, "_blank");
     }
   };
 
@@ -301,6 +348,15 @@ const ProjectTreeItem: React.FC<ProjectTreeItemProps> = ({
                 · {children.length} {children.length === 1 ? "proyecto" : "proyectos"}
               </span>
             )}
+            {meta?.registrationMode && (
+              <span
+                className="inline-flex items-center gap-1 text-[9px] font-mono font-bold px-1.5 py-0.5 rounded text-white border border-white/40 shrink-0"
+                style={{ backgroundImage: "repeating-linear-gradient(119deg, rgba(255,255,255,0.35) 0px, rgba(255,255,255,0.35) 1px, transparent 1px, transparent 6px)" }}
+                title="Modo registro activo · el enlace registra personas y los hijos piden solo el documento"
+              >
+                <ClipboardList className="w-3 h-3" /> Registro
+              </span>
+            )}
             {meta?.useDatabase && <Database className="w-3 h-3 text-emerald-400" />}
             {!isActive && <span className="text-[9px] text-red-400">Inactivo</span>}
           </div>
@@ -332,8 +388,28 @@ const ProjectTreeItem: React.FC<ProjectTreeItemProps> = ({
           <button onClick={() => setAdding((v) => !v)} title="Crear dentro" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10"><Plus className="w-3.5 h-3.5" /></button>
           <button onClick={() => { setRenameName(node.name); setRenaming((v) => !v); }} title="Renombrar" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10"><PencilLine className="w-3.5 h-3.5" /></button>
           <button onClick={() => onToggleActive(node.id, isActive)} title={isActive ? "Desactivar" : "Activar"} className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10">{isActive ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}</button>
-          <button onClick={copyLink} title="Copiar enlace para compartir" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10">{copiedLink ? <Check className="w-3.5 h-3.5" /> : <Link className="w-3.5 h-3.5" />}</button>
-          <button onClick={copyQr} title="Copiar código QR" className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10">{copiedQr ? <Check className="w-3.5 h-3.5" /> : <QrCode className="w-3.5 h-3.5" />}</button>
+          <button onClick={copyLink} title={isRegistrationParent ? "Copiar enlace de REGISTRO" : "Copiar enlace para compartir"} className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10">{copiedLink ? <Check className="w-3.5 h-3.5" /> : <Link className="w-3.5 h-3.5" />}</button>
+          <button onClick={copyQr} title={isRegistrationParent ? "Copiar QR de REGISTRO" : "Copiar código QR"} className="w-6 h-6 flex items-center justify-center rounded text-white/40 hover:text-white hover:bg-white/10">{copiedQr ? <Check className="w-3.5 h-3.5" /> : <QrCode className="w-3.5 h-3.5" />}</button>
+          {isRegistrationParent && (
+            <>
+              <button
+                onClick={copyActLink}
+                title="Copiar enlace de ENTREGAS (un solo enlace para todas las actividades)"
+                className="w-6 h-6 flex items-center justify-center rounded text-white/70 hover:text-white border border-white/40"
+                style={{ backgroundImage: "repeating-linear-gradient(119deg, rgba(255,255,255,0.30) 0px, rgba(255,255,255,0.30) 1px, transparent 1px, transparent 6px)" }}
+              >
+                {copiedActLink ? <Check className="w-3.5 h-3.5" /> : <Link className="w-3.5 h-3.5" />}
+              </button>
+              <button
+                onClick={copyActQr}
+                title="Copiar QR de ENTREGAS"
+                className="w-6 h-6 flex items-center justify-center rounded text-white/70 hover:text-white border border-white/40"
+                style={{ backgroundImage: "repeating-linear-gradient(119deg, rgba(255,255,255,0.30) 0px, rgba(255,255,255,0.30) 1px, transparent 1px, transparent 6px)" }}
+              >
+                {copiedActQr ? <Check className="w-3.5 h-3.5" /> : <QrCode className="w-3.5 h-3.5" />}
+              </button>
+            </>
+          )}
           <button onClick={() => onDelete(node.id, node.name)} disabled={isDeletingId === node.id} title="Eliminar" className="w-6 h-6 flex items-center justify-center rounded text-red-400/60 hover:text-red-400 hover:bg-red-950/20 disabled:opacity-40"><Trash2 className="w-3.5 h-3.5" /></button>
         </div>
       </div>
@@ -698,6 +774,26 @@ export default function AdminPanel({
   const [savingPerson, setSavingPerson] = useState(false);
   const [copiedActLink, setCopiedActLink] = useState(false);
   const [copiedActQr, setCopiedActQr] = useState(false);
+  // Which identity columns are visible in the consolidated table (admin toggles).
+  // Persisted per browser so the choice sticks between sessions.
+  const [regCols, setRegCols] = useState<{ persona: boolean; documento: boolean; correo: boolean; telefono: boolean }>(() => {
+    try {
+      const raw = localStorage.getItem("envi_registry_cols");
+      if (raw) {
+        const p = JSON.parse(raw);
+        return { persona: p.persona !== false, documento: p.documento !== false, correo: p.correo !== false, telefono: p.telefono !== false };
+      }
+    } catch { /* ignore */ }
+    return { persona: true, documento: true, correo: true, telefono: true };
+  });
+  const [showColsMenu, setShowColsMenu] = useState(false);
+  // When navigating to a child activity from the consolidated table, remember which
+  // person to auto-open there so the admin lands right on their submission.
+  const [pendingSenderFocus, setPendingSenderFocus] = useState<{ projectId: string; email: string; document: string } | null>(null);
+
+  useEffect(() => {
+    try { localStorage.setItem("envi_registry_cols", JSON.stringify(regCols)); } catch { /* ignore */ }
+  }, [regCols]);
 
   const loadRegistrySummary = async (parentId: string) => {
     if (!parentId) return;
@@ -1093,6 +1189,38 @@ export default function AdminPanel({
       // no-op
     }
   };
+
+  /** Open a child activity from the consolidated table, focusing a specific person
+   *  so the admin lands right on their submission (to review/change the note). */
+  const openActivityForPerson = (projId: string, email: string, document: string) => {
+    setRemitentesCollapsed(false);
+    setPendingSenderFocus({ projectId: projId, email: (email || "").toLowerCase(), document: (document || "").trim() });
+    openProject(projId);
+  };
+
+  // Once the focused activity's submissions have loaded, expand that person's panel
+  // and scroll to it, then clear the pending focus.
+  useEffect(() => {
+    if (!pendingSenderFocus || selectedMetaProjectId !== pendingSenderFocus.projectId) return;
+    const match = submissions.find(
+      (s) =>
+        s.projectId === pendingSenderFocus.projectId &&
+        (s.senderEmail?.toLowerCase() === pendingSenderFocus.email ||
+          (!!pendingSenderFocus.document && (s.document || "").trim() === pendingSenderFocus.document))
+    );
+    if (!match) return; // submissions for this project not loaded yet
+    const email = match.senderEmail;
+    setExpandedSenders((prev) => ({ ...prev, [email]: true }));
+    const focus = pendingSenderFocus;
+    setPendingSenderFocus(null);
+    setTimeout(() => {
+      try {
+        const el = document.getElementById(`sender-row-${normalizeString(email)}`);
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      } catch { /* no-op */ }
+    }, 250);
+    void focus;
+  }, [submissions, selectedMetaProjectId, pendingSenderFocus]);
 
   // Persist current view + selected project so a refresh keeps you editing in place.
   useEffect(() => {
@@ -2049,6 +2177,25 @@ export default function AdminPanel({
           {/* Control buttons — right side of the header, same row as the back arrow */}
           {selectedMetaProjectId && projects.find((p) => p.id === selectedMetaProjectId) && (
             <div className="flex items-center gap-2 shrink-0">
+              {/* Quick jump to the registration parent (consolidated grades) — shown
+                  only when this project is a CHILD of a registration-mode parent. */}
+              {(() => {
+                const cur = projects.find((p) => p.id === selectedMetaProjectId);
+                const pid = cur?.parentId || "";
+                if (!pid || !projectMeta[pid]?.registrationMode) return null;
+                const parentName = projects.find((p) => p.id === pid)?.name || "registro";
+                return (
+                  <button
+                    type="button"
+                    onClick={() => openProject(pid)}
+                    title={`Ir a las notas consolidadas de "${parentName}"`}
+                    className="w-10 h-10 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all shrink-0"
+                  >
+                    <GraduationCap className="w-4 h-4" />
+                  </button>
+                );
+              })()}
+
               {/* Color picker */}
               <label
                 className="relative w-10 h-10 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 cursor-pointer shrink-0 flex items-center justify-center transition-all"
@@ -2127,7 +2274,7 @@ export default function AdminPanel({
               {(() => {
                 const proj = projects.find((p) => p.id === selectedMetaProjectId);
                 if (!proj) return null;
-                const shareUrl = `${window.location.origin}/${normalizeString(proj.name)}`;
+                const shareUrl = `${window.location.origin}/${projectSlug(proj.id, proj.name)}`;
                 const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(shareUrl)}`;
                 const copyShareLink = async () => {
                   try {
@@ -2512,6 +2659,43 @@ export default function AdminPanel({
                 >
                   <Plus className="w-3 h-3" /> Agregar persona
                 </button>
+
+                {/* Column visibility: admin chooses which identity fields to show. */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowColsMenu((v) => !v)}
+                    className="text-[10px] font-semibold flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-all cursor-pointer"
+                    title="Mostrar u ocultar columnas de la tabla"
+                  >
+                    <Table className="w-3 h-3" /> Columnas
+                  </button>
+                  {showColsMenu && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowColsMenu(false)} />
+                      <div className="absolute right-0 mt-1 z-50 w-44 rounded-lg border border-white/15 bg-[#0d0d0d] p-2 shadow-xl">
+                        <div className="text-[9px] font-semibold text-white/40 uppercase tracking-widest px-2 pb-1">Columnas visibles</div>
+                        {([
+                          ["persona", "Persona"],
+                          ["documento", "Documento"],
+                          ["correo", "Correo"],
+                          ["telefono", "Teléfono"],
+                        ] as const).map(([key, label]) => (
+                          <label key={key} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-white/5 cursor-pointer text-[11px] text-white/80">
+                            <input
+                              type="checkbox"
+                              checked={regCols[key]}
+                              onChange={(e) => setRegCols((prev) => ({ ...prev, [key]: e.target.checked }))}
+                              className="accent-white"
+                            />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+
                 <button
                   type="button"
                   onClick={() => void loadRegistrySummary(selectedMetaProjectId)}
@@ -2521,45 +2705,41 @@ export default function AdminPanel({
                 >
                   <RefreshCw className={`w-3 h-3 ${loadingSummary ? "animate-spin" : ""}`} /> Actualizar
                 </button>
+
+                {/* Enlace + QR de entregas: una sola URL para todas las actividades. */}
+                {(() => {
+                  const proj = projects.find((p) => p.id === selectedMetaProjectId);
+                  if (!proj) return null;
+                  const actUrl = `${window.location.origin}/${projectSlug(proj.id, proj.name)}-e`;
+                  const actQr = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(actUrl)}`;
+                  const copyActLink = async () => {
+                    try { await navigator.clipboard.writeText(actUrl); setCopiedActLink(true); setTimeout(() => setCopiedActLink(false), 1500); }
+                    catch { window.prompt("Copia el enlace de entregas:", actUrl); }
+                  };
+                  const copyActQr = async () => {
+                    try {
+                      const resp = await fetch(actQr);
+                      const blob = await resp.blob();
+                      const ClipItem = (window as any).ClipboardItem;
+                      if (navigator.clipboard && ClipItem) { await navigator.clipboard.write([new ClipItem({ [blob.type || "image/png"]: blob })]); setCopiedActQr(true); setTimeout(() => setCopiedActQr(false), 1500); }
+                      else window.open(actQr, "_blank");
+                    } catch { window.open(actQr, "_blank"); }
+                  };
+                  return (
+                    <>
+                      <button type="button" onClick={copyActLink} title="Copiar enlace de entregas (un solo enlace para todas las actividades)"
+                        className="w-9 h-9 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all shrink-0">
+                        {copiedActLink ? <Check className="w-4 h-4" /> : <Link className="w-4 h-4" />}
+                      </button>
+                      <button type="button" onClick={copyActQr} title="Copiar QR de entregas"
+                        className="w-9 h-9 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all shrink-0">
+                        {copiedActQr ? <Check className="w-4 h-4" /> : <QrCode className="w-4 h-4" />}
+                      </button>
+                    </>
+                  );
+                })()}
               </div>
             </div>
-
-            {/* Shareable link for submitting to any activity by document. */}
-            {(() => {
-              const proj = projects.find((p) => p.id === selectedMetaProjectId);
-              if (!proj) return null;
-              const actUrl = `${window.location.origin}/${normalizeString(proj.name)}?entregar=1`;
-              const actQr = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(actUrl)}`;
-              const copyActLink = async () => {
-                try { await navigator.clipboard.writeText(actUrl); setCopiedActLink(true); setTimeout(() => setCopiedActLink(false), 1500); }
-                catch { window.prompt("Copia el enlace de entregas:", actUrl); }
-              };
-              const copyActQr = async () => {
-                try {
-                  const resp = await fetch(actQr);
-                  const blob = await resp.blob();
-                  const ClipItem = (window as any).ClipboardItem;
-                  if (navigator.clipboard && ClipItem) { await navigator.clipboard.write([new ClipItem({ [blob.type || "image/png"]: blob })]); setCopiedActQr(true); setTimeout(() => setCopiedActQr(false), 1500); }
-                  else window.open(actQr, "_blank");
-                } catch { window.open(actQr, "_blank"); }
-              };
-              return (
-                <div className="mb-5 rounded-lg border border-white/10 bg-white/5 p-3 flex items-center gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[10px] font-semibold text-white/40 uppercase tracking-widest">Enlace de entregas</div>
-                    <div className="text-[11px] text-white/55 leading-relaxed">Los registrados ingresan su documento y eligen la actividad a subir — un solo enlace para todas.</div>
-                  </div>
-                  <button type="button" onClick={copyActLink} title="Copiar enlace de entregas"
-                    className="w-9 h-9 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all shrink-0">
-                    {copiedActLink ? <Check className="w-4 h-4" /> : <Link className="w-4 h-4" />}
-                  </button>
-                  <button type="button" onClick={copyActQr} title="Copiar QR de entregas"
-                    className="w-9 h-9 flex items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-white transition-all shrink-0">
-                    {copiedActQr ? <Check className="w-4 h-4" /> : <QrCode className="w-4 h-4" />}
-                  </button>
-                </div>
-              );
-            })()}
 
             {loadingSummary ? (
               <p className="text-sm text-white/40 text-center py-8">Cargando registro...</p>
@@ -2582,11 +2762,22 @@ export default function AdminPanel({
                       <thead>
                         <tr className="text-left text-white/40 border-b border-white/10">
                           <th className="py-2 px-2 font-semibold">#</th>
-                          <th className="py-2 px-2 font-semibold">Persona</th>
-                          <th className="py-2 px-2 font-semibold whitespace-nowrap">Documento</th>
-                          <th className="py-2 px-2 font-semibold">Correo</th>
+                          {regCols.persona && <th className="py-2 px-2 font-semibold">Persona</th>}
+                          {regCols.documento && <th className="py-2 px-2 font-semibold whitespace-nowrap">Documento</th>}
+                          {regCols.correo && <th className="py-2 px-2 font-semibold">Correo</th>}
+                          {regCols.telefono && <th className="py-2 px-2 font-semibold whitespace-nowrap">Teléfono</th>}
                           {childCols.map((c) => (
-                            <th key={c.id} className="py-2 px-2 font-semibold whitespace-nowrap text-center">{c.name}</th>
+                            <th key={c.id} className="py-2 px-2 font-semibold whitespace-nowrap text-center">
+                              <button
+                                type="button"
+                                onClick={() => openProject(c.id)}
+                                className="inline-flex items-center gap-1 hover:text-white transition-colors cursor-pointer"
+                                title={`Ir a la actividad "${c.name}"`}
+                              >
+                                {c.name}
+                                <ExternalLink className="w-3 h-3 opacity-40" />
+                              </button>
+                            </th>
                           ))}
                           <th className="py-2 px-2 font-semibold whitespace-nowrap text-center">Promedio</th>
                           <th className="py-2 px-2"></th>
@@ -2605,29 +2796,35 @@ export default function AdminPanel({
                           return (
                             <tr key={doc || i} className="border-b border-white/5 hover:bg-white/5">
                               <td className="py-1.5 px-2 text-white/40 font-mono">{i + 1}</td>
-                              <td className="py-1.5 px-2 text-white/80 font-medium whitespace-nowrap">{person.name || "—"}</td>
-                              <td className="py-1.5 px-2 text-white/60 font-mono whitespace-nowrap">{doc || "—"}</td>
-                              <td className="py-1.5 px-2 text-white/50 max-w-[180px] truncate">{person.email || "—"}</td>
+                              {regCols.persona && <td className="py-1.5 px-2 text-white/80 font-medium whitespace-nowrap">{person.name || "—"}</td>}
+                              {regCols.documento && <td className="py-1.5 px-2 text-white/60 font-mono whitespace-nowrap">{doc || "—"}</td>}
+                              {regCols.correo && <td className="py-1.5 px-2 text-white/50 max-w-[180px] truncate">{person.email || "—"}</td>}
+                              {regCols.telefono && <td className="py-1.5 px-2 text-white/50 font-mono whitespace-nowrap">{person.phone || "—"}</td>}
                               {childCols.map((c) => {
                                 const cell = perDoc[c.id];
+                                const statusTxt = cell?.status === "guardado" ? " · nota guardada (sin enviar)" : cell?.status === "enviado" ? " · nota enviada" : "";
                                 return (
                                   <td key={c.id} className="py-1.5 px-2 text-center whitespace-nowrap">
-                                    {cell && cell.note ? (
-                                      <span
-                                        className={`font-mono font-bold ${cell.status === "guardado" ? "text-white/50 italic" : "text-white"}`}
-                                        title={cell.status === "guardado" ? "Nota guardada (borrador, sin enviar)" : cell.status === "enviado" ? "Nota enviada" : undefined}
-                                      >
-                                        {cell.note}
-                                      </span>
-                                    ) : (
-                                      <span className="text-white/20">—</span>
-                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => openActivityForPerson(c.id, person.email || "", doc)}
+                                      className="w-full inline-flex items-center justify-center min-h-[1.25rem] px-1 rounded hover:bg-white/10 transition-colors cursor-pointer"
+                                      title={`Abrir "${c.name}" en la entrega de ${person.name || doc || "esta persona"}${statusTxt}`}
+                                    >
+                                      {cell && cell.note ? (
+                                        <span className={`font-mono font-bold ${cell.status === "guardado" ? "text-white/50 italic" : "text-white"}`}>
+                                          {cell.note}
+                                        </span>
+                                      ) : (
+                                        <span className="text-white/20">—</span>
+                                      )}
+                                    </button>
                                   </td>
                                 );
                               })}
                               <td className="py-1.5 px-2 text-center whitespace-nowrap">
                                 {avg !== null ? (
-                                  <span className="font-mono font-bold text-white text-sm">{avg.toFixed(2)}</span>
+                                  <span className="font-mono font-bold text-white text-sm">{Math.round(avg * 10) / 10}</span>
                                 ) : (
                                   <span className="text-white/20">—</span>
                                 )}
@@ -2774,7 +2971,7 @@ export default function AdminPanel({
                     const hasDraft = !!fbAnchor?.feedbackDraft;
                     const { note: gradeNote, status: gradeStatus } = latestFeedbackNote(fbAnchor);
                     return (
-                      <div key={person.email} className="border border-white/5 rounded-xl overflow-hidden">
+                      <div key={person.email} id={`sender-row-${normalizeString(person.email)}`} className="border border-white/5 rounded-xl overflow-hidden scroll-mt-24">
                         <button
                           type="button"
                           onClick={() => setExpandedSenders(prev => ({ ...prev, [person.email]: !prev[person.email] }))}
